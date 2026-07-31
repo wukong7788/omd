@@ -1,0 +1,8 @@
+{
+  "endpoint": "fund_daily",
+  "rows": [
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240103", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2},
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240102", "open": 9.9, "high": 10.1, "low": 9.7, "close": 10.0},
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240104", "open": 10.3, "high": 10.6, "low": 10.1, "close": 10.4}
+  ]
+}

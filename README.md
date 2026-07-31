@@ -1,0 +1,149 @@
+# Oh My Data (OMD)
+
+`ohmydata` is a provisional, offline-first market-data SDK. Tushare endpoint
+adapters accept an already initialized official-compatible client; credentials
+are never loaded by this library.
+
+## Supported Python and installation
+
+Python 3.11 and 3.12 are supported (`>=3.11,<3.13`). From a source checkout:
+
+```bash
+uv sync
+uv run python -c "import ohmydata; print(ohmydata.__version__)"
+```
+
+The core has no runtime dependencies. Install `ohmydata[tushare]` for the
+Pandas-backed adapter. Provider tests use fake clients and never call a network.
+
+## Phase 2 Tushare adapter (offline and injected)
+
+Pass an already initialized official-client-compatible object. The adapter
+does not create clients or read credentials; this fake-client example is safe
+to run offline:
+
+```python
+import pandas as pd
+from ohmydata.providers.tushare import EmptyPolicy, FundDailyRequest, TushareClient
+
+
+class FakeClient:
+    def fund_daily(self, **kwargs):
+        return pd.DataFrame(
+            {
+                "ts_code": ["FAKE.ETF"],
+                "trade_date": ["20240102"],
+                "open": [1.0],
+                "high": [1.1],
+                "low": [0.9],
+                "close": [1.05],
+                "pre_close": [1.0],
+                "change": [0.05],
+                "pct_chg": [5.0],
+                "vol": [100],
+                "amount": [250.0],
+            }
+        )
+
+
+request = FundDailyRequest(
+    empty_policy=EmptyPolicy.ERROR, ts_code="FAKE.ETF", start_date="20240101", end_date="20240102"
+)
+result = TushareClient(FakeClient()).fetch_fund_daily(request)
+```
+
+Values and nulls retain Tushare's native semantics: fund daily OHLC and
+`change`/`pct_chg` are provider values, `vol` is in hands, and `amount` is in
+thousand yuan. Empty responses must be selected explicitly with
+`EmptyPolicy.ALLOW` or `EmptyPolicy.ERROR`.
+`fund_share.fd_share` remains provider-native in ten-thousand shares (万份);
+`fund_adj` and `fund_nav` values are likewise preserved without adjustment or
+imputation.
+
+### Adjusted ETF bars recipe
+
+`fetch_adjusted_etf_bars` composes `fund_daily` with provider-native
+`fund_adj` factors. Choose `AdjustmentCoveragePolicy.STRICT` (the default) or
+`PRESERVE_MISSING_FACTOR`; raw OHLC and `adj_factor` remain available beside
+the explicitly derived adjusted OHLC columns. The recipe is offline-testable
+when supplied an injected `TushareClient` and does not claim point-in-time
+availability.
+
+```python
+from ohmydata.providers.tushare import (
+    AdjustmentCoveragePolicy,
+    AdjustedEtfBarsRequest,
+    EmptyPolicy,
+)
+
+request = AdjustedEtfBarsRequest(
+    "FAKE.ETF",
+    EmptyPolicy.ERROR,
+    AdjustmentCoveragePolicy.STRICT,
+    start_date="20240101",
+    end_date="20240131",
+)
+```
+
+## Local checks
+
+```bash
+uv lock
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv build
+git diff --check
+```
+
+Behavioral evidence for the initial consumers is in
+[`docs/behavioral-inventory.md`](docs/behavioral-inventory.md). The adjusted
+ETF characterization is test-only and uses synthetic JSON fixtures.
+
+Phase 1 core is offline and explicit:
+
+```python
+from datetime import UTC, datetime
+from pathlib import Path
+from ohmydata.core import RequestSpec, RetryPolicy, RateLimitPolicy, RateLimiter, execute_with_retry
+from ohmydata.core import SnapshotMode, SnapshotStore
+
+try:
+    RequestSpec("demo", "bars", {"api_token": "never-serialize"})
+except ValueError:
+    pass
+limiter = RateLimiter(RateLimitPolicy(0.1))
+limiter.acquire()
+result = execute_with_retry(lambda: "ok", RetryPolicy(max_attempts=1))
+store = SnapshotStore(Path("snapshots"))
+store.write(
+    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.APPEND
+)
+store.write(
+    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.FROZEN
+)
+```
+
+`RetryPolicy(max_attempts=3)` counts the first call. APPEND preserves distinct
+observations; FROZEN permits one response identity. Limiter state is per instance.
+
+## Phase 1 core (offline)
+
+`ohmydata.core` provides canonical request identities, classified retry with
+total-attempt semantics, explicit instance-scoped rate limiters, dataframe-free
+provenance, and immutable APPEND/FROZEN snapshots. Request parameters reject
+secret-bearing keys before serialization. Snapshot callers provide exact bytes;
+the core never contacts providers or loads credentials.
+
+## Phase 2b Tushare endpoints
+
+The Tushare adapter exposes typed requests for fund dividends, fund portfolios,
+daily basics, and index weights through injected clients. Requests always send
+an explicit ordered field list and preserve provider-native values and missing
+data. `fund_portfolio` requires a bounded report selector (`ann_date`, exact
+`period`, or a same-year `start_date`/`end_date` range); unbounded holdings are
+rejected. Native units remain unchanged: dividend cash is yuan per share,
+portfolio market value is yuan and amount is shares, daily-basic share and
+market-value fields use Tushare's ten-thousand units, and index weights remain
+provider percentages.

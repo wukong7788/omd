@@ -1,0 +1,352 @@
+# Oh My Data (OMD) — Tushare First Plan
+
+## 1. Objective
+
+Build a reusable, provider-aware market-data SDK shared by `funmoney_backtest`
+and `stock_notify`.
+
+The first release implements Tushare only. The repository and core contracts
+must allow future yfinance and FMP providers without forcing their different
+request, adjustment, timezone, quota, and error semantics into a false common
+API.
+
+The repository name is `omd`, short for Oh My Data. The confirmed Python
+distribution and import namespace are both `ohmydata`.
+
+## 2. Source Repositories
+
+Initial extraction evidence comes from:
+
+- `/Users/ron/Documents/funmoney_backtest`
+  - `data_pipeline/tushare_ext/`
+  - `data_provider/tushare.py`
+  - Tushare-specific research dataset builders and tests
+- `/Users/ron/Documents/stock_notify`
+  - `data/build_aetf_prices.py`
+  - `data/build_etf_dividend_yield.py`
+  - `data/build_underlying_yield.py`
+  - `data/build_underlying_yield_ts.py`
+  - `data/build_index_proxy_prices.py`
+
+These repositories are consumers and behavioral evidence. The SDK must not
+import them at runtime or copy their strategy, storage, UI, notification, or
+portfolio logic.
+
+## 3. Non-goals for v0.1
+
+- Implement yfinance or FMP.
+- Create a universal provider endpoint API.
+- Move strategy, backtest, signal, broker, notification, or UI behavior.
+- Own consumer universe selection or data publication workflows.
+- Define ETF dividend, index-yield, or other investment features.
+- Read `.env` files or environment variables inside the library.
+- Store real provider responses, tokens, account data, or licensed datasets in
+  Git.
+- Replace both consumer implementations in one migration.
+- Publish to public PyPI before the API, naming, licensing, and support
+  expectations are reviewed.
+
+## 4. Architectural Boundaries
+
+### 4.1 Shared core
+
+The provider-independent core may own:
+
+- typed request and fetch-result metadata;
+- retry policy and transient/permanent error classification;
+- rate-limit policy and injectable clock/sleep functions;
+- request identity and canonical parameter encoding;
+- snapshot provenance, hashing, validation, and replay;
+- common observability hooks;
+- provider capability protocols where at least two real consumers need them.
+
+The core must not depend on Pandas, Polars, Tushare, yfinance, FMP, consumer
+configuration files, or consumer storage paths.
+
+### 4.2 Tushare provider
+
+The Tushare provider may own:
+
+- injected official Tushare client calls;
+- Tushare-specific authentication errors without loading credentials itself;
+- endpoint-specific date parameters, page/window behavior, fields, and units;
+- retryable Tushare throttling/network failures;
+- required response-column and empty-response policies;
+- provider-native Pandas responses;
+- explicit conversion helpers such as records and an optional Polars adapter;
+- reusable provider-semantic recipes, initially adjusted ETF daily bars.
+
+It must not own:
+
+- a consumer's symbol universe;
+- a consumer's final Parquet/DuckDB schema or paths;
+- backtest-ready feature construction;
+- PIT alignment against a consumer's canonical sessions;
+- operational cutoffs such as a particular project's nightly sync time;
+- silent missing-value imputation.
+
+### 4.3 Consumer-owned logic
+
+`funmoney_backtest` keeps:
+
+- `DataProviderRequest`, `DataProviderResult`, `RAW_BAR_SCHEMA`, and quality
+  reports;
+- amount/unit mapping into its normalized backtest contract;
+- canonical-session and point-in-time research transforms;
+- dataset registry paths and research promotion status;
+- backtest/signal/live parity and all strategy behavior.
+
+`stock_notify` keeps:
+
+- YAML universe selection and dividend ETF discovery;
+- DuckDB/Parquet publication and atomic application refresh;
+- dividend-yield, holdings-yield, and UI feature calculations;
+- desktop scheduling and notification behavior.
+
+## 5. Provisional Package Layout
+
+```text
+omd/
+  AGENTS.md
+  CHANGELOG.md
+  PLAN.md
+  README.md
+  pyproject.toml
+  src/
+    ohmydata/
+      __init__.py
+      core/
+        errors.py
+        policy.py
+        provenance.py
+        rate_limit.py
+        snapshot.py
+        specs.py
+      providers/
+        tushare/
+          client.py
+          endpoints.py
+          errors.py
+          recipes/
+            etf_adjusted_bars.py
+      adapters/
+        records.py
+        polars.py
+  tests/
+    fixtures/
+    core/
+    providers/
+      tushare/
+```
+
+Do not create empty yfinance or FMP modules in v0.1. Future providers are added
+only when a concrete integration task supplies real contracts and fixtures.
+
+## 6. Public Contract Direction
+
+Avoid a generic public API such as:
+
+```python
+client.fetch(endpoint, params)
+```
+
+as the only consumer-facing abstraction. Provider escape hatches may exist,
+but reusable workflows should expose explicit capabilities or typed requests:
+
+```python
+result = client.fetch_fund_daily(request)
+result = client.fetch_fund_adjustment(request)
+result = client.fetch_daily_basic(request)
+```
+
+Every fetch result must make these facts inspectable:
+
+- provider and endpoint;
+- canonical request identity;
+- effective parameters and requested fields;
+- attempt count and retry history;
+- row/column summary;
+- retrieval timestamp and timezone;
+- snapshot identities when snapshotting is enabled;
+- warnings and explicit empty-result disposition.
+
+The library accepts a token or initialized provider client from the caller. It
+must never discover credentials implicitly.
+
+## 7. Error and Missing-data Contract
+
+Define stable exception categories before migrating consumers:
+
+- `AuthenticationError`
+- `PermissionDeniedError`
+- `RateLimitError`
+- `TransientProviderError`
+- `PermanentProviderError`
+- `EmptyResponseError`
+- `SchemaMismatchError`
+- `PaginationError`
+- `SnapshotIntegrityError`
+- `CoverageError`
+
+Only explicitly transient failures are retried by default. Permission, invalid
+parameter, and schema failures fail immediately.
+
+Empty results are endpoint/request-policy decisions, not globally success or
+failure. A delisted fund outside the requested window may legitimately be
+empty; an active required symbol's daily history may not.
+
+Missing numeric values remain missing unless a named consumer transform
+explicitly imputes them. In particular, missing `dv_ttm` must not become zero
+inside the provider layer, and coverage must measure finite-value weight rather
+than total portfolio weight.
+
+## 8. Snapshot and Reproducibility Contract
+
+- Canonical request identity excludes secrets and unstable object
+  representations.
+- Raw response hash is deterministic for the declared serialization.
+- Writes use a temporary path plus atomic rename.
+- Concurrent writers cannot create partial response/manifest pairs.
+- Existing snapshot content is never overwritten.
+- Same-request/different-response behavior is explicit:
+  - append a new observation when drift is allowed;
+  - fail closed when a frozen/replay policy requires a single identity.
+- Replay validates manifest, request identity, response hash, endpoint, and
+  serialization version before returning data.
+- Tests use synthetic or irreversibly sanitized fixtures only.
+
+## 9. Delivery Phases
+
+### Phase 0 — Bootstrap and behavioral inventory
+
+- [x] Confirm distribution/import names (`ohmydata` for both distribution and import).
+- [x] Add `pyproject.toml`, `src/` layout, README, CHANGELOG, and CI.
+- [x] Support Python 3.11 and 3.12.
+- [x] Inventory duplicated Tushare calls, retry rules, empty semantics, units,
+      and adjustment behavior in both consumers.
+- [x] Capture offline characterization fixtures and expected results.
+- [x] Record unresolved behavior conflicts rather than silently choosing one.
+
+Acceptance:
+
+- package imports on Python 3.11 and 3.12;
+- test, lint, and type-check commands run in a clean checkout;
+- inventory maps every initial consumer path to SDK or consumer ownership.
+
+### Phase 1 — Core policies and provenance
+
+- [x] Implement canonical request specs and identities.
+- [x] Implement error taxonomy.
+- [x] Implement bounded retry with injectable sleep/random functions.
+- [x] Implement rate limiting without hidden global credentials or paths.
+- [x] Implement atomic immutable snapshots and replay validation.
+- [x] Test concurrency, tampering, retry classification, and secret redaction.
+
+Acceptance:
+
+- unit tests perform no real network calls;
+- permanent failures are never retried;
+- snapshot interruption cannot produce a valid-looking partial asset;
+- logs and manifests contain no credentials.
+
+### Phase 2 — Tushare endpoint client
+
+- [x] Add injected official-client adapter.
+- [x] Define endpoint-specific specs instead of universal `limit/offset`.
+- [x] Implement `trade_cal`, `fund_basic`, `fund_daily`, `fund_adj`,
+      `fund_nav`, and `fund_share`.
+- [x] Add `fund_div`, `fund_portfolio`, `daily_basic`, and `index_weight` only
+      after their field, permission, pagination, and empty contracts are fixed.
+- [x] Preserve provider-native values and document units.
+
+Acceptance:
+
+- deterministic offline tests cover every endpoint;
+- page/window merges have explicit ordering and duplicate policy;
+- required fields, empty responses, permission failures, and throttling have
+  distinct outcomes.
+
+### Phase 3 — First reusable recipe
+
+- [x] Implement adjusted ETF daily-bar retrieval from `fund_daily + fund_adj`.
+- [x] Preserve raw OHLC, raw adjustment factor, and explicit adjustment
+      formula inputs.
+- [x] Reject incomplete factor coverage unless the caller selects a documented
+      alternative policy.
+- [x] Do not embed either consumer's final storage schema.
+
+Acceptance:
+
+- golden fixtures match both consumers where their existing semantics agree;
+- disagreements are resolved explicitly before migration;
+- no float, unit, date, or adjustment drift is hidden by dataframe conversion.
+
+### Phase 4 — Consumer shadow migrations
+
+Migration order:
+
+1. `funmoney_backtest` research Tushare client;
+2. `stock_notify` adjusted A-share ETF price fetch;
+3. `stock_notify` special Tushare endpoints;
+4. `funmoney_backtest` production daily-bar provider last.
+
+For every consumer:
+
+- [ ] pin an SDK tag/commit, never a moving branch;
+- [ ] run old and new implementations against the same offline fixtures;
+- [ ] compare request sequence, schema, row count, values, missingness, units,
+      dates, hashes, retry outcomes, and error outcomes;
+- [ ] shadow real-data execution only when explicitly authorized;
+- [ ] remove old code only after parity evidence is accepted.
+
+`funmoney_backtest` production migration additionally requires unchanged
+backtest/signal behavior and its repository-specific gates.
+
+## 10. Public Repository, Versioning, and Distribution
+
+- This is a public GitHub repository. All committed content must be safe for
+  unrestricted public disclosure.
+- Never commit provider tokens, `.env` files, credentials, account identifiers,
+  real request headers, private repository URLs, consumer configuration, or
+  downloaded/licensed provider responses.
+- Examples use unmistakably fake placeholders such as
+  `TUSHARE_TOKEN=example-not-a-real-token`.
+- Before every push, inspect staged changes and run secret scanning. Enable
+  GitHub secret scanning/push protection when available for the repository.
+- If a secret is ever committed, revoke/rotate it first; deleting it in a later
+  commit is not sufficient because Git history remains public.
+- Use semantic versions and annotated tags.
+- Consumer lockfiles pin an immutable tag or commit.
+- Start with provider extras:
+
+```text
+ohmydata[tushare]
+ohmydata[polars]
+```
+
+- Do not make yfinance a dependency of the Tushare-only release.
+- Do not publish public packages or real provider fixtures without reviewing
+  naming, licensing, data redistribution, and support expectations.
+
+Target milestones:
+
+- `v0.1.0`: stable Tushare core, endpoint client, snapshots, and first recipe;
+- `v0.2.0`: yfinance provider after separate inventory and plan update;
+- FMP version is intentionally unscheduled.
+
+## 11. Global Acceptance Gates for v0.1.0
+
+1. Python 3.11 and 3.12 pass.
+2. Offline pytest, Ruff, Pyright, and packaging checks pass.
+3. No test performs an unmarked live provider call.
+4. No credential lookup or secret logging exists in library code.
+5. Public-repository secret scanning finds no credentials or sensitive
+   consumer configuration.
+6. Retry behavior is bounded, classified, observable, and deterministic in
+   tests.
+7. Endpoint pagination/window logic is explicit and tested per endpoint.
+8. Snapshots are atomic, immutable, replayable, and integrity checked.
+9. Missing and empty data never become plausible fabricated values.
+10. Tushare-specific assumptions do not leak into the core package.
+11. At least one consumer completes an accepted shadow migration before
+    declaring the SDK production-ready.

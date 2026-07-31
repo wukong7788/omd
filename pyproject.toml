@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ohmydata"
+version = "0.0.1"
+description = "Offline-first market-data SDK scaffold"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+authors = [{ name = "OMD contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+tushare = ["pandas>=2.0,<3.0", "tushare>=1.4,<2.0"]
+
+[dependency-groups]
+dev = [
+  "pandas>=2.0",
+  "pandas-stubs>=2.2",
+  "pyright>=1.1.390",
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ohmydata"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/ohmydata",
+  "README.md",
+  "CHANGELOG.md",
+  "pyproject.toml",
+  "uv.lock",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"

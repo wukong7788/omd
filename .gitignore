@@ -1,0 +1,50 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+token.json
+
+# Provider responses and local data
+data/
+downloads/
+snapshots/
+raw/
+artifacts/
+*.parquet
+*.feather
+*.arrow
+*.duckdb
+*.db
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Local tooling and OS files
+.agents/
+.codex/
+.DS_Store
+.idea/
+.vscode/
+*.log
+tmp/
+temp/

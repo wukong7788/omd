@@ -1,0 +1,8 @@
+{
+  "endpoint": "fund_adj",
+  "rows": [
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240104", "adj_factor": 1.25},
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240102", "adj_factor": 1.10},
+    {"ts_code": "SYNTH.ETF", "trade_date": "20240103", "adj_factor": 1.20}
+  ]
+}
