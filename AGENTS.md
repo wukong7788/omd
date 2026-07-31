@@ -180,6 +180,27 @@ Use semantic versioning. Each release-worthy behavior change updates
 `CHANGELOG.md`. Breaking changes require a migration section and a major
 version after `v1.0.0`.
 
+### Release Commit and PyPI Publication
+
+- A release commit must update every version-bearing or release-tracking file
+  in the same commit: `pyproject.toml`, `src/ohmydata/__init__.py`,
+  `uv.lock`, the exact version assertion in `tests/test_package.py`, and
+  `CHANGELOG.md`. Documentation describing changed public behavior must be
+  updated in that commit as well.
+- Before committing, run the canonical test, Ruff, format, Pyright, build, and
+  `git diff --check` gates; inspect the built wheel/sdist version and the
+  staged diff, and run the secret scan. Never publish a version that is
+  inconsistent across those files or already exists on PyPI.
+- After the release commit is committed and pushed to the intended public
+  branch, the user may authorize execution of `.github/workflows/publish.yml`
+  via GitHub Actions `workflow_dispatch`. Confirm the workflow uses the
+  intended commit and version, then inspect the completed run and PyPI artifact
+  before claiming publication succeeded.
+- `publish.yml` is external publication. Do not dispatch it without explicit
+  user authorization, and do not retry a failed run blindly: inspect the job
+  logs, correct the release/workflow or trusted-publisher configuration, commit
+  and push the fix when required, then dispatch a new run.
+
 ## Documentation Discipline
 
 - `PLAN.md` owns pre-`v0.1.0` architecture, phases, and acceptance gates.
