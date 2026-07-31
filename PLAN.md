@@ -38,7 +38,10 @@ portfolio logic.
 - Create a universal provider endpoint API.
 - Move strategy, backtest, signal, broker, notification, or UI behavior.
 - Own consumer universe selection or data publication workflows.
-- Define ETF dividend, index-yield, or other investment features.
+- Own consumer-specific ETF dividend, index-yield, scoring, or publication
+  definitions. Narrow provider-semantic calculations may be promoted as
+  reusable recipes only when at least two concrete callers share the same
+  units, missing-data, coverage, and date semantics.
 - Read `.env` files or environment variables inside the library.
 - Store real provider responses, tokens, account data, or licensed datasets in
   Git.
@@ -74,13 +77,14 @@ The Tushare provider may own:
 - required response-column and empty-response policies;
 - provider-native Pandas responses;
 - explicit conversion helpers such as records and an optional Polars adapter;
-- reusable provider-semantic recipes, initially adjusted ETF daily bars.
+- reusable provider-semantic recipes, initially adjusted ETF daily bars and
+  offline weighted constituent dividend-yield calculations.
 
 It must not own:
 
 - a consumer's symbol universe;
 - a consumer's final Parquet/DuckDB schema or paths;
-- backtest-ready feature construction;
+- backtest-ready or consumer-specific feature construction;
 - PIT alignment against a consumer's canonical sessions;
 - operational cutoffs such as a particular project's nightly sync time;
 - silent missing-value imputation.
@@ -129,6 +133,7 @@ omd/
           errors.py
           recipes/
             etf_adjusted_bars.py
+            weighted_dividend_yield.py
       adapters/
         records.py
         polars.py
@@ -280,6 +285,70 @@ Acceptance:
 - golden fixtures match both consumers where their existing semantics agree;
 - disagreements are resolved explicitly before migration;
 - no float, unit, date, or adjustment drift is hidden by dataframe conversion.
+
+### Phase 3b — Offline weighted dividend-yield recipes
+
+- [x] Add pure, offline calculations for `fund_portfolio + daily_basic.dv_ttm`
+      and `index_weight + daily_basic.dv_ttm`.
+- [x] Accept already-downloaded provider-native Pandas frames without reading
+      files, discovering credentials, or making provider calls.
+- [x] Preserve Tushare units explicitly: portfolio `mkv` is yuan, index
+      `weight` and `dv_ttm` are percentages, and recipe output is a decimal
+      yield.
+- [x] Treat zero `dv_ttm` as an observed zero while preserving null, non-finite,
+      and absent constituent yields as missing.
+- [x] Expose finite-value weight coverage and require an explicit policy for
+      incomplete coverage; never silently renormalize supported constituents or
+      turn missing yield into zero.
+- [x] Require callers to select one portfolio/index snapshot and one
+      `daily_basic` observation date before calculation; do not infer PIT
+      availability, report selection, staleness, or canonical-session alignment.
+- [x] Keep ETF discovery, AUM/fee filters, rolling dividend-event alignment,
+      consumer schemas, storage, scoring, scheduling, and publication outside
+      the SDK.
+
+Acceptance:
+
+- synthetic offline tests cover portfolio and index weights, complete and
+  incomplete coverage, observed zero and negative yields, null/non-finite
+  values, duplicates, mixed snapshots, invalid units/weights, empty frames,
+  input isolation, and deterministic result metadata;
+- the same pure functions can consume frames returned by OMD typed endpoints or
+  frames loaded by a consumer from immutable local data;
+- `stock_notify` holdings/index yield calculations and `funmoney_backtest` PIT
+  dividend datasets are documented as concrete callers, without importing
+  either repository or moving their PIT/storage policy into OMD;
+- public API documentation states formulas, units, missingness, coverage, and
+  non-PIT semantics.
+
+Follow-up recipe candidates require separate reviewed contracts. In
+particular, rolling ETF distribution yield from `fund_div + fund_nav` must
+freeze ex-date/announcement-date availability, revision/deduplication, NAV
+selection, rolling-window, and no-look-ahead rules before implementation.
+
+### Phase 3c — Explicit Polars adapters (planned, not authorized)
+
+- [ ] Add an optional `ohmydata[polars]` extra with a reviewed dependency and
+      compatibility range; core and Tushare/Pandas installations must remain
+      usable without Polars.
+- [ ] Add explicit adapters under `ohmydata.adapters.polars`; do not make
+      implicit Pandas/Polars conversion part of endpoint fetching or recipes.
+- [ ] Preserve column names, ordering, provider-native units, nulls, dates,
+      timezones, integer/float behavior, and raw-versus-derived traceability.
+- [ ] Define fail-closed handling for unsupported object values, duplicate
+      columns, timezone-aware values, categorical/decimal types, and conversion
+      overflow before implementation.
+- [ ] Cover round-trip and one-way conversion with synthetic frames containing
+      nulls, NaN/infinity, dates, timestamps, large integers, and mixed numeric
+      dtypes on Python 3.11 and 3.12.
+- [ ] Document the explicit boundary for `funmoney_backtest`: its PIT alignment,
+      canonical sessions, Polars dataset schemas, storage, and feature logic
+      remain consumer-owned after conversion.
+
+This phase is roadmap-only. It requires a separate reviewed contract and is not
+authorized by the Phase 3b implementation or its acceptance. No Polars
+dependency, adapter module, public export, lockfile change, or consumer migration
+may be added until that contract is frozen.
 
 ### Phase 4 — Consumer shadow migrations
 

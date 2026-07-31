@@ -88,6 +88,32 @@ request = AdjustedEtfBarsRequest(
 )
 ```
 
+### Offline weighted dividend yield recipes
+
+`build_portfolio_dividend_yield` and `build_index_dividend_yield` calculate a
+provider-semantic weighted yield from already-downloaded Pandas frames. Portfolio
+`mkv` is yuan; index `weight` and `daily_basic.dv_ttm` are provider percentages.
+The returned `dividend_yield` is a decimal ratio (`sum((w_i / W) * dv_ttm_i) / 100`),
+where `W` is the provider-native total weight.
+Choose `DividendYieldCoveragePolicy.REQUIRE_COMPLETE` to reject missing finite
+yield coverage, or `PRESERVE_INCOMPLETE` to return `None`; partial coverage is
+never renormalized. Inputs are not modified, and dates are identity checks only:
+the recipe does not infer point-in-time availability or report selection.
+
+```python
+from ohmydata.providers.tushare import (
+    DividendYieldCoveragePolicy,
+    build_index_dividend_yield,
+)
+
+result = build_index_dividend_yield(
+    index_weights_df,
+    daily_basic_df,
+    DividendYieldCoveragePolicy.REQUIRE_COMPLETE,
+)
+print(result.dividend_yield)
+```
+
 ## Local checks
 
 ```bash

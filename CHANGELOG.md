@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.3 — 2026-07-31
+
+- Added offline weighted portfolio and index dividend-yield recipes with
+  explicit finite-coverage policies, provider-native units, and deterministic
+  formula metadata.
+
 ## Unreleased — 0.0.2
 
 - Fixed adjusted ETF bars to tolerate Tushare factor-date supersets for the

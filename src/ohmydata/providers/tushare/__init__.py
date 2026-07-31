@@ -17,7 +17,12 @@ from .recipes import (
     AdjustedEtfBarsRequest,
     AdjustedEtfBarsResult,
     AdjustmentCoveragePolicy,
+    DividendYieldCoveragePolicy,
+    DividendYieldWeightSource,
+    WeightedDividendYieldResult,
     build_adjusted_etf_bars,
+    build_index_dividend_yield,
+    build_portfolio_dividend_yield,
     fetch_adjusted_etf_bars,
 )
 
@@ -26,6 +31,8 @@ __all__ = [
     "AdjustedEtfBarsResult",
     "AdjustmentCoveragePolicy",
     "DailyBasicRequest",
+    "DividendYieldCoveragePolicy",
+    "DividendYieldWeightSource",
     "EmptyPolicy",
     "FundAdjustmentRequest",
     "FundBasicRequest",
@@ -38,7 +45,10 @@ __all__ = [
     "TradeCalendarRequest",
     "TushareClient",
     "TushareFetchResult",
+    "WeightedDividendYieldResult",
     "build_adjusted_etf_bars",
+    "build_index_dividend_yield",
+    "build_portfolio_dividend_yield",
     "classify_tushare_exception",
     "fetch_adjusted_etf_bars",
 ]
