@@ -68,6 +68,9 @@ imputation.
 the explicitly derived adjusted OHLC columns. The recipe is offline-testable
 when supplied an injected `TushareClient` and does not claim point-in-time
 availability.
+Tushare adjustment responses may contain extra dates for the requested symbol;
+the recipe ignores those factor-only dates while strict coverage still requires
+a finite factor for every returned daily bar. Rows for foreign symbols fail.
 
 ```python
 from ohmydata.providers.tushare import (

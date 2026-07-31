@@ -179,6 +179,28 @@ def test_duplicate_and_foreign_keys_rejected() -> None:
         build_adjusted_etf_bars(daily(), foreign, AdjustmentCoveragePolicy.PRESERVE_MISSING_FACTOR)
 
 
+def test_same_symbol_extra_adjustment_date_is_ignored() -> None:
+    factors = pd.concat(
+        [
+            adj(),
+            pd.DataFrame(
+                {
+                    "ts_code": ["A.ETF"],
+                    "trade_date": ["20231229"],
+                    "adj_factor": [0.9],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    result = build_adjusted_etf_bars(daily(), factors, AdjustmentCoveragePolicy.STRICT)
+
+    assert list(result["trade_date"]) == ["20240102", "20240103"]
+    assert list(result["adj_factor"]) == [1.1, 1.2]
+    assert list(result["adj_close"]) == pytest.approx([10.45, 12.6])
+
+
 class Fake:
     def __init__(self, daily_frame: pd.DataFrame, adj_frame: pd.DataFrame | None = None):
         self.daily_frame, self.adj_frame = daily_frame, adj_frame

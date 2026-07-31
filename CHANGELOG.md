@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 0.0.2
+
+- Fixed adjusted ETF bars to tolerate Tushare factor-date supersets for the
+  requested symbol without creating extra output rows. Foreign symbols still
+  fail, and strict coverage still requires every daily bar to have a finite
+  adjustment factor.
+
 ## Unreleased — 0.0.1
 
 - Added the offline-composable adjusted ETF bars recipe with explicit factor

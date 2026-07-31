@@ -121,8 +121,15 @@ def build_adjusted_etf_bars(
             raise SchemaMismatchError("invalid adjustment factor")
     daily_keys = pd.MultiIndex.from_frame(daily[_KEYS])
     adj_keys = pd.MultiIndex.from_frame(adj[_KEYS])
-    if any(key not in daily_keys for key in adj_keys):
-        raise SchemaMismatchError("adjustment key is not present in daily data")
+    daily_symbols = set(daily["ts_code"].tolist())
+    if any(symbol not in daily_symbols for symbol in adj["ts_code"].tolist()):
+        raise SchemaMismatchError("adjustment symbol is not present in daily data")
+    # Tushare may return additional factor dates for the requested symbol even
+    # when identical date bounds are supplied to both endpoints. Those rows
+    # cannot create output bars and are safe to discard. Coverage remains
+    # strict in the opposite direction: every daily key must still have a
+    # finite factor after the left join below.
+    adj = adj.loc[adj_keys.isin(daily_keys)].copy()
     merged = daily.merge(
         adj[_KEYS + ["adj_factor"]], on=_KEYS, how="left", sort=False, validate="one_to_one"
     )

@@ -78,8 +78,10 @@ pure offline composition helper.
 - Copy inputs defensively.
 - Reject null key fields, duplicate daily keys, and duplicate adjustment keys.
   Never keep-first or keep-last.
-- Reject adjustment rows whose `(ts_code, trade_date)` is not present in the
-  daily input; fail rather than silently discard unexplained provider rows.
+- Reject adjustment rows for symbols not present in the daily input. Ignore
+  additional factor dates for the requested symbol because Tushare may return
+  a date superset despite identical request bounds; never expand output from a
+  factor-only row, and still require every daily key under strict coverage.
 - Preserve every daily column, dtype/value/null semantics where Pandas merge
   permits, and retain raw `open,high,low,close,vol,amount`.
 - Preserve the raw provider `adj_factor` as a separate column.
