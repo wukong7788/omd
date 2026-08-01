@@ -326,8 +326,8 @@ Acceptance:
 - public API documentation states formulas, units, missingness, coverage, and
   non-PIT semantics.
 
-After the `0.0.4` registry release is published and pinned, `stock_notify` will
-use `NORMALIZE_SUPPORTED` only when finite provider-weight coverage is strictly
+With the published and pinned `0.0.4` registry release, `stock_notify` uses
+`NORMALIZE_SUPPORTED` only when finite provider-weight coverage is strictly
 greater than `99%`. Coverage at or below that threshold, including unsupported
 Hong Kong/QDII constituents, remains unknown rather than being filled from a
 different yield definition.
