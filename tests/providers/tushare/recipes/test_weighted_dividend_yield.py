@@ -71,6 +71,39 @@ def test_missing_dv_ttm_is_incomplete(value: object) -> None:
         build_portfolio_dividend_yield(weights, daily, DividendYieldCoveragePolicy.REQUIRE_COMPLETE)
 
 
+def test_supported_weight_normalization_is_explicit_and_preserves_coverage() -> None:
+    weights, daily = _portfolio()
+    daily = daily.astype(object)
+    daily.loc[0, "dv_ttm"] = None
+    result = build_portfolio_dividend_yield(
+        weights,
+        daily,
+        DividendYieldCoveragePolicy.NORMALIZE_SUPPORTED,
+    )
+    assert result.dividend_yield == pytest.approx(0.08)
+    assert result.finite_weight_coverage == pytest.approx(0.25)
+    assert result.provider_total_weight == 4_000_000
+    assert result.provider_supported_weight == 1_000_000
+    assert result.coverage_policy is DividendYieldCoveragePolicy.NORMALIZE_SUPPORTED
+    assert (
+        result.formula_identifier
+        == "fund_portfolio_mkv_supported_weight_normalized_daily_basic_dv_ttm_v1"
+    )
+
+
+def test_supported_weight_normalization_with_zero_coverage_is_unknown() -> None:
+    weights, daily = _portfolio()
+    daily = daily.astype(object)
+    daily.loc[:, "dv_ttm"] = None
+    result = build_portfolio_dividend_yield(
+        weights,
+        daily,
+        DividendYieldCoveragePolicy.NORMALIZE_SUPPORTED,
+    )
+    assert result.dividend_yield is None
+    assert result.finite_weight_coverage == 0
+
+
 def test_validation_and_input_isolation() -> None:
     weights, daily = _portfolio()
     before_weights, before_daily = weights.copy(deep=True), daily.copy(deep=True)

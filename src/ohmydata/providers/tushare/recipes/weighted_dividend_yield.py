@@ -12,11 +12,18 @@ from ....core import CoverageError, SchemaMismatchError
 
 PORTFOLIO_FORMULA_IDENTIFIER = "fund_portfolio_mkv_weighted_daily_basic_dv_ttm_v1"
 INDEX_FORMULA_IDENTIFIER = "index_weight_weighted_daily_basic_dv_ttm_v1"
+PORTFOLIO_SUPPORTED_FORMULA_IDENTIFIER = (
+    "fund_portfolio_mkv_supported_weight_normalized_daily_basic_dv_ttm_v1"
+)
+INDEX_SUPPORTED_FORMULA_IDENTIFIER = (
+    "index_weight_supported_weight_normalized_daily_basic_dv_ttm_v1"
+)
 
 
 class DividendYieldCoveragePolicy(str, Enum):
     REQUIRE_COMPLETE = "REQUIRE_COMPLETE"
     PRESERVE_INCOMPLETE = "PRESERVE_INCOMPLETE"
+    NORMALIZE_SUPPORTED = "NORMALIZE_SUPPORTED"
 
 
 class DividendYieldWeightSource(str, Enum):
@@ -93,6 +100,7 @@ def _calculate(
     source: DividendYieldWeightSource,
     key: str,
     formula_identifier: str,
+    supported_formula_identifier: str,
     weight_field: str,
     minimum: float,
 ) -> WeightedDividendYieldResult:
@@ -154,7 +162,17 @@ def _calculate(
     complete = math.isclose(coverage, 1.0, rel_tol=0.0, abs_tol=1e-12)
     if not complete and policy is DividendYieldCoveragePolicy.REQUIRE_COMPLETE:
         raise CoverageError("finite dividend-yield weight coverage is incomplete")
-    result_yield = weighted_sum / 100.0 if complete else None
+    if complete:
+        result_yield = weighted_sum / 100.0
+    elif policy is DividendYieldCoveragePolicy.NORMALIZE_SUPPORTED and supported_weight > 0:
+        result_yield = (weighted_sum / coverage) / 100.0
+    else:
+        result_yield = None
+    effective_formula_identifier = (
+        supported_formula_identifier
+        if policy is DividendYieldCoveragePolicy.NORMALIZE_SUPPORTED
+        else formula_identifier
+    )
     return WeightedDividendYieldResult(
         result_yield,
         coverage,
@@ -164,7 +182,7 @@ def _calculate(
         supported_count,
         source,
         policy,
-        formula_identifier,
+        effective_formula_identifier,
     )
 
 
@@ -180,6 +198,7 @@ def build_portfolio_dividend_yield(
         DividendYieldWeightSource.FUND_PORTFOLIO,
         "symbol",
         PORTFOLIO_FORMULA_IDENTIFIER,
+        PORTFOLIO_SUPPORTED_FORMULA_IDENTIFIER,
         "mkv",
         0.0,
     )
@@ -197,6 +216,7 @@ def build_index_dividend_yield(
         DividendYieldWeightSource.INDEX_WEIGHT,
         "con_code",
         INDEX_FORMULA_IDENTIFIER,
+        INDEX_SUPPORTED_FORMULA_IDENTIFIER,
         "weight",
         0.0,
     )

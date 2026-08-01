@@ -301,8 +301,10 @@ Acceptance:
 - [x] Treat zero `dv_ttm` as an observed zero while preserving null, non-finite,
       and absent constituent yields as missing.
 - [x] Expose finite-value weight coverage and require an explicit policy for
-      incomplete coverage; never silently renormalize supported constituents or
-      turn missing yield into zero.
+      incomplete coverage; never turn missing yield into zero. Supported-weight
+      renormalization is available only through the explicitly selected
+      `NORMALIZE_SUPPORTED` policy, preserves the original coverage metadata,
+      and leaves the caller responsible for a named minimum-coverage threshold.
 - [x] Require callers to select one portfolio/index snapshot and one
       `daily_basic` observation date before calculation; do not infer PIT
       availability, report selection, staleness, or canonical-session alignment.
@@ -323,6 +325,12 @@ Acceptance:
   either repository or moving their PIT/storage policy into OMD;
 - public API documentation states formulas, units, missingness, coverage, and
   non-PIT semantics.
+
+After the `0.0.4` registry release is published and pinned, `stock_notify` will
+use `NORMALIZE_SUPPORTED` only when finite provider-weight coverage is strictly
+greater than `99%`. Coverage at or below that threshold, including unsupported
+Hong Kong/QDII constituents, remains unknown rather than being filled from a
+different yield definition.
 
 Follow-up recipe candidates require separate reviewed contracts. In
 particular, rolling ETF distribution yield from `fund_div + fund_nav` must

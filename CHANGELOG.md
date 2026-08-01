@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.4 — 2026-08-01
+
+- Added the explicit `NORMALIZE_SUPPORTED` weighted-dividend-yield coverage
+  policy. It normalizes only over finite supported weight, preserves the
+  original coverage metadata, reports a distinct formula identifier, and
+  leaves minimum-coverage acceptance to the caller.
+
 ## 0.0.3 — 2026-07-31
 
 - Added offline weighted portfolio and index dividend-yield recipes with

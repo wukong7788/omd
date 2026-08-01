@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohmydata"
-version = "0.0.3"
+version = "0.0.4"
 description = "Offline-first market-data SDK scaffold"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

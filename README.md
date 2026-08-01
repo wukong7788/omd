@@ -96,9 +96,13 @@ provider-semantic weighted yield from already-downloaded Pandas frames. Portfoli
 The returned `dividend_yield` is a decimal ratio (`sum((w_i / W) * dv_ttm_i) / 100`),
 where `W` is the provider-native total weight.
 Choose `DividendYieldCoveragePolicy.REQUIRE_COMPLETE` to reject missing finite
-yield coverage, or `PRESERVE_INCOMPLETE` to return `None`; partial coverage is
-never renormalized. Inputs are not modified, and dates are identity checks only:
-the recipe does not infer point-in-time availability or report selection.
+yield coverage, `PRESERVE_INCOMPLETE` to return `None`, or the explicitly named
+`NORMALIZE_SUPPORTED` policy to divide only by finite supported weight while
+still reporting the original `finite_weight_coverage`. Callers own any minimum
+coverage threshold and must not present a normalized partial estimate as full
+coverage. Zero supported coverage remains unknown. Inputs are not modified, and
+dates are identity checks only: the recipe does not infer point-in-time
+availability or report selection.
 
 ```python
 from ohmydata.providers.tushare import (
