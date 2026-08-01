@@ -104,7 +104,10 @@ It must not own:
 
 - YAML universe selection and dividend ETF discovery;
 - DuckDB/Parquet publication and atomic application refresh;
-- dividend-yield, holdings-yield, and UI feature calculations;
+- dividend-event/AUM calculations, portfolio report and index snapshot
+  selection, PIT/as-of policy, expenses, final schemas, and UI features; OMD's
+  pure recipes own only the shared weighted-dividend-yield arithmetic and
+  finite-value coverage calculation;
 - desktop scheduling and notification behavior.
 
 ## 5. Provisional Package Layout
@@ -341,9 +344,39 @@ selection, rolling-window, and no-look-ahead rules before implementation.
 - [ ] Cover round-trip and one-way conversion with synthetic frames containing
       nulls, NaN/infinity, dates, timestamps, large integers, and mixed numeric
       dtypes on Python 3.11 and 3.12.
+- [ ] Add a Pandas/Polars parity test group that feeds the same synthetic
+      fixtures through both paths and compares structure, numeric results, and
+      final signal behavior.
 - [ ] Document the explicit boundary for `funmoney_backtest`: its PIT alignment,
       canonical sessions, Polars dataset schemas, storage, and feature logic
       remain consumer-owned after conversion.
+
+#### Pandas/Polars parity contract
+
+The adapter must target semantic parity, not accidental bit-for-bit identity.
+The same fixture must be used for both implementations, and parity tests must
+cover:
+
+- structural equality: column names, row counts, key uniqueness, ordering,
+  date/timezone representation, and raw-versus-derived columns;
+- numeric equality: explicit absolute/relative tolerances for floating-point
+  results, with deterministic rounding at a named output boundary;
+- missingness equality: null, NaN, infinity, empty groups, and divide-by-zero
+  outcomes must map to the same contract state;
+- join/group behavior: duplicate-key policy, join cardinality, grouping order,
+  and stable sorting must match;
+- behavioral equality: the final signal date and signal sequence must be equal,
+  not merely the intermediate floating-point columns;
+- error parity: malformed columns, unsupported dtypes, invalid keys, and
+  incomplete coverage must raise the same public error category.
+
+Fixtures must include threshold-boundary values such as a threshold itself and
+values immediately above and below it, because a tiny floating-point difference
+must not silently flip a signal. Monetary amounts, quantities, fees, and other
+fixed-unit values must use the repository's explicit Decimal or integer-minor-
+unit policy; statistical ratios may use floating point only with the frozen
+tolerance. The test report must show structure, numeric, missingness, and signal
+comparisons separately.
 
 This phase is roadmap-only. It requires a separate reviewed contract and is not
 authorized by the Phase 3b implementation or its acceptance. No Polars
@@ -367,6 +400,27 @@ For every consumer:
       dates, hashes, retry outcomes, and error outcomes;
 - [ ] shadow real-data execution only when explicitly authorized;
 - [ ] remove old code only after parity evidence is accepted.
+
+#### Accepted Stock Notify evidence — 2026-08-01
+
+- [x] Pin the exact public registry release `ohmydata[tushare]==0.0.3`.
+- [x] Pass offline request, schema, value, missingness, unit, error-boundary,
+      client-reuse, and empty-response parity tests for the adjusted ETF bars,
+      typed special endpoints, and portfolio/index dividend-yield recipes.
+- [x] Complete an explicitly authorized read-only Tushare shadow without
+      writing consumer data, credentials, configuration, or publication
+      artifacts.
+- [x] Verify a `2025-01-27` sample for portfolio `510880.SH` and index
+      `000922.CSI`: request order, fields, schemas, row counts, dates, and
+      missingness matched the accepted consumer contract.
+- [x] Accept and regression-test one explicit correction rather than hiding it
+      as parity: the index provider weights totaled `99.998%`, so the legacy
+      direct-percent result (`6.569159491%`) was replaced by the recipe's
+      actual-total-normalized result (`6.569290876817539%`), a correction of
+      approximately `0.0131` basis points with unchanged units.
+- [x] Remove the duplicated Stock Notify portfolio/index weighting formulas
+      after offline and live evidence were accepted. Stock Notify retains all
+      consumer-owned selection, PIT/as-of, fee, storage, and publication logic.
 
 `funmoney_backtest` production migration additionally requires unchanged
 backtest/signal behavior and its repository-specific gates.
