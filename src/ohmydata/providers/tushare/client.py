@@ -185,6 +185,8 @@ class TushareClient:
         self._check_empty(frame, request.empty_policy)
         if request.endpoint == "index_weight" and not frame.empty:
             self._validate_index_weight_scope(frame, request)
+        if request.endpoint == "daily_basic" and not frame.empty:
+            self._validate_daily_basic_scope(frame, request)
         frame = self._sort_and_validate(frame, request)
         if isinstance(request, FundBasicRequest) and request.required_ts_codes:
             present = set(frame["ts_code"].tolist())
@@ -293,6 +295,28 @@ class TushareClient:
         except (TypeError, ValueError) as exc:
             raise SchemaMismatchError("response trade_date is malformed") from exc
         if out_of_range.any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+
+    @staticmethod
+    def _validate_daily_basic_scope(frame: Any, request: DailyBasicRequest) -> None:
+        symbols = frame["ts_code"]
+        if request.ts_code is not None and (symbols != request.ts_code).any():
+            raise SchemaMismatchError("response ts_code is outside request scope")
+        dates = frame["trade_date"]
+        for value in dates.tolist():
+            if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                raise SchemaMismatchError("response trade_date is malformed")
+            try:
+                date(int(value[:4]), int(value[4:6]), int(value[6:]))
+            except ValueError as exc:
+                raise SchemaMismatchError("response trade_date is malformed") from exc
+        if request.trade_date is not None:
+            if (dates != request.trade_date).any():
+                raise SchemaMismatchError("response trade_date is outside request scope")
+            return
+        if request.start_date is not None and (dates < request.start_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+        if request.end_date is not None and (dates > request.end_date).any():
             raise SchemaMismatchError("response trade_date is outside request range")
 
     @staticmethod

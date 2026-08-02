@@ -237,7 +237,11 @@ data. `fund_portfolio` requires a bounded report selector (`ann_date`, exact
 rejected. Native units remain unchanged: dividend cash is yuan per share,
 portfolio market value is yuan and amount is shares, daily-basic share and
 market-value fields use Tushare's ten-thousand units, and index weights remain
-provider percentages.
+provider percentages. `daily_basic` accepts either a symbol with optional
+inclusive calendar-date bounds or one exact trade date; responses are
+scope-checked, stably ordered by symbol/date, and exactly 6000 rows are
+rejected as an ambiguous provider cap. No availability timestamp or consumer
+normalization is inferred.
 
 ## Stock daily and adjustment endpoints
 

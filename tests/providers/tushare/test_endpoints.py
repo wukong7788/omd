@@ -426,3 +426,24 @@ def test_phase2b_custom_fields_preserve_order_and_required_keys():
         fields=("weight", "trade_date", "index_code", "con_code"),
     )
     assert index.fields == ("weight", "trade_date", "index_code", "con_code")
+
+
+@pytest.mark.parametrize("value", ["20240230", "20241301", "2024-01-01", "2024011"])
+def test_daily_basic_rejects_non_calendar_dates(value):
+    with pytest.raises(ValueError):
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", start_date=value)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"trade_date": "20240101", "start_date": "20240101"},
+        {"trade_date": "20240101", "end_date": "20240101"},
+        {"start_date": "20240101"},
+        {"end_date": "20240101"},
+        {"ts_code": " "},
+    ],
+)
+def test_daily_basic_rejects_mixed_or_missing_orientation(kwargs):
+    with pytest.raises(ValueError):
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, **kwargs)

@@ -666,6 +666,12 @@ class DailyBasicRequest(_BaseRequest):
         object.__setattr__(self, "trade_date", _date(self.trade_date))
         object.__setattr__(self, "start_date", start)
         object.__setattr__(self, "end_date", end)
+        for value in (self.trade_date, start, end):
+            if value is not None:
+                try:
+                    date(int(value[:4]), int(value[4:6]), int(value[6:]))
+                except ValueError as exc:
+                    raise ValueError("dates must be valid calendar dates") from exc
         object.__setattr__(self, "fields", _fields(self.fields, _DAILY_BASIC_FIELDS))
 
     @property

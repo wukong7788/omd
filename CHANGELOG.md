@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened Tushare `daily_basic` selectors and response validation with real
+  calendar dates, explicit symbol/date scope checks, stable identity ordering,
+  and ambiguous-cap detection while preserving provider-native values.
+
 - Hardened Tushare `index_weight` selectors and response validation: exact or
   complete single-month requests, requested-index/date scope checks, stable
   identity ordering, and provider-native weight preservation.

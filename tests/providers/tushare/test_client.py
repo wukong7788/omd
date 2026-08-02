@@ -1295,7 +1295,7 @@ def test_phase2b_duplicate_rejection_and_daily_cap(weights):
 
     with pytest.raises(PaginationError):
         client(D()).fetch_daily_basic(
-            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240101")
         )
 
     class W:
@@ -1557,3 +1557,189 @@ def test_phase2b_validation_precedes_provider_calls():
             DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", trade_date="20240101")
         )
     assert provider.calls == 0
+
+
+def test_daily_basic_response_scope_and_calendar_validation():
+    base = {field: [1.0] for field in PHASE2B_FIELDS["daily_basic"]}
+
+    class Provider:
+        def __init__(self, ts_code: object = "A", trade_date: object = "20240101"):
+            self.frame = pd.DataFrame(base | {"ts_code": [ts_code], "trade_date": [trade_date]})
+
+        def daily_basic(self, **kwargs):
+            return self.frame
+
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(ts_code="B")).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(trade_date="20240102")).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240101")
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(trade_date="20240102")).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", end_date="20240101")
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(trade_date="20231231")).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", start_date="20240101")
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(trade_date="20240230")).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(trade_date=20240101)).fetch_daily_basic(
+            DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+        )
+
+
+def test_daily_basic_5999_rows_are_accepted():
+    fields = PHASE2B_FIELDS["daily_basic"]
+    dates = pd.date_range("2000-01-01", periods=5999).strftime("%Y%m%d").tolist()
+    frame = pd.DataFrame(
+        {field: [1.0] * 5999 for field in fields} | {"ts_code": ["A"] * 5999, "trade_date": dates}
+    )
+
+    class Provider:
+        def daily_basic(self, **kwargs):
+            return frame
+
+    result = client(Provider()).fetch_daily_basic(
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+    )
+    assert len(result.frame) == 5999
+
+
+def test_daily_basic_selector_kwargs_and_custom_identity_fields():
+    fields = PHASE2B_FIELDS["daily_basic"]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def daily_basic(self, **kwargs):
+            self.calls.append(kwargs)
+            return pd.DataFrame(columns=fields)
+
+    provider = Provider()
+    api = client(provider)
+    for request in (
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240101"),
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"),
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", start_date="20240101"),
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", end_date="20240102"),
+        DailyBasicRequest(
+            empty_policy=EmptyPolicy.ALLOW,
+            ts_code="A",
+            start_date="20240101",
+            end_date="20240102",
+        ),
+    ):
+        api.fetch_daily_basic(request)
+    assert provider.calls == [
+        {"trade_date": "20240101", "fields": ",".join(fields)},
+        {"ts_code": "A", "fields": ",".join(fields)},
+        {"ts_code": "A", "start_date": "20240101", "fields": ",".join(fields)},
+        {"ts_code": "A", "end_date": "20240102", "fields": ",".join(fields)},
+        {
+            "ts_code": "A",
+            "start_date": "20240101",
+            "end_date": "20240102",
+            "fields": ",".join(fields),
+        },
+    ]
+    custom = ("ts_code", "trade_date", "dv_ttm", "limit_status")
+
+    class Custom:
+        def daily_basic(self, **kwargs):
+            return pd.DataFrame(
+                {field: [1] for field in custom} | {"ts_code": ["A"], "trade_date": ["20240101"]}
+            )
+
+    result = client(Custom()).fetch_daily_basic(
+        DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=custom)
+    )
+    assert result.frame.columns.tolist() == list(custom)
+
+    for missing in (("trade_date", "dv_ttm"), ("ts_code", "dv_ttm")):
+        with pytest.raises(SchemaMismatchError):
+            client(Custom()).fetch_daily_basic(
+                DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=missing)
+            )
+
+
+def test_daily_basic_native_values_and_duplicate_identity_rejection():
+    fields = PHASE2B_FIELDS["daily_basic"] + ("limit_status",)
+    row: dict[str, object] = {field: 1.0 for field in fields}
+    row.update(
+        ts_code="A",
+        trade_date="20240101",
+        turnover_rate=12.5,
+        dv_ttm=float("nan"),
+        total_share=100,
+        total_mv=200,
+        limit_status=0,
+    )
+    row["pe"] = float("inf")
+    row["ps"] = float("-inf")
+    row["pb"] = None
+
+    class Provider:
+        def __init__(self, frame):
+            self.frame = frame
+
+        def daily_basic(self, **kwargs):
+            return self.frame
+
+    request = DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=fields)
+    result = client(Provider(pd.DataFrame([row]))).fetch_daily_basic(request)
+    assert result.frame.turnover_rate.iloc[0] == 12.5
+    assert pd.isna(result.frame.dv_ttm.iloc[0])
+    assert result.frame.pe.iloc[0] == float("inf")
+    assert result.frame.ps.iloc[0] == float("-inf")
+    assert pd.isna(result.frame.pb.iloc[0])
+    assert result.frame.total_share.iloc[0] == 100 and result.frame.total_mv.iloc[0] == 200
+    assert result.frame.limit_status.iloc[0] == 0
+    duplicate = pd.DataFrame([row, row])
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(duplicate)).fetch_daily_basic(request)
+    changed: dict[str, object] = dict(row)
+    changed["dv_ttm"] = 2.0
+    with pytest.raises(SchemaMismatchError):
+        client(Provider(pd.DataFrame([row, changed]))).fetch_daily_basic(request)
+
+
+def test_daily_basic_snapshot_revisions_remain_distinct(tmp_path):
+    fields = PHASE2B_FIELDS["daily_basic"]
+
+    class Provider:
+        def __init__(self):
+            self.value = 1.0
+
+        def daily_basic(self, **kwargs):
+            row: dict[str, object] = {field: self.value for field in fields}
+            row.update(ts_code="A", trade_date="20240101")
+            return pd.DataFrame([row])
+
+    provider = Provider()
+    api = client(provider)
+    request = DailyBasicRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+    first = api.fetch_daily_basic(request)
+    provider.value = 2.0
+    second = api.fetch_daily_basic(request)
+    store = SnapshotStore(tmp_path)
+    a = store.write(
+        request.spec,
+        first.frame.to_json(orient="records").encode(),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        "json-rows-v1",
+    )
+    b = store.write(
+        request.spec,
+        second.frame.to_json(orient="records").encode(),
+        datetime(2024, 1, 2, tzinfo=UTC),
+        "json-rows-v1",
+    )
+    assert a.path != b.path and store.replay(a).payload != store.replay(b).payload
