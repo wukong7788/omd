@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added immutable provider-native `RawFactEnvelope` metadata with conservative
+  availability quality flags and explicit same-key row revision evidence.
+
 - Hardened Tushare `daily_basic` selectors and response validation with real
   calendar dates, explicit symbol/date scope checks, stable identity ordering,
   and ambiguous-cap detection while preserving provider-native values.

@@ -15,6 +15,7 @@ from .errors import (
     SnapshotIntegrityError,
     TransientProviderError,
 )
+from .facts import RawFactEnvelope, RawFactQualityFlag, RawFactRevisionStatus
 from .policy import AttemptRecord, RetryPolicy, RetryResult, execute_with_retry
 from .provenance import EmptyDisposition, FetchProvenance
 from .rate_limit import RateLimitDecision, RateLimiter, RateLimitPolicy
@@ -46,6 +47,9 @@ __all__ = [
     "RateLimitError",
     "RateLimitPolicy",
     "RateLimiter",
+    "RawFactEnvelope",
+    "RawFactQualityFlag",
+    "RawFactRevisionStatus",
     "RequestSpec",
     "RetryExhaustedError",
     "RetryPolicy",

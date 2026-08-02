@@ -219,6 +219,11 @@ serialization. `provider_first_observed_at()` reports when OMD first persisted
 those exact bytes, not provider publication time or consumer usability.
 Limiter state is per instance.
 
+Raw provider rows can be wrapped in `RawFactEnvelope`, preserving the
+response-level `fact_version` separately from a canonical row hash. Revision
+status remains conservative until an explicit same-key prior row is supplied;
+point-in-time and date-only availability quality flags are serialized too.
+
 ## Phase 1 core (offline)
 
 `ohmydata.core` provides canonical request identities, classified retry with
