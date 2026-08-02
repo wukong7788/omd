@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Documented the v0.1.0 public-contract changes, fail-closed upgrade behavior,
+  and funmoney/stock_notify consumer ownership boundaries.
+
 - Added offline PIT fail-closed characterization fixtures covering revisions,
   date-only availability, consumer cutoff boundaries, exact snapshot replay,
   `fund_adj` pagination, and historical-vintage evidence.

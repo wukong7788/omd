@@ -185,6 +185,9 @@ git diff --check
 Behavioral evidence for the initial consumers is in
 [`docs/behavioral-inventory.md`](docs/behavioral-inventory.md). The adjusted
 ETF characterization is test-only and uses synthetic JSON fixtures.
+The public-contract changes and consumer-owned migration boundaries planned for
+`v0.1.0` are summarized in
+[`docs/v0.1.0-migration.md`](docs/v0.1.0-migration.md).
 
 Phase 1 core is offline and explicit:
 
