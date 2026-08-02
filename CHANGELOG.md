@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added immutable provider-independent snapshot observation receipts,
+  exact-payload fact versions, and first-observed timestamp semantics while
+  preserving legacy snapshot manifests and replay APIs.
+
 - Added typed, injected-client Tushare stock `daily` and `adj_factor` endpoint
   requests with explicit selectors, ordered fields, stable key validation,
   empty-result policy, provenance, and ambiguous-cap detection.

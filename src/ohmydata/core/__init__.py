@@ -17,7 +17,13 @@ from .errors import (
 from .policy import AttemptRecord, RetryPolicy, RetryResult, execute_with_retry
 from .provenance import EmptyDisposition, FetchProvenance
 from .rate_limit import RateLimitDecision, RateLimiter, RateLimitPolicy
-from .snapshot import SnapshotMode, SnapshotRef, SnapshotReplay, SnapshotStore
+from .snapshot import (
+    SnapshotMode,
+    SnapshotObservationRef,
+    SnapshotRef,
+    SnapshotReplay,
+    SnapshotStore,
+)
 from .specs import RequestSpec
 
 __all__ = [
@@ -44,6 +50,7 @@ __all__ = [
     "SnapshotConflictError",
     "SnapshotIntegrityError",
     "SnapshotMode",
+    "SnapshotObservationRef",
     "SnapshotRef",
     "SnapshotReplay",
     "SnapshotStore",

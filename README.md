@@ -193,7 +193,12 @@ store.write(
 ```
 
 `RetryPolicy(max_attempts=3)` counts the first call. APPEND preserves distinct
-observations; FROZEN permits one response identity. Limiter state is per instance.
+observations; FROZEN permits one response identity. `SnapshotStore.observe()`
+adds immutable, ordered fetch receipts without changing snapshot bytes;
+`SnapshotRef.fact_version` identifies the exact request, payload, and
+serialization. `provider_first_observed_at()` reports when OMD first persisted
+those exact bytes, not provider publication time or consumer usability.
+Limiter state is per instance.
 
 ## Phase 1 core (offline)
 

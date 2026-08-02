@@ -38,6 +38,7 @@ def test_core_exports_are_explicit() -> None:
         "SnapshotConflictError",
         "SnapshotIntegrityError",
         "SnapshotMode",
+        "SnapshotObservationRef",
         "SnapshotRef",
         "SnapshotReplay",
         "SnapshotStore",
