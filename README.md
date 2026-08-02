@@ -99,6 +99,11 @@ thousand yuan. Empty responses must be selected explicitly with
 `fund_share.fd_share` remains provider-native in ten-thousand shares (万份);
 `fund_adj` and `fund_nav` values are likewise preserved without adjustment or
 imputation.
+`FundNavRequest` and `FundShareRequest` validate real calendar dates and reject
+provider rows outside the requested symbol/date scope. NAV revisions (including
+exact duplicates) remain intact; a 2,000-row `fund_share` response is rejected
+as an ambiguous provider cap. Announcement and trade dates are date-only
+evidence and do not prove an intraday availability timestamp.
 
 ### Adjusted ETF bars recipe
 

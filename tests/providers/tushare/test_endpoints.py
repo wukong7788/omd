@@ -222,6 +222,60 @@ def test_request_validation_and_explicit_fields():
     assert request.spec.fields == ("ts_code", "trade_date", "adj_factor")
 
 
+@pytest.mark.parametrize("request_type", [FundNavRequest, FundShareRequest])
+@pytest.mark.parametrize("value", ["20240230", "2024-02-01", "2024010"])
+def test_fund_nav_share_reject_non_calendar_dates(request_type, value):
+    kwargs = {"ts_code": "A", "start_date": value}
+    with pytest.raises(ValueError):
+        request_type(empty_policy=EmptyPolicy.ALLOW, **kwargs)
+
+
+def test_fund_nav_share_selectors_require_nonempty_values():
+    with pytest.raises(ValueError):
+        FundNavRequest(empty_policy=EmptyPolicy.ALLOW, ts_code=" ")
+    with pytest.raises(ValueError):
+        FundNavRequest(empty_policy=EmptyPolicy.ALLOW, nav_date=" ")
+    with pytest.raises(ValueError):
+        FundShareRequest(empty_policy=EmptyPolicy.ALLOW, market=" ")
+
+
+@pytest.mark.parametrize("request_type", [FundNavRequest, FundShareRequest])
+@pytest.mark.parametrize("kwargs", [{"start_date": "20240101"}, {"end_date": "20240102"}])
+def test_fund_nav_share_partial_ranges_with_symbol(request_type, kwargs):
+    request = request_type(empty_policy=EmptyPolicy.ALLOW, ts_code="A", **kwargs)
+    assert request.spec.effective_parameters["ts_code"] == "A"
+
+
+def test_fund_nav_share_ranges_require_symbol_when_date_selector_used():
+    with pytest.raises(ValueError):
+        FundNavRequest(empty_policy=EmptyPolicy.ALLOW, nav_date="20240101", end_date="20240102")
+    with pytest.raises(ValueError):
+        FundShareRequest(
+            empty_policy=EmptyPolicy.ALLOW, trade_date="20240101", start_date="20240101"
+        )
+    with pytest.raises(ValueError):
+        FundShareRequest(empty_policy=EmptyPolicy.ALLOW, market="E", end_date="20240102")
+
+
+def test_fund_nav_share_range_provider_parameters_are_exact():
+    nav = FundNavRequest(
+        empty_policy=EmptyPolicy.ALLOW, ts_code="A", start_date="20240101", end_date="20240102"
+    )
+    share = FundShareRequest(
+        empty_policy=EmptyPolicy.ALLOW, ts_code="A,B", start_date="20240101", end_date="20240102"
+    )
+    assert nav.spec.effective_parameters == {
+        "ts_code": "A",
+        "start_date": "20240101",
+        "end_date": "20240102",
+    }
+    assert share.spec.effective_parameters == {
+        "ts_code": "A,B",
+        "start_date": "20240101",
+        "end_date": "20240102",
+    }
+
+
 def test_etf_basic_spec_defaults_filters_and_date_validation():
     request = EtfBasicRequest(
         empty_policy=EmptyPolicy.ALLOW,

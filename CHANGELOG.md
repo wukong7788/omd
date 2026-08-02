@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened Tushare `fund_nav` and `fund_share` request/response semantics with
+  real-calendar validation, scope checks, stable ordering, revision
+  preservation, provider-native values, and explicit `fund_share` cap handling.
+
 - Added immutable provider-native `RawFactEnvelope` metadata with conservative
   availability quality flags and explicit same-key row revision evidence.
 

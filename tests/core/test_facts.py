@@ -94,6 +94,37 @@ def test_date_only_and_additional_quality_flags(tmp_path: Path) -> None:
     assert "CALLER_NOTE" in envelope.quality_flags
 
 
+def test_fund_nav_date_only_evidence_is_not_intraday_or_historical_vintage(tmp_path: Path) -> None:
+    store = SnapshotStore(tmp_path)
+    observation = store.observe(
+        RequestSpec("tushare", "fund_nav", {}, ()),
+        b"raw",
+        datetime(2024, 1, 4, tzinfo=UTC),
+        "json-v1",
+    )
+    envelope = RawFactEnvelope.from_observation(
+        store,
+        observation,
+        native_fields={
+            "ts_code": "FAKE",
+            "ann_date": date(2024, 1, 3),
+            "nav_date": date(2000, 1, 1),
+        },
+        primary_key_fields=("ts_code", "nav_date", "ann_date"),
+        entity_fields=("ts_code",),
+        native_schema_version="row-v1",
+        adapter_version="adapter-v1",
+        source_available_at=date(2024, 1, 3),
+        availability_basis=AvailabilityBasis.SOURCE_DECLARED,
+        availability_precision=AvailabilityPrecision.DATE,
+    )
+    assert envelope.availability.availability_precision is AvailabilityPrecision.DATE
+    assert RawFactQualityFlag.DATE_ONLY_AVAILABILITY.value in envelope.quality_flags
+    assert RawFactQualityFlag.PIT_UNPROVEN.value in envelope.quality_flags
+    revised = envelope.classify_against(envelope)
+    assert revised.revision_status is RawFactRevisionStatus.UNCHANGED_FROM_PREVIOUS
+
+
 def test_exact_derived_metadata_and_json_safe_values(tmp_path: Path) -> None:
     envelope = _envelope(
         tmp_path,

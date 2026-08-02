@@ -68,6 +68,8 @@ _UNIQUE_KEYS = {
     "dividend": (),
 }
 _SORT_KEYS = {
+    "fund_nav": ("ts_code", "nav_date", "ann_date"),
+    "fund_share": ("ts_code", "trade_date"),
     "fund_div": ("ts_code", "ex_date", "ann_date", "imp_anndate", "pay_date"),
     "fund_portfolio": ("ts_code", "end_date", "ann_date", "symbol"),
     "daily_basic": ("ts_code", "trade_date"),
@@ -187,6 +189,10 @@ class TushareClient:
             self._validate_index_weight_scope(frame, request)
         if request.endpoint == "daily_basic" and not frame.empty:
             self._validate_daily_basic_scope(frame, request)
+        if request.endpoint == "fund_nav" and not frame.empty:
+            self._validate_fund_nav_scope(frame, request)
+        if request.endpoint == "fund_share" and not frame.empty:
+            self._validate_fund_share_scope(frame, request)
         frame = self._sort_and_validate(frame, request)
         if isinstance(request, FundBasicRequest) and request.required_ts_codes:
             present = set(frame["ts_code"].tolist())
@@ -314,6 +320,50 @@ class TushareClient:
             if (dates != request.trade_date).any():
                 raise SchemaMismatchError("response trade_date is outside request scope")
             return
+        if request.start_date is not None and (dates < request.start_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+        if request.end_date is not None and (dates > request.end_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+
+    @staticmethod
+    def _validate_fund_nav_scope(frame: Any, request: FundNavRequest) -> None:
+        symbols = frame["ts_code"]
+        if request.ts_code is not None and (symbols != request.ts_code).any():
+            raise SchemaMismatchError("response ts_code is outside request scope")
+        for column in ("nav_date", "ann_date"):
+            values = frame[column]
+            for value in values.tolist():
+                if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                    raise SchemaMismatchError(f"response {column} is malformed")
+                try:
+                    date(int(value[:4]), int(value[4:6]), int(value[6:]))
+                except ValueError as exc:
+                    raise SchemaMismatchError(f"response {column} is malformed") from exc
+        nav_dates = frame["nav_date"]
+        if request.nav_date is not None and (nav_dates != request.nav_date).any():
+            raise SchemaMismatchError("response nav_date is outside request scope")
+        if request.start_date is not None and (nav_dates < request.start_date).any():
+            raise SchemaMismatchError("response nav_date is outside request range")
+        if request.end_date is not None and (nav_dates > request.end_date).any():
+            raise SchemaMismatchError("response nav_date is outside request range")
+
+    @staticmethod
+    def _validate_fund_share_scope(frame: Any, request: FundShareRequest) -> None:
+        symbols = frame["ts_code"]
+        if request.ts_code is not None:
+            allowed = {value.strip() for value in request.ts_code.split(",") if value.strip()}
+            if (~symbols.isin(allowed)).any():
+                raise SchemaMismatchError("response ts_code is outside request scope")
+        dates = frame["trade_date"]
+        for value in dates.tolist():
+            if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                raise SchemaMismatchError("response trade_date is malformed")
+            try:
+                date(int(value[:4]), int(value[4:6]), int(value[6:]))
+            except ValueError as exc:
+                raise SchemaMismatchError("response trade_date is malformed") from exc
+        if request.trade_date is not None and (dates != request.trade_date).any():
+            raise SchemaMismatchError("response trade_date is outside request scope")
         if request.start_date is not None and (dates < request.start_date).any():
             raise SchemaMismatchError("response trade_date is outside request range")
         if request.end_date is not None and (dates > request.end_date).any():

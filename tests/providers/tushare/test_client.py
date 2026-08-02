@@ -1,5 +1,6 @@
 # pyright: reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -757,7 +758,7 @@ def test_adjustment_exact_pagination_and_duplicate_failures_and_empty_policy():
             pd.DataFrame(
                 {
                     "ts_code": [str(i) for i in range(2000)],
-                    "trade_date": [str(i).zfill(8) for i in range(2000)],
+                    "trade_date": pd.date_range("2000-01-01", periods=2000).strftime("%Y%m%d"),
                 }
             ),
             2000,
@@ -1390,6 +1391,337 @@ def test_phase2b_exact_duplicate_rows_preserved_and_fund_nav_regression():
         )
         == 2
     )
+
+
+def test_fund_nav_scope_order_and_native_values():
+    frame = pd.DataFrame(
+        {
+            "ts_code": ["A", "A", "A", "A", "A"],
+            "nav_date": ["20240102", "20240101", "20240101", "20240102", "20240102"],
+            "ann_date": ["20240103", "20240103", "20240104", "20240104", "20240105"],
+            "unit_nav": [None, 0.0, float("inf"), float("nan"), float("-inf")],
+            "fd_share": [1, 2, 3, 4, 5],
+        }
+    )
+
+    class N:
+        def fund_nav(self, **kwargs):
+            return frame
+
+    result = client(N()).fetch_fund_nav(
+        FundNavRequest(
+            empty_policy=EmptyPolicy.ALLOW,
+            ts_code="A",
+            fields=("ts_code", "nav_date", "ann_date", "unit_nav"),
+        )
+    )
+    assert result.frame[["nav_date", "ann_date"]].values.tolist() == [
+        ["20240101", "20240103"],
+        ["20240101", "20240104"],
+        ["20240102", "20240103"],
+        ["20240102", "20240104"],
+        ["20240102", "20240105"],
+    ]
+    assert result.frame.unit_nav.iloc[0] == 0.0
+    assert result.frame.unit_nav.iloc[1] == float("inf")
+    assert pd.isna(result.frame.unit_nav.iloc[2])
+    assert pd.isna(result.frame.unit_nav.iloc[3])
+    assert result.frame.unit_nav.iloc[4] == float("-inf")
+
+
+def test_fund_share_scope_and_row_cap_boundary():
+    frame = pd.DataFrame(
+        {
+            "ts_code": ["B", "A"],
+            "trade_date": ["20240102", "20240101"],
+            "fd_share": [0.0, float("nan")],
+        }
+    )
+
+    class S:
+        def fund_share(self, **kwargs):
+            return frame
+
+    result = client(S()).fetch_fund_share(
+        FundShareRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A,B")
+    )
+    assert result.frame.ts_code.tolist() == ["A", "B"]
+    assert result.frame.fd_share.iloc[0] != result.frame.fd_share.iloc[0]
+
+    cap = pd.DataFrame(
+        {
+            "ts_code": [f"F{i}" for i in range(2000)],
+            "trade_date": pd.date_range("2000-01-01", periods=2000).strftime("%Y%m%d"),
+            "fd_share": [0.0] * 2000,
+        }
+    )
+
+    class C:
+        def fund_share(self, **kwargs):
+            return cap
+
+    with pytest.raises(PaginationError):
+        client(C()).fetch_fund_share(FundShareRequest(empty_policy=EmptyPolicy.ALLOW, market="E"))
+
+
+@pytest.mark.parametrize(
+    "req, frame, message",
+    [
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["B"], "nav_date": ["20240101"], "ann_date": ["20240102"]}),
+            "scope",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                nav_date="20240101",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240102"], "ann_date": ["20240103"]}),
+            "scope",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "trade_date")
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240230"]}),
+            "malformed",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["bad"], "ann_date": ["20240102"]}),
+            "malformed",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": [20240101], "ann_date": ["20240102"]}),
+            "malformed",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240101"], "ann_date": ["bad"]}),
+            "malformed",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                start_date="20240102",
+                end_date="20240103",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240101"], "ann_date": ["20240102"]}),
+            "range",
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                start_date="20240102",
+                end_date="20240103",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240104"], "ann_date": ["20240105"]}),
+            "range",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW, ts_code="A,B", fields=("ts_code", "trade_date")
+            ),
+            pd.DataFrame({"ts_code": ["C"], "trade_date": ["20240101"]}),
+            "scope",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                trade_date="20240101",
+                fields=("ts_code", "trade_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240102"]}),
+            "scope",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "trade_date")
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": [20240101]}),
+            "malformed",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                start_date="20240102",
+                end_date="20240103",
+                fields=("ts_code", "trade_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240101"]}),
+            "range",
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                start_date="20240102",
+                end_date="20240103",
+                fields=("ts_code", "trade_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240104"]}),
+            "range",
+        ),
+    ],
+)
+def test_fund_nav_share_response_scope_fail_closed(req, frame, message):
+    class Provider:
+        def __getattr__(self, name):
+            return lambda **kwargs: frame
+
+    with pytest.raises(SchemaMismatchError, match=message):
+        getattr(client(Provider()), f"fetch_{req.endpoint}")(req)
+
+
+@pytest.mark.parametrize(
+    "req, frame",
+    [
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": [None], "nav_date": ["20240101"], "ann_date": ["20240102"]}),
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": [None], "ann_date": ["20240102"]}),
+        ),
+        (
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                ts_code="A",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240101"], "ann_date": [None]}),
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "trade_date")
+            ),
+            pd.DataFrame({"ts_code": [None], "trade_date": ["20240101"]}),
+        ),
+        (
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "trade_date")
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": [None]}),
+        ),
+    ],
+)
+def test_fund_nav_share_required_null_keys_rejected(req, frame):
+    class Provider:
+        def __getattr__(self, name):
+            return lambda **kwargs: frame
+
+    with pytest.raises(SchemaMismatchError, match="null endpoint key"):
+        getattr(client(Provider()), f"fetch_{req.endpoint}")(req)
+
+
+def test_fund_share_1999_rows_are_accepted():
+    frame = pd.DataFrame(
+        {
+            "ts_code": ["A"] * 1999,
+            "trade_date": pd.date_range("2000-01-01", periods=1999).strftime("%Y%m%d"),
+            "fd_share": [None, 0.0, float("nan"), float("inf"), float("-inf")] + [1.0] * 1994,
+        }
+    )
+
+    class Provider:
+        def fund_share(self, **kwargs):
+            return frame
+
+    result = client(Provider()).fetch_fund_share(
+        FundShareRequest(empty_policy=EmptyPolicy.ALLOW, market="E")
+    )
+    assert len(result.frame) == 1999
+
+
+@pytest.mark.parametrize(
+    "endpoint, req, frame",
+    [
+        (
+            "fund_nav",
+            FundNavRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                nav_date="20240101",
+                fields=("ts_code", "nav_date", "ann_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "nav_date": ["20240101"], "ann_date": ["20240102"]}),
+        ),
+        (
+            "fund_share",
+            FundShareRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                trade_date="20240101",
+                fields=("ts_code", "trade_date"),
+            ),
+            pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240101"]}),
+        ),
+    ],
+)
+def test_fund_nav_share_empty_policies(endpoint, req, frame):
+    class Provider:
+        def __getattr__(self, name):
+            return lambda **kwargs: pd.DataFrame(columns=frame.columns)
+
+    empty_request = replace(req, empty_policy=EmptyPolicy.ALLOW)
+    assert getattr(client(Provider()), f"fetch_{endpoint}")(empty_request).frame.empty
+    with pytest.raises(EmptyResponseError):
+        getattr(client(Provider()), f"fetch_{endpoint}")(
+            replace(req, empty_policy=EmptyPolicy.ERROR)
+        )
+
+
+def test_fund_nav_no_undocumented_cap():
+    frame = pd.DataFrame(
+        {
+            "ts_code": ["A"] * 2000,
+            "nav_date": pd.date_range("2000-01-01", periods=2000).strftime("%Y%m%d"),
+            "ann_date": pd.date_range("2000-01-02", periods=2000).strftime("%Y%m%d"),
+        }
+    )
+
+    class Provider:
+        def fund_nav(self, **kwargs):
+            return frame
+
+    result = client(Provider()).fetch_fund_nav(
+        FundNavRequest(
+            empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "nav_date", "ann_date")
+        )
+    )
+    assert len(result.frame) == 2000
 
 
 @pytest.mark.parametrize(

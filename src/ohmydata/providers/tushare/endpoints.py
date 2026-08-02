@@ -31,6 +31,16 @@ def _date(value: Any) -> str | None:
     return value
 
 
+def _calendar_date(value: Any) -> str | None:
+    value = _date(value)
+    if value is not None:
+        try:
+            date(int(value[:4]), int(value[4:6]), int(value[6:]))
+        except ValueError as exc:
+            raise ValueError("dates must be real calendar dates") from exc
+    return value
+
+
 def _date_range(start: str | None, end: str | None) -> tuple[str | None, str | None]:
     start, end = _date(start), _date(end)
     if start is not None and end is not None and start > end:
@@ -366,14 +376,21 @@ class FundNavRequest(_BaseRequest):
 
     def __post_init__(self) -> None:
         _validate_empty(self.empty_policy)
-        start, end = _date_range(self.start_date, self.end_date)
+        if self.ts_code is not None:
+            _nonempty(self.ts_code, "ts_code")
+        raw_nav_date: Any = self.nav_date
+        if raw_nav_date is not None and not isinstance(raw_nav_date, str):
+            raise ValueError("nav_date must be a non-empty string")
+        if raw_nav_date is not None and not raw_nav_date.strip():
+            raise ValueError("nav_date must be a non-empty string")
         if (self.ts_code is None) == (self.nav_date is None):
             raise ValueError("exactly one of ts_code or nav_date is required")
+        start, end = _date_range(self.start_date, self.end_date)
         if (start is not None or end is not None) and self.ts_code is None:
             raise ValueError("date range requires ts_code")
-        object.__setattr__(self, "nav_date", _date(self.nav_date))
-        object.__setattr__(self, "start_date", start)
-        object.__setattr__(self, "end_date", end)
+        object.__setattr__(self, "nav_date", _calendar_date(self.nav_date))
+        object.__setattr__(self, "start_date", _calendar_date(start))
+        object.__setattr__(self, "end_date", _calendar_date(end))
         object.__setattr__(
             self,
             "fields",
@@ -418,14 +435,22 @@ class FundShareRequest(_BaseRequest):
 
     def __post_init__(self) -> None:
         _validate_empty(self.empty_policy)
-        start, end = _date_range(self.start_date, self.end_date)
-        if not any((self.ts_code, self.trade_date, self.market)):
+        selectors = (self.ts_code, self.trade_date, self.market)
+        if self.ts_code is not None:
+            _nonempty(self.ts_code, "ts_code")
+        raw_trade_date: Any = self.trade_date
+        raw_market: Any = self.market
+        for value, name in ((raw_trade_date, "trade_date"), (raw_market, "market")):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{name} must be a non-empty string")
+        if not any(value is not None for value in selectors):
             raise ValueError("one filter is required")
+        start, end = _date_range(self.start_date, self.end_date)
         if (start is not None or end is not None) and self.ts_code is None:
             raise ValueError("date range requires ts_code")
-        object.__setattr__(self, "trade_date", _date(self.trade_date))
-        object.__setattr__(self, "start_date", start)
-        object.__setattr__(self, "end_date", end)
+        object.__setattr__(self, "trade_date", _calendar_date(self.trade_date))
+        object.__setattr__(self, "start_date", _calendar_date(start))
+        object.__setattr__(self, "end_date", _calendar_date(end))
         object.__setattr__(
             self, "fields", _fields(self.fields, ("ts_code", "trade_date", "fd_share"))
         )
