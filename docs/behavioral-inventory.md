@@ -9,7 +9,7 @@ document makes no point-in-time availability claim.
 
 | Consumer path | Endpoint and request | Current behavior and semantics | Ownership / offline evidence |
 |---|---|---|---|
-| `funmoney_backtest/data_provider/tushare.py` | `trade_cal(exchange="SSE", is_open="1", start_date, end_date, fields="cal_date")` | Optional batch-calendar optimization; ascending open dates, latest-window trimming, pending latest date may stop batch and fall back per symbol. Empty/missing `cal_date` disables batch. | SDK endpoint-specific calendar contract; consumer owns canonical sessions and cutoff. Offline fake-client evidence: `funmoney_backtest/tests/test_tushare_provider.py` trade-calendar/batch-cutoff/fallback cases. |
+| `funmoney_backtest/data_provider/tushare.py` | `trade_cal(exchange="SSE", is_open="1", start_date, end_date, fields="cal_date")` | Official-client Pandas responses are immediately converted to Polars; the remaining provider, normalization, quality, and Parquet contracts are Polars. Optional batch-calendar optimization uses ascending open dates; latest-window trimming and pending latest date may stop batch and fall back per symbol. Empty/missing `cal_date` disables batch. | SDK endpoint-specific calendar contract and explicit Pandas-to-Polars adapter; consumer owns canonical sessions and cutoff. Offline fake-client evidence: `funmoney_backtest/tests/test_tushare_provider.py` trade-calendar/batch-cutoff/fallback cases. |
 | same | `etf_basic(market="E", list_status="L", fields="ts_code,name,market,list_status,delist_date")` in explicit `all_symbols=True` mode | Required active-universe query; local filters retain `list_status == L`, empty/null `delist_date`, `market == E`, and valid `NNNNNN.SH`/`NNNNNN.SZ` symbols; absent endpoint raises `RuntimeError`; empty response or no valid active symbols also raises `RuntimeError` (no fallback). | Consumer owns explicit all-symbols selection; offline fake-client evidence: `funmoney_backtest/tests/test_tushare_provider.py::etf_basic`. |
 | same | `fund_basic(market="E", status="L"), status="D", status="I"` | Queries all three statuses; absent endpoint, empty response, or missing requested symbol receives default metadata rather than failing. | Consumer owns metadata; offline fake-client evidence: `funmoney_backtest/tests/test_tushare_provider.py`. |
 | same | `fund_daily(ts_code, start_date, end_date)` or per-`trade_date` batch | Raw OHLC/volume/amount retained; empty may be allowed only for delisted/out-of-window symbols, otherwise failure. Broad legacy retry. | SDK fetch semantics; consumer owns backtest schema and point-in-time transforms. Offline fake-client evidence: `funmoney_backtest/tests/test_tushare_provider.py` empty/retry/batch/per-symbol cases. |
@@ -49,8 +49,11 @@ document makes no point-in-time availability claim.
 - Empty responses are endpoint/request policy decisions. Optional enrichment
   calls may return no feature, while required symbol history or factor coverage
   fails closed.
-- Legacy consumers use Pandas/Polars, but the Phase 0 package has no dataframe
-  runtime dependency and performs no provider calls.
+- `funmoney_backtest` is a Polars consumer: its provider result, normalized bar,
+  quality, Parquet, and research contracts use Polars. Pandas appears at the
+  official Tushare response boundary before explicit conversion. OMD core
+  remains dataframe-independent; its Tushare adapter preserves provider-native
+  Pandas and the available Polars conversion remains an optional explicit adapter.
 
 ## Conflict and evidence-gap table
 

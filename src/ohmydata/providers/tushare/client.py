@@ -19,6 +19,7 @@ from ...core.errors import CoverageError, EmptyResponseError, PaginationError, S
 from .endpoints import (
     DailyBasicRequest,
     EmptyPolicy,
+    EtfBasicRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -38,6 +39,7 @@ _KEYS: dict[str, tuple[str, ...]] = {
     "fund_adj": ("ts_code", "trade_date"),
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
     "fund_share": ("ts_code", "trade_date"),
+    "etf_basic": ("ts_code",),
 }
 _NON_NULL_KEYS = {
     **_KEYS,
@@ -45,6 +47,7 @@ _NON_NULL_KEYS = {
     "fund_portfolio": ("ts_code", "end_date", "symbol"),
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
+    "etf_basic": ("ts_code",),
 }
 _UNIQUE_KEYS = {
     **_KEYS,
@@ -53,6 +56,7 @@ _UNIQUE_KEYS = {
     "fund_portfolio": (),
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
+    "etf_basic": ("ts_code",),
 }
 _SORT_KEYS = {
     "fund_div": ("ts_code", "ex_date", "ann_date", "imp_anndate", "pay_date"),
@@ -60,7 +64,13 @@ _SORT_KEYS = {
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
 }
-_CAPS = {"fund_basic": 15000, "fund_daily": 5000, "fund_share": 2000, "daily_basic": 6000}
+_CAPS = {
+    "fund_basic": 15000,
+    "fund_daily": 5000,
+    "fund_share": 2000,
+    "daily_basic": 6000,
+    "etf_basic": 5000,
+}
 
 
 @dataclass(frozen=True, init=False)
@@ -97,6 +107,9 @@ class TushareClient:
         return self._fetch_single(request)
 
     def fetch_fund_basic(self, request: FundBasicRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
+    def fetch_etf_basic(self, request: EtfBasicRequest) -> TushareFetchResult:
         return self._fetch_single(request)
 
     def fetch_fund_daily(self, request: FundDailyRequest) -> TushareFetchResult:

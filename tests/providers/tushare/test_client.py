@@ -23,6 +23,7 @@ from ohmydata.core import (
 from ohmydata.providers.tushare import (
     DailyBasicRequest,
     EmptyPolicy,
+    EtfBasicRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -89,6 +90,10 @@ class Fake:
         self.calls.append(kwargs)
         return self.result
 
+    def etf_basic(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
 
 def client(fake, **kwargs):
     kwargs.setdefault("clock", lambda: datetime(2024, 1, 2, tzinfo=UTC))
@@ -147,6 +152,24 @@ def test_empty_policy_and_validation_errors():
         )
 
 
+def test_etf_basic_empty_policy_and_null_key_validation():
+    fields = ("ts_code", "cname")
+    empty = Fake(pd.DataFrame(columns=fields))
+    allowed = client(empty).fetch_etf_basic(
+        EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=fields)
+    )
+    assert allowed.frame.empty
+    with pytest.raises(EmptyResponseError):
+        client(Fake(pd.DataFrame(columns=fields))).fetch_etf_basic(
+            EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, fields=fields)
+        )
+    null_key = pd.DataFrame({"ts_code": [None], "cname": ["missing"]})
+    with pytest.raises(SchemaMismatchError):
+        client(Fake(null_key)).fetch_etf_basic(
+            EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=fields)
+        )
+
+
 def test_transient_retry_exhaustion_and_permanent_no_retry():
     fake = Fake(daily_frame(), errors=[ConnectionError("network")])
     result = client(
@@ -188,6 +211,34 @@ def test_non_dataframe_and_duplicate_and_cap_failures():
     with pytest.raises(PaginationError):
         client(Fake(basic)).fetch_fund_basic(
             FundBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=("ts_code",))
+        )
+
+
+def test_etf_basic_sorts_validates_keys_cap_and_defensive_copy():
+    fields = ["ts_code", "cname"]
+    source = pd.DataFrame({"ts_code": ["B", "A"], "cname": ["b", "a"]})
+    fake = Fake(source)
+    result = client(fake).fetch_etf_basic(
+        EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, market="E", fields=tuple(fields))
+    )
+    assert fake.calls == [{"market": "E", "fields": "ts_code,cname"}]
+    assert result.frame.ts_code.tolist() == ["A", "B"]
+    assert result.provenance.endpoint == "etf_basic"
+    returned = result.frame
+    returned.loc[0, "cname"] = "changed"
+    assert result.frame.loc[0, "cname"] == "a"
+    with pytest.raises(SchemaMismatchError):
+        client(Fake(pd.DataFrame({"cname": ["a"]}))).fetch_etf_basic(
+            EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=("cname",))
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Fake(pd.DataFrame({"ts_code": ["A", "A"], "cname": ["a", "a"]}))).fetch_etf_basic(
+            EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=tuple(fields))
+        )
+    cap = pd.DataFrame({"ts_code": [f"E{i}" for i in range(5000)], "cname": ["x"] * 5000})
+    with pytest.raises(PaginationError):
+        client(Fake(cap)).fetch_etf_basic(
+            EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=tuple(fields))
         )
 
 

@@ -2,6 +2,7 @@ from .client import TushareClient, TushareFetchResult
 from .endpoints import (
     DailyBasicRequest,
     EmptyPolicy,
+    EtfBasicRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -34,6 +35,7 @@ __all__ = [
     "DividendYieldCoveragePolicy",
     "DividendYieldWeightSource",
     "EmptyPolicy",
+    "EtfBasicRequest",
     "FundAdjustmentRequest",
     "FundBasicRequest",
     "FundDailyRequest",

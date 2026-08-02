@@ -16,6 +16,23 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
 Pandas-backed adapter. Provider tests use fake clients and never call a network.
 
+The optional `ohmydata[polars]` extra provides explicit, eager representation
+adapters:
+
+```python
+from ohmydata.adapters.polars import pandas_to_polars, polars_to_pandas
+
+polars_frame = pandas_to_polars(pandas_frame)
+pandas_frame = polars_to_pandas(polars_frame)
+```
+
+Conversions preserve columns and row order, provider-native values, nulls,
+NaN/infinities, and supported temporal timezones. They do not parse dates,
+rename or sort columns, scale units, deduplicate, impute, or apply consumer
+schemas. Unsupported or potentially lossy dtypes fail with
+`SchemaMismatchError`; the adapter never contacts a provider or reads
+credentials.
+
 ## Phase 2 Tushare adapter (offline and injected)
 
 Pass an already initialized official-client-compatible object. The adapter
@@ -50,6 +67,18 @@ request = FundDailyRequest(
     empty_policy=EmptyPolicy.ERROR, ts_code="FAKE.ETF", start_date="20240101", end_date="20240102"
 )
 result = TushareClient(FakeClient()).fetch_fund_daily(request)
+```
+
+The typed `etf_basic` endpoint preserves Tushare's provider-native metadata and
+requires an explicit empty policy. Its official filters are `ts_code`,
+`index_code`, `list_date`, `list_status`, `exchange`, and `mgr`; `market` is
+forwarded only as a compatibility filter for callers that already use it.
+
+```python
+from ohmydata.providers.tushare import EtfBasicRequest
+
+request = EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, market="E", list_status="L")
+result = TushareClient(FakeClient()).fetch_etf_basic(request)
 ```
 
 Values and nulls retain Tushare's native semantics: fund daily OHLC and

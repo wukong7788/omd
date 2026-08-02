@@ -15,6 +15,11 @@ distribution and import namespace are both `ohmydata`.
 
 ## 2. Source Repositories
 
+The current cross-repository capability and API comparison is maintained in
+[`docs/consumer-capability-matrix.md`](docs/consumer-capability-matrix.md).
+It is an evidence map, not a replacement for this roadmap or provider
+contracts.
+
 Initial extraction evidence comes from:
 
 - `/Users/ron/Documents/funmoney_backtest`
@@ -337,25 +342,32 @@ particular, rolling ETF distribution yield from `fund_div + fund_nav` must
 freeze ex-date/announcement-date availability, revision/deduplication, NAV
 selection, rolling-window, and no-look-ahead rules before implementation.
 
-### Phase 3c — Explicit Polars adapters (planned, not authorized)
+### Phase 3c — Explicit Polars adapters (adapter accepted; consumer parity pending)
 
-- [ ] Add an optional `ohmydata[polars]` extra with a reviewed dependency and
+The detailed draft contract and `funmoney_backtest` shadow-migration gates are
+owned by
+[`docs/plans/phase-3c-polars-and-funmoney-migration.md`](docs/plans/phase-3c-polars-and-funmoney-migration.md).
+`funmoney_backtest` is a Polars consumer; Pandas remains the provider-native
+Tushare/OMD boundary before explicit conversion.
+
+- [x] Add an optional `ohmydata[polars]` extra with a reviewed dependency and
       compatibility range; core and Tushare/Pandas installations must remain
       usable without Polars.
-- [ ] Add explicit adapters under `ohmydata.adapters.polars`; do not make
+- [x] Add explicit adapters under `ohmydata.adapters.polars`; do not make
       implicit Pandas/Polars conversion part of endpoint fetching or recipes.
-- [ ] Preserve column names, ordering, provider-native units, nulls, dates,
+- [x] Preserve column names, ordering, provider-native units, nulls, dates,
       timezones, integer/float behavior, and raw-versus-derived traceability.
-- [ ] Define fail-closed handling for unsupported object values, duplicate
+- [x] Define fail-closed handling for unsupported object values, duplicate
       columns, timezone-aware values, categorical/decimal types, and conversion
       overflow before implementation.
-- [ ] Cover round-trip and one-way conversion with synthetic frames containing
+- [x] Cover round-trip and one-way conversion with synthetic frames containing
       nulls, NaN/infinity, dates, timestamps, large integers, and mixed numeric
       dtypes on Python 3.11 and 3.12.
-- [ ] Add a Pandas/Polars parity test group that feeds the same synthetic
-      fixtures through both paths and compares structure, numeric results, and
-      final signal behavior.
-- [ ] Document the explicit boundary for `funmoney_backtest`: its PIT alignment,
+- [ ] Add a Pandas/Polars parity test group that compares the provider-native
+      Pandas reference with the explicitly adapted Polars representation, then
+      compares the OMD-backed path with funmoney's existing Polars outputs and
+      final signal behavior using the same synthetic fixtures.
+- [x] Document the explicit boundary for `funmoney_backtest`: its PIT alignment,
       canonical sessions, Polars dataset schemas, storage, and feature logic
       remain consumer-owned after conversion.
 
@@ -386,10 +398,11 @@ unit policy; statistical ratios may use floating point only with the frozen
 tolerance. The test report must show structure, numeric, missingness, and signal
 comparisons separately.
 
-This phase is roadmap-only. It requires a separate reviewed contract and is not
-authorized by the Phase 3b implementation or its acceptance. No Polars
-dependency, adapter module, public export, lockfile change, or consumer migration
-may be added until that contract is frozen.
+The OMD adapter slice was accepted on 2026-08-01 after offline Python 3.11 and
+3.12 validation. The distinct typed `etf_basic` endpoint slice was accepted on
+2026-08-02. Consumer parity, live shadows, cutover, and legacy removal remain
+pending under the separate reviewed migration gates. Neither accepted OMD-only
+slice authorizes consumer or A-share live migration.
 
 ### Phase 4 — Consumer shadow migrations
 
@@ -430,8 +443,10 @@ For every consumer:
       after offline and live evidence were accepted. Stock Notify retains all
       consumer-owned selection, PIT/as-of, fee, storage, and publication logic.
 
-`funmoney_backtest` production migration additionally requires unchanged
-backtest/signal behavior and its repository-specific gates.
+`funmoney_backtest` migration additionally requires the Phase 3c/4a gates,
+including use of the accepted typed `etf_basic` contract for `all_symbols`,
+explicit preservation of its current adjustment-factor tolerance during shadow parity, and unchanged
+backtest/signal behavior under its repository-specific checks.
 
 ## 10. Public Repository, Versioning, and Distribution
 

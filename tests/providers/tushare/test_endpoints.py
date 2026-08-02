@@ -8,6 +8,7 @@ from ohmydata.providers import tushare
 from ohmydata.providers.tushare import (
     DailyBasicRequest,
     EmptyPolicy,
+    EtfBasicRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -42,6 +43,7 @@ def test_empty_policy_rejects_raw_strings():
     [
         lambda: TradeCalendarRequest(),
         lambda: FundBasicRequest(),
+        lambda: EtfBasicRequest(),
         lambda: FundDailyRequest(ts_code="FAKE"),
         lambda: FundAdjustmentRequest(ts_code="FAKE"),
         lambda: FundNavRequest(ts_code="FAKE"),
@@ -62,6 +64,7 @@ def test_empty_policy_is_required(factory):
     [
         lambda: TradeCalendarRequest(empty_policy="ALLOW"),
         lambda: FundBasicRequest(empty_policy="ALLOW"),
+        lambda: EtfBasicRequest(empty_policy="ALLOW"),
         lambda: FundDailyRequest(empty_policy="ALLOW", ts_code="FAKE"),
         lambda: FundAdjustmentRequest(empty_policy="ALLOW", ts_code="FAKE"),
         lambda: FundNavRequest(empty_policy="ALLOW", ts_code="FAKE"),
@@ -97,6 +100,46 @@ def test_request_validation_and_explicit_fields():
     assert request.spec.fields == ("ts_code", "trade_date", "adj_factor")
 
 
+def test_etf_basic_spec_defaults_filters_and_date_validation():
+    request = EtfBasicRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        index_code="000300.SH",
+        list_date="20240101",
+        list_status="L",
+        exchange="SH",
+        mgr="FAKE_MANAGER",
+        market="E",
+    )
+    assert request.spec.endpoint == "etf_basic"
+    assert request.spec.fields == (
+        "ts_code",
+        "csname",
+        "extname",
+        "cname",
+        "index_code",
+        "index_name",
+        "setup_date",
+        "list_date",
+        "list_status",
+        "exchange",
+        "mgr_name",
+        "custod_name",
+        "mgt_fee",
+        "etf_type",
+    )
+    assert request.spec.effective_parameters == {
+        "index_code": "000300.SH",
+        "list_date": "20240101",
+        "list_status": "L",
+        "exchange": "SH",
+        "mgr": "FAKE_MANAGER",
+        "market": "E",
+    }
+    with pytest.raises(ValueError):
+        EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, list_date="2024-01-01")
+    assert EtfBasicRequest(empty_policy=EmptyPolicy.ALLOW, fields=("cname",)).fields == ("cname",)
+
+
 def test_public_exports_are_exact_and_no_arbitrary_fetch():
     assert set(tushare.__all__) == {
         "AdjustedEtfBarsRequest",
@@ -106,6 +149,7 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "DividendYieldWeightSource",
         "DailyBasicRequest",
         "EmptyPolicy",
+        "EtfBasicRequest",
         "FundAdjustmentRequest",
         "FundBasicRequest",
         "FundDailyRequest",

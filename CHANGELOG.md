@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.5 — 2026-08-02
+
+- Added the optional, representation-only Pandas↔Polars adapter with eager
+  conversions, narrow dtype support, and fail-closed schema validation.
+- Added the typed Tushare `etf_basic` endpoint with explicit filters, stable
+  key validation and ordering, empty policy, provenance, and cap detection.
+
 ## 0.0.4 — 2026-08-01
 
 - Added the explicit `NORMALIZE_SUPPORTED` weighted-dividend-yield coverage

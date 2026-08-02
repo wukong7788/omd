@@ -151,6 +151,56 @@ class FundBasicRequest(_BaseRequest):
         return self._spec({"ts_code": self.ts_code, "market": self.market, "status": self.status})
 
 
+_ETF_BASIC_FIELDS = (
+    "ts_code",
+    "csname",
+    "extname",
+    "cname",
+    "index_code",
+    "index_name",
+    "setup_date",
+    "list_date",
+    "list_status",
+    "exchange",
+    "mgr_name",
+    "custod_name",
+    "mgt_fee",
+    "etf_type",
+)
+
+
+@dataclass(frozen=True)
+class EtfBasicRequest(_BaseRequest):
+    ts_code: str | None = None
+    index_code: str | None = None
+    list_date: str | None = None
+    list_status: str | None = None
+    exchange: str | None = None
+    mgr: str | None = None
+    market: str | None = None
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="etf_basic")
+
+    def __post_init__(self) -> None:
+        _validate_empty(self.empty_policy)
+        object.__setattr__(self, "list_date", _date(self.list_date))
+        object.__setattr__(self, "fields", _fields(self.fields, _ETF_BASIC_FIELDS))
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "index_code": self.index_code,
+                "list_date": self.list_date,
+                "list_status": self.list_status,
+                "exchange": self.exchange,
+                "mgr": self.mgr,
+                "market": self.market,
+            }
+        )
+
+
 @dataclass(frozen=True)
 class _FundDateRequest(_BaseRequest):
     ts_code: str | None = None
