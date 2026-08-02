@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the typed, injected-client Tushare stock `dividend` endpoint with
+  provider-native revision preservation, explicit selectors, fields, and
+  empty-result policy.
+
 - Added provider-independent `AvailabilityEvidence` with explicit source,
   observation, UTC normalization, and conservative point-in-time semantics.
 

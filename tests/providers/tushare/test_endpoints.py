@@ -19,6 +19,7 @@ from ohmydata.providers.tushare import (
     IndexWeightRequest,
     StockAdjustmentRequest,
     StockDailyRequest,
+    StockDividendRequest,
     TradeCalendarRequest,
 )
 
@@ -86,6 +87,69 @@ def test_stock_request_validation(kwargs):
 def test_stock_public_exports():
     assert StockDailyRequest is tushare.StockDailyRequest
     assert StockAdjustmentRequest is tushare.StockAdjustmentRequest
+    assert StockDividendRequest is tushare.StockDividendRequest
+
+
+def test_stock_dividend_request_selectors_fields_and_validation():
+    request = StockDividendRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        ts_code=" 000001.SZ ",
+        ann_date="20240102",
+        record_date="20240103",
+        ex_date="20240104",
+        imp_ann_date="20240105",
+    )
+    assert request.spec.effective_parameters == {
+        "ts_code": " 000001.SZ ",
+        "ann_date": "20240102",
+        "record_date": "20240103",
+        "ex_date": "20240104",
+        "imp_ann_date": "20240105",
+    }
+    assert request.fields == (
+        "ts_code",
+        "end_date",
+        "ann_date",
+        "div_proc",
+        "stk_div",
+        "stk_bo_rate",
+        "stk_co_rate",
+        "cash_div",
+        "cash_div_tax",
+        "record_date",
+        "ex_date",
+        "pay_date",
+        "div_listdate",
+        "imp_ann_date",
+        "base_date",
+        "base_share",
+    )
+    assert StockDividendRequest(
+        empty_policy=EmptyPolicy.ALLOW, ex_date="20240101", fields=("cash_div", "ts_code")
+    ).fields == ("cash_div", "ts_code")
+    for kwargs in ({}, {"ts_code": ""}, {"ts_code": " "}, {"ann_date": "2024-01-01"}):
+        with pytest.raises(ValueError):
+            StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, **kwargs)
+    with pytest.raises(ValueError):
+        StockDividendRequest(
+            empty_policy=EmptyPolicy.ALLOW, ex_date="20240101", fields=("cash_div",)
+        )
+
+
+@pytest.mark.parametrize(
+    "selector", ["ts_code", "ann_date", "record_date", "ex_date", "imp_ann_date"]
+)
+def test_stock_dividend_each_selector_is_forwardable(selector):
+    value = "A" if selector == "ts_code" else "20240101"
+    request = StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, **{selector: value})
+    assert request.spec.effective_parameters == {selector: value}
+
+
+def test_stock_dividend_requires_explicit_empty_policy():
+    with pytest.raises(TypeError):
+        StockDividendRequest(ts_code="A")
+    with pytest.raises(TypeError):
+        StockDividendRequest(empty_policy="ALLOW", ts_code="A")
 
 
 @pytest.mark.parametrize("request_type", [StockDailyRequest, StockAdjustmentRequest])
@@ -219,6 +283,7 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "TradeCalendarRequest",
         "StockAdjustmentRequest",
         "StockDailyRequest",
+        "StockDividendRequest",
         "TushareClient",
         "TushareFetchResult",
         "WeightedDividendYieldResult",

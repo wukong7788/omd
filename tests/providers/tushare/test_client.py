@@ -34,6 +34,7 @@ from ohmydata.providers.tushare import (
     IndexWeightRequest,
     StockAdjustmentRequest,
     StockDailyRequest,
+    StockDividendRequest,
     TradeCalendarRequest,
     TushareClient,
 )
@@ -101,6 +102,10 @@ class Fake:
         return self.result
 
     def etf_basic(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+    def dividend(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
 
@@ -268,6 +273,84 @@ def test_stock_daily_defensive_copies():
     returned.loc[0, "close"] = 88
     assert result.frame.loc[0, "close"] != 88
     assert result.frame.loc[0, "close"] != 99
+
+
+def test_stock_dividend_preserves_revisions_duplicates_nulls_and_native_values():
+    fields = StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, ann_date="20240101").fields
+    source = pd.DataFrame(
+        {
+            "ts_code": ["A", "A", "A"],
+            "end_date": ["2023", "2023", "2023"],
+            "ann_date": ["20240101"] * 3,
+            "div_proc": ["实施", "预案", "预案"],
+            "stk_div": [None, 0.1, 0.1],
+            "stk_bo_rate": [None, 1.0, 1.0],
+            "stk_co_rate": [None, 0.0, 0.0],
+            "cash_div": [1.2, 0.0, 0.0],
+            "cash_div_tax": [1.0, None, None],
+            "record_date": [None] * 3,
+            "ex_date": ["20240110", "20240111", "20240111"],
+            "pay_date": [None] * 3,
+            "div_listdate": [None] * 3,
+            "imp_ann_date": ["20240109", "20240108", "20240108"],
+            "base_date": [None] * 3,
+            "base_share": [123.4, 10.0, 10.0],
+        }
+    )
+    source = source.iloc[[1, 0, 2]].reset_index(drop=True)
+    fake = Fake(source)
+    result = client(fake).fetch_stock_dividend(
+        StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, ann_date="20240101")
+    )
+    assert fake.calls == [{"ann_date": "20240101", "fields": ",".join(fields)}]
+    assert result.frame[["ts_code", "div_proc", "imp_ann_date", "cash_div"]].to_records(
+        index=False
+    ).tolist() == [
+        ("A", "预案", "20240108", 0.0),
+        ("A", "预案", "20240108", 0.0),
+        ("A", "实施", "20240109", 1.2),
+    ]
+    assert len(result.frame) == 3
+    assert pd.isna(result.frame.loc[0, "record_date"])
+    assert result.frame.loc[2, "base_share"] == 123.4
+
+
+def test_stock_dividend_no_duplicate_or_cap_claim_and_failures():
+    request = StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+    fields = list(request.fields)
+    row: dict[str, object] = {field: None for field in fields}
+    row["ts_code"] = "A"
+    duplicate = pd.DataFrame([row, row])
+    assert len(client(Fake(duplicate)).fetch_stock_dividend(request).frame) == 2
+    many = pd.DataFrame({field: ["A"] * 6000 for field in fields})
+    assert len(client(Fake(many)).fetch_stock_dividend(request).frame) == 6000
+    with pytest.raises(SchemaMismatchError):
+        client(Fake(pd.DataFrame({field: [None] for field in fields}))).fetch_stock_dividend(
+            request
+        )
+    with pytest.raises(SchemaMismatchError):
+        client(Fake("not a dataframe")).fetch_stock_dividend(request)
+    with pytest.raises(SchemaMismatchError):
+        client(Fake(many.drop(columns=[fields[-1]]))).fetch_stock_dividend(request)
+    with pytest.raises(SchemaMismatchError):
+        client(object()).fetch_stock_dividend(request)
+    empty = pd.DataFrame(columns=fields)
+    assert client(Fake(empty)).fetch_stock_dividend(request).frame.empty
+    with pytest.raises(EmptyResponseError):
+        client(Fake(empty)).fetch_stock_dividend(
+            StockDividendRequest(empty_policy=EmptyPolicy.ERROR, ts_code="A")
+        )
+
+
+def test_stock_dividend_defensive_copy():
+    request = StockDividendRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+    source = pd.DataFrame({field: [None] for field in request.fields})
+    source["ts_code"] = ["A"]
+    result = client(Fake(source)).fetch_stock_dividend(request)
+    source.loc[0, "ts_code"] = "B"
+    returned = result.frame
+    returned.loc[0, "ts_code"] = "C"
+    assert result.frame.loc[0, "ts_code"] == "A"
 
 
 def test_empty_policy_and_validation_errors():

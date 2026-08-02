@@ -86,6 +86,12 @@ request = EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, market="E", list_statu
 result = TushareClient(FakeClient()).fetch_etf_basic(request)
 ```
 
+Typed stock dividend events are available through `StockDividendRequest` and
+`fetch_stock_dividend`. Select at least one of `ts_code`, `ann_date`,
+`record_date`, `ex_date`, or `imp_ann_date`; selectors may be combined. The
+response preserves provider-native dates, process states, values, units, nulls,
+and revision or duplicate rows, and does not infer point-in-time availability.
+
 Values and nulls retain Tushare's native semantics: fund daily OHLC and
 `change`/`pct_chg` are provider values, `vol` is in hands, and `amount` is in
 thousand yuan. Empty responses must be selected explicitly with

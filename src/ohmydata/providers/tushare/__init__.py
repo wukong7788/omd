@@ -13,6 +13,7 @@ from .endpoints import (
     IndexWeightRequest,
     StockAdjustmentRequest,
     StockDailyRequest,
+    StockDividendRequest,
     TradeCalendarRequest,
 )
 from .errors import classify_tushare_exception
@@ -48,6 +49,7 @@ __all__ = [
     "IndexWeightRequest",
     "StockAdjustmentRequest",
     "StockDailyRequest",
+    "StockDividendRequest",
     "TradeCalendarRequest",
     "TushareClient",
     "TushareFetchResult",

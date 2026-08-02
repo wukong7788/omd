@@ -30,6 +30,7 @@ from .endpoints import (
     IndexWeightRequest,
     StockAdjustmentRequest,
     StockDailyRequest,
+    StockDividendRequest,
     TradeCalendarRequest,
 )
 from .errors import classify_tushare_exception
@@ -44,6 +45,7 @@ _KEYS: dict[str, tuple[str, ...]] = {
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
     "fund_share": ("ts_code", "trade_date"),
     "etf_basic": ("ts_code",),
+    "dividend": ("ts_code",),
 }
 _NON_NULL_KEYS = {
     **_KEYS,
@@ -52,6 +54,7 @@ _NON_NULL_KEYS = {
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
     "etf_basic": ("ts_code",),
+    "dividend": ("ts_code",),
 }
 _UNIQUE_KEYS = {
     **_KEYS,
@@ -61,12 +64,31 @@ _UNIQUE_KEYS = {
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
     "etf_basic": ("ts_code",),
+    "dividend": (),
 }
 _SORT_KEYS = {
     "fund_div": ("ts_code", "ex_date", "ann_date", "imp_anndate", "pay_date"),
     "fund_portfolio": ("ts_code", "end_date", "ann_date", "symbol"),
     "daily_basic": ("ts_code", "trade_date"),
     "index_weight": ("index_code", "con_code", "trade_date"),
+    "dividend": (
+        "ts_code",
+        "end_date",
+        "ann_date",
+        "imp_ann_date",
+        "record_date",
+        "ex_date",
+        "pay_date",
+        "div_listdate",
+        "div_proc",
+        "base_date",
+        "stk_div",
+        "stk_bo_rate",
+        "stk_co_rate",
+        "cash_div",
+        "cash_div_tax",
+        "base_share",
+    ),
 }
 _CAPS = {
     "fund_basic": 15000,
@@ -125,6 +147,9 @@ class TushareClient:
         return self._fetch_single(request)
 
     def fetch_stock_adjustment(self, request: StockAdjustmentRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
+    def fetch_stock_dividend(self, request: StockDividendRequest) -> TushareFetchResult:
         return self._fetch_single(request)
 
     def fetch_fund_adjustment(self, request: FundAdjustmentRequest) -> TushareFetchResult:

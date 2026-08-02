@@ -498,6 +498,63 @@ class FundDividendRequest(_BaseRequest):
         )
 
 
+_STOCK_DIVIDEND_FIELDS = (
+    "ts_code",
+    "end_date",
+    "ann_date",
+    "div_proc",
+    "stk_div",
+    "stk_bo_rate",
+    "stk_co_rate",
+    "cash_div",
+    "cash_div_tax",
+    "record_date",
+    "ex_date",
+    "pay_date",
+    "div_listdate",
+    "imp_ann_date",
+    "base_date",
+    "base_share",
+)
+
+
+@dataclass(frozen=True)
+class StockDividendRequest(_BaseRequest):
+    ts_code: str | None = None
+    ann_date: str | None = None
+    record_date: str | None = None
+    ex_date: str | None = None
+    imp_ann_date: str | None = None
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="dividend")
+
+    def __post_init__(self) -> None:
+        _validate_empty(self.empty_policy)
+        selectors = (self.ts_code, self.ann_date, self.record_date, self.ex_date, self.imp_ann_date)
+        if not any(value is not None for value in selectors):
+            raise ValueError("at least one stock dividend selector is required")
+        if self.ts_code is not None:
+            _nonempty(self.ts_code, "ts_code")
+        for name in ("ann_date", "record_date", "ex_date", "imp_ann_date"):
+            object.__setattr__(self, name, _date(getattr(self, name)))
+        selected_fields = _fields(self.fields, _STOCK_DIVIDEND_FIELDS)
+        if "ts_code" not in selected_fields:
+            raise ValueError("fields must include ts_code")
+        object.__setattr__(self, "fields", selected_fields)
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "ann_date": self.ann_date,
+                "record_date": self.record_date,
+                "ex_date": self.ex_date,
+                "imp_ann_date": self.imp_ann_date,
+            }
+        )
+
+
 @dataclass(frozen=True)
 class FundPortfolioRequest(_BaseRequest):
     ts_code: str | None = None
