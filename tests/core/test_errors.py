@@ -17,6 +17,9 @@ def test_core_exports_are_explicit() -> None:
     expected = {
         "AuthenticationError",
         "AttemptRecord",
+        "AvailabilityBasis",
+        "AvailabilityEvidence",
+        "AvailabilityPrecision",
         "CoverageError",
         "EmptyDisposition",
         "EmptyResponseError",

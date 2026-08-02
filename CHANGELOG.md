@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added provider-independent `AvailabilityEvidence` with explicit source,
+  observation, UTC normalization, and conservative point-in-time semantics.
+
 - Added immutable provider-independent snapshot observation receipts,
   exact-payload fact versions, and first-observed timestamp semantics while
   preserving legacy snapshot manifests and replay APIs.

@@ -170,6 +170,12 @@ ETF characterization is test-only and uses synthetic JSON fixtures.
 
 Phase 1 core is offline and explicit:
 
+Availability evidence is represented by the dataframe-free
+`AvailabilityEvidence` value object. Source-declared timestamps are the only
+evidence marked `pit_proven`; inferred schedules, date-only declarations, and
+provider-first-observed fallbacks remain conservative. Snapshot construction
+uses validated observation receipts and normalizes datetimes to UTC.
+
 ```python
 from datetime import UTC, datetime
 from pathlib import Path

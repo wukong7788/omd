@@ -1,3 +1,4 @@
+from .availability import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision
 from .errors import (
     AuthenticationError,
     CoverageError,
@@ -29,6 +30,9 @@ from .specs import RequestSpec
 __all__ = [
     "AttemptRecord",
     "AuthenticationError",
+    "AvailabilityBasis",
+    "AvailabilityEvidence",
+    "AvailabilityPrecision",
     "CoverageError",
     "EmptyDisposition",
     "EmptyResponseError",
