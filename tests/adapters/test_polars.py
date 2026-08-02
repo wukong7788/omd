@@ -79,6 +79,46 @@ def test_empty_supported_dtypes_are_allowed() -> None:
     assert result.shape == (0, 3)
 
 
+def test_empty_object_policy_defaults_to_error() -> None:
+    source = pd.DataFrame({"x": pd.Series([], dtype=object)})
+    with pytest.raises(SchemaMismatchError, match="empty object"):
+        pandas_to_polars(source)
+
+
+def test_empty_object_policy_string_converts_zero_rows_to_string() -> None:
+    source = pd.DataFrame({"x": pd.Series([], dtype=object)})
+    result = pandas_to_polars(source, empty_object_policy="string")
+    assert result.shape == (0, 1)
+    assert result.dtypes == [pl.String]
+
+
+def test_empty_object_policy_string_preserves_all_nulls_and_source() -> None:
+    source = pd.DataFrame({"x": pd.Series([None, pd.NA], dtype=object)})
+    original_dtype = source["x"].dtype
+    result = pandas_to_polars(source, empty_object_policy="string")
+    assert result.shape == (2, 1)
+    assert result.dtypes == [pl.String]
+    assert result["x"].to_list() == [None, None]
+    assert source["x"].dtype == original_dtype
+    assert source["x"].tolist() == [None, pd.NA]
+
+
+def test_empty_object_policy_string_still_rejects_populated_objects() -> None:
+    frames = [
+        pd.DataFrame({"x": ["a", 1]}),
+        pd.DataFrame({"x": [[1, 2]]}),
+        pd.DataFrame({"x": [decimal.Decimal("1.20")]}),
+    ]
+    for frame in frames:
+        with pytest.raises(SchemaMismatchError):
+            pandas_to_polars(frame, empty_object_policy="string")
+
+
+def test_empty_object_policy_rejects_unknown_values_before_conversion() -> None:
+    with pytest.raises(ValueError, match="empty_object_policy"):
+        pandas_to_polars(object(), empty_object_policy="guess")
+
+
 @pytest.mark.parametrize(
     "frame",
     [

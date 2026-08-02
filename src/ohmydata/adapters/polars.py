@@ -17,7 +17,16 @@ def _missing() -> ImportError:
     return ImportError("install the optional dataframe dependencies with `ohmydata[polars]`")
 
 
-def _pandas_supported(series: Any, pd: Any) -> None:
+def _object_has_non_missing_values(series: Any, pd: Any) -> bool:
+    for value in series.tolist():
+        missing = pd.isna(value)
+        if getattr(missing, "ndim", 0) == 0 and bool(missing):
+            continue
+        return True
+    return False
+
+
+def _pandas_supported(series: Any, pd: Any, *, allow_empty_object: bool = False) -> None:
     dtype = series.dtype
     if isinstance(dtype, (pd.CategoricalDtype, pd.PeriodDtype)):
         raise SchemaMismatchError(f"unsupported Pandas dtype {dtype}")
@@ -43,16 +52,16 @@ def _pandas_supported(series: Any, pd: Any) -> None:
     if pd.api.types.is_string_dtype(dtype) and not pd.api.types.is_object_dtype(dtype):
         return
     if pd.api.types.is_object_dtype(dtype):
+        if not _object_has_non_missing_values(series, pd):
+            if allow_empty_object:
+                return
+            raise SchemaMismatchError("empty object dtype is unsupported")
         values: list[Any] = []
         for value in series.tolist():
-            if value is None:
-                continue
             missing = pd.isna(value)
             if getattr(missing, "ndim", 0) == 0 and bool(missing):
                 continue
             values.append(value)
-        if not values:
-            raise SchemaMismatchError("empty object dtype is unsupported")
         kinds: set[type[Any]] = {type(value) for value in values}
         if kinds <= {str} or kinds <= {bytes} or kinds <= {_dt.date}:
             return
@@ -62,8 +71,10 @@ def _pandas_supported(series: Any, pd: Any) -> None:
     raise SchemaMismatchError(f"unsupported Pandas dtype {dtype}")
 
 
-def pandas_to_polars(frame: Any) -> Any:
+def pandas_to_polars(frame: Any, *, empty_object_policy: Any = "error") -> Any:
     """Convert a Pandas DataFrame to an independent eager Polars DataFrame."""
+    if not isinstance(empty_object_policy, str) or empty_object_policy not in {"error", "string"}:
+        raise ValueError("empty_object_policy must be 'error' or 'string'")
     try:
         import pandas as pd
         import polars as pl
@@ -75,10 +86,24 @@ def pandas_to_polars(frame: Any) -> Any:
         raise TypeError("pandas_to_polars requires a pandas.DataFrame")
     if not frame.columns.is_unique:
         raise SchemaMismatchError("duplicate column names")
+    conversion_frame = frame
+    if empty_object_policy == "string":
+        empty_object_columns = [
+            name
+            for name in frame.columns
+            if pd.api.types.is_object_dtype(frame[name].dtype)
+            and not _object_has_non_missing_values(frame[name], pd)
+        ]
+        if empty_object_columns:
+            conversion_frame = frame.copy()
+            for name in empty_object_columns:
+                conversion_frame[name] = conversion_frame[name].astype("string")
     for name in frame.columns:
-        _pandas_supported(frame[name], pd)
+        _pandas_supported(
+            conversion_frame[name], pd, allow_empty_object=empty_object_policy == "string"
+        )
     try:
-        result = pl.from_pandas(frame, nan_to_null=False)
+        result = pl.from_pandas(conversion_frame, nan_to_null=False)
     except (TypeError, ValueError, OverflowError, RuntimeError) as exc:
         raise SchemaMismatchError(
             f"Pandas-to-Polars conversion failed: {type(exc).__name__}"

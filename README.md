@@ -23,6 +23,8 @@ adapters:
 from ohmydata.adapters.polars import pandas_to_polars, polars_to_pandas
 
 polars_frame = pandas_to_polars(pandas_frame)
+# For validated empty/all-null Pandas object columns, opt into String:
+polars_frame = pandas_to_polars(pandas_frame, empty_object_policy="string")
 pandas_frame = polars_to_pandas(polars_frame)
 ```
 
@@ -31,7 +33,10 @@ NaN/infinities, and supported temporal timezones. They do not parse dates,
 rename or sort columns, scale units, deduplicate, impute, or apply consumer
 schemas. Unsupported or potentially lossy dtypes fail with
 `SchemaMismatchError`; the adapter never contacts a provider or reads
-credentials.
+credentials. The default `empty_object_policy="error"` rejects ambiguous
+empty object columns; the explicit `"string"` policy casts only empty/all-null
+object columns to nullable Pandas strings before conversion and never changes
+populated object columns or imputes missing values.
 
 ## Phase 2 Tushare adapter (offline and injected)
 

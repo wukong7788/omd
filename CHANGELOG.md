@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.6 — 2026-08-02
+
+- Added an explicit `empty_object_policy` to the Pandas→Polars adapter. The
+  default remains fail-closed; callers may opt into nullable Polars `String`
+  columns for empty or all-null Pandas `object` columns.
+
 ## 0.0.5 — 2026-08-02
 
 - Added the optional, representation-only Pandas↔Polars adapter with eager
