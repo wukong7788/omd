@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened Tushare `index_weight` selectors and response validation: exact or
+  complete single-month requests, requested-index/date scope checks, stable
+  identity ordering, and provider-native weight preservation.
+
 - Added the typed, injected-client Tushare stock `dividend` endpoint with
   provider-native revision preservation, explicit selectors, fields, and
   empty-result policy.

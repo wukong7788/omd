@@ -398,7 +398,12 @@ def test_phase2b_index_weight_selector_matrix_and_default_fields():
         {},
         {"trade_date": "20240101", "start_date": "20240101", "end_date": "20240131"},
         {"start_date": "20240101"},
+        {"end_date": "20240131"},
+        {"trade_date": "20240101", "start_date": "20240101"},
+        {"trade_date": "20240101", "end_date": "20240131"},
         {"start_date": "20240101", "end_date": "20240201"},
+        {"start_date": "20240132", "end_date": "20240131"},
+        {"trade_date": "20240230"},
         {"trade_date": "2024-01-01"},
     ):
         with pytest.raises(ValueError):
@@ -414,3 +419,10 @@ def test_phase2b_custom_fields_preserve_order_and_required_keys():
         DailyBasicRequest(
             empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=("ts_code", "ts_code")
         )
+    index = IndexWeightRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        index_code="I",
+        trade_date="20240101",
+        fields=("weight", "trade_date", "index_code", "con_code"),
+    )
+    assert index.fields == ("weight", "trade_date", "index_code", "con_code")

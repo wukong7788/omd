@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from ...core import (
@@ -52,7 +53,7 @@ _NON_NULL_KEYS = {
     "fund_div": ("ts_code",),
     "fund_portfolio": ("ts_code", "end_date", "symbol"),
     "daily_basic": ("ts_code", "trade_date"),
-    "index_weight": ("index_code", "con_code", "trade_date"),
+    "index_weight": ("index_code", "trade_date", "con_code"),
     "etf_basic": ("ts_code",),
     "dividend": ("ts_code",),
 }
@@ -62,7 +63,7 @@ _UNIQUE_KEYS = {
     "fund_div": (),
     "fund_portfolio": (),
     "daily_basic": ("ts_code", "trade_date"),
-    "index_weight": ("index_code", "con_code", "trade_date"),
+    "index_weight": ("index_code", "trade_date", "con_code"),
     "etf_basic": ("ts_code",),
     "dividend": (),
 }
@@ -70,7 +71,7 @@ _SORT_KEYS = {
     "fund_div": ("ts_code", "ex_date", "ann_date", "imp_anndate", "pay_date"),
     "fund_portfolio": ("ts_code", "end_date", "ann_date", "symbol"),
     "daily_basic": ("ts_code", "trade_date"),
-    "index_weight": ("index_code", "con_code", "trade_date"),
+    "index_weight": ("index_code", "trade_date", "con_code"),
     "dividend": (
         "ts_code",
         "end_date",
@@ -182,6 +183,8 @@ class TushareClient:
         raw, attempts = self._invoke(method, parameters)
         frame = self._validate_frame(raw, request)
         self._check_empty(frame, request.empty_policy)
+        if request.endpoint == "index_weight" and not frame.empty:
+            self._validate_index_weight_scope(frame, request)
         frame = self._sort_and_validate(frame, request)
         if isinstance(request, FundBasicRequest) and request.required_ts_codes:
             present = set(frame["ts_code"].tolist())
@@ -267,6 +270,30 @@ class TushareClient:
     def _check_empty(frame: Any, policy: EmptyPolicy) -> None:
         if frame.empty and policy is EmptyPolicy.ERROR:
             raise EmptyResponseError("empty response")
+
+    @staticmethod
+    def _validate_index_weight_scope(frame: Any, request: IndexWeightRequest) -> None:
+        if (frame["index_code"] != request.index_code).any():
+            raise SchemaMismatchError("response index_code is outside request scope")
+        dates = frame["trade_date"]
+        for value in dates.tolist():
+            if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                raise SchemaMismatchError("response trade_date is malformed")
+            try:
+                date(int(value[:4]), int(value[4:6]), int(value[6:]))
+            except ValueError as exc:
+                raise SchemaMismatchError("response trade_date is malformed") from exc
+        if request.trade_date is not None:
+            if (dates != request.trade_date).any():
+                raise SchemaMismatchError("response trade_date is outside request scope")
+            return
+        assert request.start_date is not None and request.end_date is not None
+        try:
+            out_of_range = (dates < request.start_date) | (dates > request.end_date)
+        except (TypeError, ValueError) as exc:
+            raise SchemaMismatchError("response trade_date is malformed") from exc
+        if out_of_range.any():
+            raise SchemaMismatchError("response trade_date is outside request range")
 
     @staticmethod
     def _sort_and_validate(frame: Any, request: Any) -> Any:

@@ -20,6 +20,7 @@ from ohmydata.core import (
     SchemaMismatchError,
     TransientProviderError,
 )
+from ohmydata.core.snapshot import SnapshotStore
 from ohmydata.providers.tushare import (
     DailyBasicRequest,
     EmptyPolicy,
@@ -1136,7 +1137,154 @@ def test_phase2b_sorting_duplicates_and_native_values():
     assert w.frame.con_code.tolist() == ["A", "B"] and w.frame.weight.tolist() == [1.25, 2.5]
 
 
-def test_phase2b_duplicate_rejection_and_daily_cap():
+@pytest.mark.parametrize(
+    "req, rows",
+    [
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW, index_code="I", trade_date="20240101"
+            ),
+            [("OTHER", "A", "20240101", 1.0)],
+        ),
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW, index_code="I", trade_date="20240101"
+            ),
+            [("I", "A", "20240102", 1.0)],
+        ),
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                index_code="I",
+                start_date="20240101",
+                end_date="20240131",
+            ),
+            [("I", "A", "20231231", 1.0)],
+        ),
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                index_code="I",
+                start_date="20240101",
+                end_date="20240131",
+            ),
+            [("I", "A", "20240201", 1.0)],
+        ),
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                index_code="I",
+                start_date="20240101",
+                end_date="20240131",
+            ),
+            [("I", "A", "2024011X", 1.0)],
+        ),
+        (
+            IndexWeightRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                index_code="I",
+                start_date="20240101",
+                end_date="20240131",
+            ),
+            [("I", "A", 20240115, 1.0)],
+        ),
+    ],
+)
+def test_phase2b_index_weight_response_scope_is_fail_closed(req, rows):
+    class Provider:
+        def index_weight(self, **kwargs):
+            return pd.DataFrame(rows, columns=PHASE2B_FIELDS["index_weight"])
+
+    with pytest.raises(SchemaMismatchError):
+        client(Provider()).fetch_index_weight(req)
+
+
+def test_phase2b_index_weight_scope_identity_order_and_native_nonfinite_values():
+    class Provider:
+        def index_weight(self, **kwargs):
+            return pd.DataFrame(
+                {
+                    "index_code": ["I", "I", "I"],
+                    "con_code": ["B", "A", "C"],
+                    "trade_date": ["20240102", "20240101", "20240101"],
+                    "weight": [float("nan"), None, float("inf")],
+                }
+            )
+
+    result = client(Provider()).fetch_index_weight(
+        IndexWeightRequest(
+            empty_policy=EmptyPolicy.ALLOW,
+            index_code="I",
+            start_date="20240101",
+            end_date="20240131",
+        )
+    )
+    assert list(zip(result.frame.trade_date, result.frame.con_code)) == [
+        ("20240101", "A"),
+        ("20240101", "C"),
+        ("20240102", "B"),
+    ]
+    assert pd.isna(result.frame.weight.iloc[0])
+    assert result.frame.weight.iloc[1] == float("inf")
+    assert pd.isna(result.frame.weight.iloc[2])
+
+
+@pytest.mark.parametrize("missing", ["index_code", "con_code", "trade_date"])
+def test_phase2b_index_weight_custom_fields_require_all_identity_columns(missing):
+    fields = [field for field in PHASE2B_FIELDS["index_weight"] if field != missing]
+    request = IndexWeightRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        index_code="I",
+        trade_date="20240101",
+        fields=tuple(fields),
+    )
+    with pytest.raises(SchemaMismatchError):
+        client(object()).fetch_index_weight(request)
+
+
+def test_phase2b_index_weight_snapshot_revisions_remain_distinct(tmp_path):
+    frames = [
+        pd.DataFrame(
+            {"index_code": ["I"], "con_code": ["A"], "trade_date": ["20240101"], "weight": [1.0]}
+        ),
+        pd.DataFrame(
+            {"index_code": ["I"], "con_code": ["A"], "trade_date": ["20240101"], "weight": [2.0]}
+        ),
+    ]
+
+    class Provider:
+        def __init__(self):
+            self.i = 0
+
+        def index_weight(self, **kwargs):
+            frame = frames[self.i]
+            self.i += 1
+            return frame
+
+    request = IndexWeightRequest(
+        empty_policy=EmptyPolicy.ALLOW, index_code="I", trade_date="20240101"
+    )
+    api = client(Provider())
+    first, second = api.fetch_index_weight(request), api.fetch_index_weight(request)
+    store = SnapshotStore(tmp_path)
+    a = store.write(
+        request.spec,
+        first.frame.to_json(orient="records").encode(),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        "json-rows-v1",
+    )
+    b = store.write(
+        request.spec,
+        second.frame.to_json(orient="records").encode(),
+        datetime(2024, 1, 2, tzinfo=UTC),
+        "json-rows-v1",
+    )
+    assert a.path != b.path
+    assert store.replay(a).payload != store.replay(b).payload
+
+
+@pytest.mark.parametrize("weights", ([1.0, 1.0], [1.0, 2.0]))
+def test_phase2b_duplicate_rejection_and_daily_cap(weights):
     class D:
         def daily_basic(self, **kwargs):
             fields = PHASE2B_FIELDS["daily_basic"]
@@ -1157,7 +1305,7 @@ def test_phase2b_duplicate_rejection_and_daily_cap():
                     "index_code": ["I", "I"],
                     "con_code": ["A", "A"],
                     "trade_date": ["20240101"] * 2,
-                    "weight": [1.0, 2.0],
+                    "weight": list(weights),
                 }
             )
 

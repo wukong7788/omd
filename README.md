@@ -158,6 +158,13 @@ result = build_index_dividend_yield(
 print(result.dividend_yield)
 ```
 
+The typed `IndexWeightRequest` accepts either one exact observation date or a
+complete inclusive range within one calendar month. Responses are checked for
+the requested index and date scope and sorted by index, observation date, and
+constituent. `weight` remains the provider-native percentage, including null
+or non-finite values; no effective period, availability timestamp, or weight
+renormalization is inferred.
+
 ## Local checks
 
 ```bash

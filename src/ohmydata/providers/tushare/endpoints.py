@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from typing import Any
 
@@ -691,10 +692,21 @@ class IndexWeightRequest(_BaseRequest):
     def __post_init__(self) -> None:
         _validate_empty(self.empty_policy)
         _nonempty(self.index_code, "index_code")
-        if (self.trade_date is None) == (self.start_date is None or self.end_date is None):
+        has_exact = self.trade_date is not None
+        has_start = self.start_date is not None
+        has_end = self.end_date is not None
+        if (has_exact and (has_start or has_end)) or (
+            not has_exact and (not has_start or not has_end)
+        ):
             raise ValueError("exactly one index weight date selector is required")
         trade = _date(self.trade_date)
         start, end = _date_range(self.start_date, self.end_date)
+        for value in (trade, start, end):
+            if value is not None:
+                try:
+                    date(int(value[:4]), int(value[4:6]), int(value[6:]))
+                except ValueError as exc:
+                    raise ValueError("dates must be valid calendar dates") from exc
         if start is not None:
             assert end is not None
             if start[:6] != end[:6]:
