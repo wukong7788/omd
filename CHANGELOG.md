@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0 — 2026-08-02
+
 - Documented the v0.1.0 public-contract changes, fail-closed upgrade behavior,
   and funmoney/stock_notify consumer ownership boundaries.
 
