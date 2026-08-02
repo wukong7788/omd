@@ -228,6 +228,12 @@ Raw provider rows can be wrapped in `RawFactEnvelope`, preserving the
 response-level `fact_version` separately from a canonical row hash. Revision
 status remains conservative until an explicit same-key prior row is supplied;
 point-in-time and date-only availability quality flags are serialized too.
+The offline characterization matrix in
+[`tests/characterization/test_pit_fail_closed.py`](tests/characterization/test_pit_fail_closed.py)
+also proves that late arrivals, date-only evidence, replay mismatches,
+pagination truncation, and historical-vintage claims remain fail-closed. OMD
+does not choose consumer cutoffs, calendars, dataset commits, or usable
+sessions.
 
 ## Phase 1 core (offline)
 

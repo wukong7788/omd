@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added offline PIT fail-closed characterization fixtures covering revisions,
+  date-only availability, consumer cutoff boundaries, exact snapshot replay,
+  `fund_adj` pagination, and historical-vintage evidence.
+
 - Hardened Tushare `fund_nav` and `fund_share` request/response semantics with
   real-calendar validation, scope checks, stable ordering, revision
   preservation, provider-native values, and explicit `fund_share` cap handling.
