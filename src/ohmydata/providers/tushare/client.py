@@ -28,6 +28,8 @@ from .endpoints import (
     FundPortfolioRequest,
     FundShareRequest,
     IndexWeightRequest,
+    StockAdjustmentRequest,
+    StockDailyRequest,
     TradeCalendarRequest,
 )
 from .errors import classify_tushare_exception
@@ -37,6 +39,8 @@ _KEYS: dict[str, tuple[str, ...]] = {
     "fund_basic": ("ts_code",),
     "fund_daily": ("ts_code", "trade_date"),
     "fund_adj": ("ts_code", "trade_date"),
+    "daily": ("ts_code", "trade_date"),
+    "adj_factor": ("ts_code", "trade_date"),
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
     "fund_share": ("ts_code", "trade_date"),
     "etf_basic": ("ts_code",),
@@ -67,6 +71,8 @@ _SORT_KEYS = {
 _CAPS = {
     "fund_basic": 15000,
     "fund_daily": 5000,
+    "daily": 6000,
+    "adj_factor": 6000,
     "fund_share": 2000,
     "daily_basic": 6000,
     "etf_basic": 5000,
@@ -113,6 +119,12 @@ class TushareClient:
         return self._fetch_single(request)
 
     def fetch_fund_daily(self, request: FundDailyRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
+    def fetch_stock_daily(self, request: StockDailyRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
+    def fetch_stock_adjustment(self, request: StockAdjustmentRequest) -> TushareFetchResult:
         return self._fetch_single(request)
 
     def fetch_fund_adjustment(self, request: FundAdjustmentRequest) -> TushareFetchResult:

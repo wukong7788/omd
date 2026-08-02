@@ -257,6 +257,73 @@ class FundDailyRequest(_FundDateRequest):
 
 
 @dataclass(frozen=True)
+class _StockDateRequest(_BaseRequest):
+    ts_code: str | None = None
+    trade_date: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+    def _validate_dates(self) -> None:
+        _validate_empty(self.empty_policy)
+        if self.ts_code is not None:
+            _nonempty(self.ts_code, "ts_code")
+        if self.trade_date is not None:
+            _date(self.trade_date)
+        if (self.ts_code is None) == (self.trade_date is None):
+            raise ValueError("exactly one of ts_code or trade_date is required")
+        start, end = _date_range(self.start_date, self.end_date)
+        if (start is not None or end is not None) and self.ts_code is None:
+            raise ValueError("date range requires ts_code")
+        object.__setattr__(self, "trade_date", _date(self.trade_date))
+        object.__setattr__(self, "start_date", start)
+        object.__setattr__(self, "end_date", end)
+
+
+@dataclass(frozen=True)
+class StockDailyRequest(_StockDateRequest):
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="daily")
+
+    def __post_init__(self) -> None:
+        self._validate_dates()
+        object.__setattr__(self, "fields", _fields(self.fields, _DAILY_FIELDS))
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "trade_date": self.trade_date,
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class StockAdjustmentRequest(_StockDateRequest):
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="adj_factor")
+
+    def __post_init__(self) -> None:
+        self._validate_dates()
+        object.__setattr__(
+            self, "fields", _fields(self.fields, ("ts_code", "trade_date", "adj_factor"))
+        )
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "trade_date": self.trade_date,
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+            }
+        )
+
+
+@dataclass(frozen=True)
 class FundAdjustmentRequest(_FundDateRequest):
     page_size: int = 2000
     max_pages: int = 100

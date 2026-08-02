@@ -404,6 +404,20 @@ The OMD adapter slice was accepted on 2026-08-01 after offline Python 3.11 and
 pending under the separate reviewed migration gates. Neither accepted OMD-only
 slice authorizes consumer or A-share live migration.
 
+### v0.1.0 — PIT-ready constituent market facts
+
+The detailed `v0.1.0` scope, dependency decisions, time/version contracts,
+endpoint priorities, and funmoney M0–M5 sequencing are owned by
+[`docs/plans/v0.1.0-pit-market-facts.md`](docs/plans/v0.1.0-pit-market-facts.md).
+
+Development of that contract and its P0 endpoints may proceed without waiting
+for every unchecked consumer-migration item in this plan. Unchecked Phase 3c
+and Phase 4 items remain mandatory for the migration or release gate that
+references them; they are not implicitly waived or complete. In particular,
+the funmoney canonical-provider cutover requires its critical-path inventory
+and baseline freeze before merge, while production synchronization remains a
+separately authorized gate.
+
 ### Phase 4 — Consumer shadow migrations
 
 Migration order:
@@ -476,7 +490,9 @@ ohmydata[polars]
 
 Target milestones:
 
-- `v0.1.0`: stable Tushare core, endpoint client, snapshots, and first recipe;
+- `v0.1.0`: stable Tushare core plus the reviewed, versioned,
+  availability-aware constituent-market-fact vertical slice defined in the
+  dedicated version plan;
 - `v0.2.0`: yfinance provider after separate inventory and plan update;
 - FMP version is intentionally unscheduled.
 

@@ -32,6 +32,8 @@ from ohmydata.providers.tushare import (
     FundPortfolioRequest,
     FundShareRequest,
     IndexWeightRequest,
+    StockAdjustmentRequest,
+    StockDailyRequest,
     TradeCalendarRequest,
     TushareClient,
 )
@@ -82,6 +84,14 @@ class Fake:
             raise error
         return self.result
 
+    def daily(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+    def adj_factor(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
     def fund_basic(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
@@ -130,6 +140,134 @@ def test_readme_injected_client_example_contract():
         )
     )
     assert result.frame.loc[0, "ts_code"] == "FAKE.ETF"
+
+
+def test_stock_daily_and_adjustment_preserve_native_values_and_kwargs():
+    source = daily_frame((("B", "20240102"), ("A", "20240101")))
+    source.loc[0, "pct_chg"] = None
+    source.loc[0, "vol"] = None
+    source.loc[0, "amount"] = None
+    fake = Fake(source)
+    result = client(fake).fetch_stock_daily(
+        StockDailyRequest(
+            empty_policy=EmptyPolicy.ALLOW, ts_code="A", start_date="20240101", end_date="20240102"
+        )
+    )
+    assert fake.calls[0] == {
+        "ts_code": "A",
+        "start_date": "20240101",
+        "end_date": "20240102",
+        "fields": ",".join(DAILY_FIELDS),
+    }
+    assert result.frame.trade_date.tolist() == ["20240101", "20240102"]
+    assert pd.isna(result.frame.loc[1, "pct_chg"])
+    assert pd.isna(result.frame.loc[1, "vol"])
+    assert pd.isna(result.frame.loc[1, "amount"])
+
+    adj = pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240101"], "adj_factor": [None]})
+    fake = Fake(adj)
+    adjustment = client(fake).fetch_stock_adjustment(
+        StockAdjustmentRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240101")
+    )
+    assert fake.calls == [{"trade_date": "20240101", "fields": "ts_code,trade_date,adj_factor"}]
+    assert pd.isna(adjustment.frame.loc[0, "adj_factor"])
+
+
+@pytest.mark.parametrize(
+    "method, req, fields",
+    [
+        (
+            "fetch_stock_daily",
+            StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"),
+            DAILY_FIELDS,
+        ),
+        (
+            "fetch_stock_adjustment",
+            StockAdjustmentRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"),
+            ["ts_code", "trade_date", "adj_factor"],
+        ),
+    ],
+)
+def test_stock_endpoints_reject_missing_methods_and_ambiguous_cap(method, req, fields):
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(object()), method)(req)
+    frame = pd.DataFrame({field: [None] * 6000 for field in fields})
+    frame["ts_code"] = [f"A{i}" for i in range(6000)]
+    frame["trade_date"] = ["20240101"] * 6000
+    with pytest.raises(PaginationError):
+        getattr(client(Fake(frame)), method)(req)
+
+
+@pytest.mark.parametrize(
+    "method, request_type, endpoint_fields",
+    [
+        ("fetch_stock_daily", StockDailyRequest, DAILY_FIELDS),
+        ("fetch_stock_adjustment", StockAdjustmentRequest, ["ts_code", "trade_date", "adj_factor"]),
+    ],
+)
+def test_stock_client_schema_and_empty_failures(method, request_type, endpoint_fields):
+    class NoCall:
+        def __init__(self, result):
+            self.result = result
+            self.calls = 0
+
+        def daily(self, **kwargs):
+            self.calls += 1
+            return self.result
+
+        def adj_factor(self, **kwargs):
+            self.calls += 1
+            return self.result
+
+    endpoint = "daily" if request_type is StockDailyRequest else "adj_factor"
+    request = request_type(empty_policy=EmptyPolicy.ALLOW, ts_code="A")
+    for missing in ("ts_code", "trade_date"):
+        fields = tuple(field for field in endpoint_fields if field != missing)
+        fake = NoCall(pd.DataFrame(columns=fields))
+        with pytest.raises(SchemaMismatchError):
+            getattr(client(fake), method)(
+                request_type(empty_policy=EmptyPolicy.ALLOW, ts_code="A", fields=fields)
+            )
+        assert fake.calls == 0
+
+    empty = pd.DataFrame(columns=endpoint_fields)
+    assert getattr(client(NoCall(empty)), method)(request).frame.empty
+    with pytest.raises(EmptyResponseError):
+        getattr(client(NoCall(empty)), method)(
+            request_type(empty_policy=EmptyPolicy.ERROR, ts_code="A")
+        )
+
+    valid = (
+        daily_frame()
+        if endpoint == "daily"
+        else pd.DataFrame({"ts_code": ["A"], "trade_date": ["20240101"], "adj_factor": [1.0]})
+    )
+    missing_column = valid.drop(columns=[endpoint_fields[-1]])
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(NoCall(missing_column)), method)(request)
+    for key in ("ts_code", "trade_date"):
+        null_key = valid.copy()
+        null_key.loc[0, key] = None
+        with pytest.raises(SchemaMismatchError):
+            getattr(client(NoCall(null_key)), method)(request)
+    duplicate = pd.concat([valid, valid], ignore_index=True)
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(NoCall(duplicate)), method)(request)
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(NoCall("not a dataframe")), method)(request)
+
+
+def test_stock_daily_defensive_copies():
+    source = daily_frame()
+    fake = Fake(source)
+    result = client(fake).fetch_stock_daily(
+        StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="FAKE.ETF")
+    )
+    source.loc[0, "close"] = 99
+    returned = result.frame
+    returned.loc[0, "close"] = 88
+    assert result.frame.loc[0, "close"] != 88
+    assert result.frame.loc[0, "close"] != 99
 
 
 def test_empty_policy_and_validation_errors():

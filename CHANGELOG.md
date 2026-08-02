@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added typed, injected-client Tushare stock `daily` and `adj_factor` endpoint
+  requests with explicit selectors, ordered fields, stable key validation,
+  empty-result policy, provenance, and ambiguous-cap detection.
+
 ## 0.0.6 — 2026-08-02
 
 - Added an explicit `empty_object_policy` to the Pandas→Polars adapter. The

@@ -17,6 +17,8 @@ from ohmydata.providers.tushare import (
     FundPortfolioRequest,
     FundShareRequest,
     IndexWeightRequest,
+    StockAdjustmentRequest,
+    StockDailyRequest,
     TradeCalendarRequest,
 )
 
@@ -36,6 +38,62 @@ def test_request_spec_is_canonical_and_validates_dates():
 def test_empty_policy_rejects_raw_strings():
     with pytest.raises(TypeError):
         TradeCalendarRequest(empty_policy="ALLOW")  # type: ignore[arg-type]
+
+
+def test_stock_request_orientations_defaults_and_custom_fields():
+    daily = StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code=" 000001.SZ ")
+    assert daily.spec.endpoint == "daily"
+    assert daily.spec.effective_parameters == {"ts_code": " 000001.SZ "}
+    assert daily.fields == (
+        "ts_code",
+        "trade_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "pre_close",
+        "change",
+        "pct_chg",
+        "vol",
+        "amount",
+    )
+    adjustment = StockAdjustmentRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        trade_date="20240102",
+        fields=("trade_date", "adj_factor", "ts_code"),
+    )
+    assert adjustment.spec.effective_parameters == {"trade_date": "20240102"}
+    assert adjustment.spec.fields == ("trade_date", "adj_factor", "ts_code")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"ts_code": ""},
+        {"ts_code": " "},
+        {"ts_code": "A", "trade_date": "20240101"},
+        {"trade_date": "2024-01-01"},
+        {"trade_date": "20240101", "start_date": "20240101"},
+        {"ts_code": "A", "start_date": "20240102", "end_date": "20240101"},
+    ],
+)
+def test_stock_request_validation(kwargs):
+    with pytest.raises(ValueError):
+        StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, **kwargs)
+
+
+def test_stock_public_exports():
+    assert StockDailyRequest is tushare.StockDailyRequest
+    assert StockAdjustmentRequest is tushare.StockAdjustmentRequest
+
+
+@pytest.mark.parametrize("request_type", [StockDailyRequest, StockAdjustmentRequest])
+def test_stock_requests_require_explicit_empty_policy(request_type):
+    with pytest.raises(TypeError):
+        request_type(ts_code="A")
+    with pytest.raises(TypeError):
+        request_type(empty_policy="ALLOW", ts_code="A")
 
 
 @pytest.mark.parametrize(
@@ -159,6 +217,8 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "FundShareRequest",
         "IndexWeightRequest",
         "TradeCalendarRequest",
+        "StockAdjustmentRequest",
+        "StockDailyRequest",
         "TushareClient",
         "TushareFetchResult",
         "WeightedDividendYieldResult",

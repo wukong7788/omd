@@ -214,3 +214,32 @@ rejected. Native units remain unchanged: dividend cash is yuan per share,
 portfolio market value is yuan and amount is shares, daily-basic share and
 market-value fields use Tushare's ten-thousand units, and index weights remain
 provider percentages.
+
+## Stock daily and adjustment endpoints
+
+The Tushare adapter also exposes typed, injected-client `daily` and
+`adj_factor` requests:
+
+```python
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    StockAdjustmentRequest,
+    StockDailyRequest,
+    TushareClient,
+)
+
+daily = TushareClient(client).fetch_stock_daily(
+    StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="000001.SZ")
+)
+adjustment = TushareClient(client).fetch_stock_adjustment(
+    StockAdjustmentRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240102")
+)
+```
+
+Both requests require exactly one symbol (optionally date-bounded) or one
+exact trade date, and return stable `ts_code`/`trade_date` ordering. Fields are
+explicit and ordered; custom lists must retain both identity fields. Values,
+units, and nulls remain provider-native: daily `pct_chg` is a percentage,
+`vol` is hands, `amount` is thousand yuan, and `adj_factor` is unmodified.
+Suspended rows are not synthesized, and no adjusted-price calculation or
+point-in-time availability claim is made.

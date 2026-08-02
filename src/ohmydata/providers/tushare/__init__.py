@@ -11,6 +11,8 @@ from .endpoints import (
     FundPortfolioRequest,
     FundShareRequest,
     IndexWeightRequest,
+    StockAdjustmentRequest,
+    StockDailyRequest,
     TradeCalendarRequest,
 )
 from .errors import classify_tushare_exception
@@ -44,6 +46,8 @@ __all__ = [
     "FundPortfolioRequest",
     "FundShareRequest",
     "IndexWeightRequest",
+    "StockAdjustmentRequest",
+    "StockDailyRequest",
     "TradeCalendarRequest",
     "TushareClient",
     "TushareFetchResult",
