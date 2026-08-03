@@ -290,3 +290,42 @@ units, and nulls remain provider-native: daily `pct_chg` is a percentage,
 `vol` is hands, `amount` is thousand yuan, and `adj_factor` is unmodified.
 Suspended rows are not synthesized, and no adjusted-price calculation or
 point-in-time availability claim is made.
+
+## ETF PCF constituent endpoints (v0.1.1)
+
+`EtfShConsRequest` and `EtfSzConsRequest` expose the exchange-native
+`etf_sh_cons` and `etf_sz_cons` schemas. Shanghai uses `sca` (CNY replacement
+amount); Shenzhen uses `sub_cc` and `red_cc` (CNY subscription/redemption
+replacement amounts). Quantities are shares and `cpr`/`rdr` are percentages.
+Provider values, nulls, sentinels, and duplicate observations remain unchanged.
+
+Each endpoint rejects an ambiguous exactly-3000-row response. Use
+`fetch_etf_pcf_history` with an explicit exchange, date range, and
+`EmptyPolicy` to recursively bisect calendar windows without offsets. The
+recipe reports successful leaf provenances, request and truncation counts, and
+returns a defensive provider-native Pandas frame. A `trade_date` is date-only
+provider evidence; availability timestamps, point-in-time lag, cross-exchange
+normalization, and published dataset policy remain consumer responsibilities.
+
+The recipe accepts an injected offline-capable client; the library performs no
+credential or environment lookup:
+
+```python
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    EtfPcfHistoryRequest,
+    fetch_etf_pcf_history,
+)
+
+history = fetch_etf_pcf_history(
+    client,
+    EtfPcfHistoryRequest(
+        ts_code="510050.SH",
+        exchange="SH",
+        start_date="20240101",
+        end_date="20240131",
+        empty_policy=EmptyPolicy.ALLOW,
+    ),
+)
+frame = history.frame
+```

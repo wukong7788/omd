@@ -3,6 +3,8 @@ from .endpoints import (
     DailyBasicRequest,
     EmptyPolicy,
     EtfBasicRequest,
+    EtfShConsRequest,
+    EtfSzConsRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -23,11 +25,14 @@ from .recipes import (
     AdjustmentCoveragePolicy,
     DividendYieldCoveragePolicy,
     DividendYieldWeightSource,
+    EtfPcfHistoryRequest,
+    EtfPcfHistoryResult,
     WeightedDividendYieldResult,
     build_adjusted_etf_bars,
     build_index_dividend_yield,
     build_portfolio_dividend_yield,
     fetch_adjusted_etf_bars,
+    fetch_etf_pcf_history,
 )
 
 __all__ = [
@@ -39,6 +44,10 @@ __all__ = [
     "DividendYieldWeightSource",
     "EmptyPolicy",
     "EtfBasicRequest",
+    "EtfPcfHistoryRequest",
+    "EtfPcfHistoryResult",
+    "EtfShConsRequest",
+    "EtfSzConsRequest",
     "FundAdjustmentRequest",
     "FundBasicRequest",
     "FundDailyRequest",
@@ -59,4 +68,5 @@ __all__ = [
     "build_portfolio_dividend_yield",
     "classify_tushare_exception",
     "fetch_adjusted_etf_bars",
+    "fetch_etf_pcf_history",
 ]

@@ -759,3 +759,98 @@ class IndexWeightRequest(_BaseRequest):
                 "end_date": self.end_date,
             }
         )
+
+
+_ETF_SH_CONS_FIELDS = (
+    "trade_date",
+    "ts_code",
+    "con_code",
+    "con_name",
+    "qty",
+    "sub_flag",
+    "cpr",
+    "rdr",
+    "sca",
+    "exchange",
+)
+_ETF_SZ_CONS_FIELDS = (
+    "trade_date",
+    "ts_code",
+    "con_code",
+    "con_name",
+    "qty",
+    "sub_flag",
+    "cpr",
+    "rdr",
+    "sub_cc",
+    "red_cc",
+    "exchange",
+)
+
+
+@dataclass(frozen=True)
+class _EtfConsRequest(_BaseRequest):
+    ts_code: str | None = None
+    trade_date: str | None = None
+    con_code: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+    def _init(self, suffix: str, defaults: tuple[str, ...]) -> None:
+        _validate_empty(self.empty_policy)
+        for name in ("ts_code", "trade_date", "con_code"):
+            value = getattr(self, name)
+            if value is not None:
+                _nonempty(value, name)
+                segments = value.split(",")
+                if any(not segment.strip() for segment in segments):
+                    raise ValueError(f"{name} must not contain empty comma-separated segments")
+                if name == "ts_code":
+                    codes = [x.strip() for x in segments]
+                    if any(not x.upper().endswith(suffix) for x in codes):
+                        raise ValueError(f"ts_code must use .{suffix[1:]} suffix")
+        start, end = _date_range(self.start_date, self.end_date)
+        if (start is None) != (end is None):
+            raise ValueError("start_date and end_date must be provided together")
+        for value in (self.trade_date, start, end):
+            if value is not None:
+                _calendar_date(value)
+        if not any(
+            value is not None and str(value).strip()
+            for value in (self.ts_code, self.trade_date, self.con_code, start)
+        ):
+            raise ValueError("at least one selector is required")
+        object.__setattr__(self, "trade_date", _calendar_date(self.trade_date))
+        object.__setattr__(self, "start_date", start)
+        object.__setattr__(self, "end_date", end)
+        object.__setattr__(self, "fields", _fields(self.fields, defaults))
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "trade_date": self.trade_date,
+                "con_code": self.con_code,
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class EtfShConsRequest(_EtfConsRequest):
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="etf_sh_cons")
+
+    def __post_init__(self) -> None:
+        self._init(".SH", _ETF_SH_CONS_FIELDS)
+
+
+@dataclass(frozen=True)
+class EtfSzConsRequest(_EtfConsRequest):
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="etf_sz_cons")
+
+    def __post_init__(self) -> None:
+        self._init(".SZ", _ETF_SZ_CONS_FIELDS)

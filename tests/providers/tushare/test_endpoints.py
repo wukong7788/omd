@@ -9,6 +9,8 @@ from ohmydata.providers.tushare import (
     DailyBasicRequest,
     EmptyPolicy,
     EtfBasicRequest,
+    EtfShConsRequest,
+    EtfSzConsRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -22,6 +24,91 @@ from ohmydata.providers.tushare import (
     StockDividendRequest,
     TradeCalendarRequest,
 )
+
+SH_FIELDS = (
+    "trade_date",
+    "ts_code",
+    "con_code",
+    "con_name",
+    "qty",
+    "sub_flag",
+    "cpr",
+    "rdr",
+    "sca",
+    "exchange",
+)
+SZ_FIELDS = (
+    "trade_date",
+    "ts_code",
+    "con_code",
+    "con_name",
+    "qty",
+    "sub_flag",
+    "cpr",
+    "rdr",
+    "sub_cc",
+    "red_cc",
+    "exchange",
+)
+
+
+@pytest.mark.parametrize(
+    "request_type, suffix, fields",
+    [(EtfShConsRequest, ".SH", SH_FIELDS), (EtfSzConsRequest, ".SZ", SZ_FIELDS)],
+)
+def test_etf_cons_request_contract(request_type, suffix, fields):
+    request = request_type(
+        empty_policy=EmptyPolicy.ALLOW,
+        ts_code=f"510050{suffix}",
+        start_date="20240101",
+        end_date="20240131",
+    )
+    assert request.endpoint in {"etf_sh_cons", "etf_sz_cons"}
+    assert request.fields == fields
+    assert request.spec.effective_parameters == {
+        "ts_code": f"510050{suffix}",
+        "start_date": "20240101",
+        "end_date": "20240131",
+    }
+    explicit = request_type(
+        empty_policy=EmptyPolicy.ERROR,
+        con_code="000001.SZ",
+        trade_date="20240102",
+        fields=("trade_date", "ts_code", "con_code"),
+    )
+    assert explicit.fields == ("trade_date", "ts_code", "con_code")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"ts_code": "   "},
+        {"ts_code": ","},
+        {"ts_code": "510050.SH,,"},
+        {"trade_date": ""},
+        {"con_code": "  "},
+        {"con_code": ","},
+        {"con_code": "000001.SZ,,000002.SZ"},
+        {"start_date": "20240101"},
+        {"end_date": "20240102"},
+        {"start_date": "20240102", "end_date": "20240101"},
+        {"trade_date": "20240230"},
+        {"start_date": "2024010x", "end_date": "20240102"},
+    ],
+)
+def test_etf_cons_rejects_invalid_selectors(kwargs):
+    with pytest.raises(ValueError):
+        EtfShConsRequest(empty_policy=EmptyPolicy.ALLOW, **kwargs)
+
+
+def test_etf_cons_suffix_mismatch_and_schema_separation():
+    with pytest.raises(ValueError):
+        EtfShConsRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="159001.SZ")
+    with pytest.raises(ValueError):
+        EtfSzConsRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="510050.SH")
+    assert "sca" in SH_FIELDS and "sub_cc" not in SH_FIELDS
+    assert "sub_cc" in SZ_FIELDS and "red_cc" in SZ_FIELDS and "sca" not in SZ_FIELDS
 
 
 def test_request_spec_is_canonical_and_validates_dates():
@@ -326,6 +413,10 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "DailyBasicRequest",
         "EmptyPolicy",
         "EtfBasicRequest",
+        "EtfShConsRequest",
+        "EtfSzConsRequest",
+        "EtfPcfHistoryRequest",
+        "EtfPcfHistoryResult",
         "FundAdjustmentRequest",
         "FundBasicRequest",
         "FundDailyRequest",
@@ -346,6 +437,7 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "classify_tushare_exception",
         "build_adjusted_etf_bars",
         "fetch_adjusted_etf_bars",
+        "fetch_etf_pcf_history",
     }
     assert "fetch" not in dir(tushare.TushareClient)
     source = inspect.getsource(tushare.TushareClient)

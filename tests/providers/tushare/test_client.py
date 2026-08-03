@@ -26,6 +26,8 @@ from ohmydata.providers.tushare import (
     DailyBasicRequest,
     EmptyPolicy,
     EtfBasicRequest,
+    EtfShConsRequest,
+    EtfSzConsRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -418,6 +420,210 @@ def test_limiter_acquired_per_attempt():
     ).fetch_fund_daily(FundDailyRequest(empty_policy=EmptyPolicy.ERROR, ts_code="FAKE"))
     assert len(fake.calls) == 2
     assert waits == [1.0]
+
+
+def _etf_frame(request_type, rows):
+    request = request_type(
+        empty_policy=EmptyPolicy.ALLOW,
+        ts_code="510050.SH" if request_type is EtfShConsRequest else "159001.SZ",
+    )
+    return pd.DataFrame(
+        [{**dict.fromkeys(request.fields), **row} for row in rows], columns=request.fields
+    )
+
+
+class EtfFake:
+    def __init__(self, request_type, frame, errors=()):
+        self.request_type = request_type
+        self.frame = frame
+        self.errors = list(errors)
+        self.calls = []
+
+    def etf_sh_cons(self, **kwargs):
+        self.calls.append(("etf_sh_cons", kwargs))
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.frame
+
+    def etf_sz_cons(self, **kwargs):
+        self.calls.append(("etf_sz_cons", kwargs))
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.frame
+
+
+@pytest.mark.parametrize(
+    "request_type, endpoint, symbol, component",
+    [
+        (EtfShConsRequest, "etf_sh_cons", "510050.SH", "000001.SZ"),
+        (EtfSzConsRequest, "etf_sz_cons", "159001.SZ", "000001.SZ"),
+    ],
+)
+def test_etf_cons_client_exact_parameters_values_scope_and_duplicates(
+    request_type, endpoint, symbol, component
+):
+    fields = request_type(empty_policy=EmptyPolicy.ALLOW, ts_code=symbol).fields
+    row = {
+        "trade_date": "20240102",
+        "ts_code": symbol,
+        "con_code": component,
+        "qty": 0,
+        "cpr": None,
+        "rdr": float("inf"),
+        "exchange": "X",
+    }
+    source = _etf_frame(request_type, [row, row])
+    fake = EtfFake(request_type, source)
+    request = request_type(
+        empty_policy=EmptyPolicy.ALLOW, ts_code=symbol, trade_date="20240102", con_code=component
+    )
+    result = getattr(client(fake), f"fetch_{endpoint}")(request)
+    assert fake.calls == [
+        (
+            endpoint,
+            {
+                "ts_code": symbol,
+                "trade_date": "20240102",
+                "con_code": component,
+                "fields": ",".join(fields),
+            },
+        )
+    ]
+    assert (
+        len(result.frame) == 2
+        and result.frame.qty.iloc[0] == 0
+        and pd.isna(result.frame.cpr.iloc[0])
+    )
+    assert result.frame.rdr.iloc[0] == float("inf")
+    custom = request_type(
+        empty_policy=EmptyPolicy.ALLOW,
+        ts_code=symbol,
+        fields=("trade_date", "ts_code", "con_code"),
+    )
+    custom_fake = EtfFake(request_type, source)
+    custom_result = getattr(client(custom_fake), f"fetch_{endpoint}")(custom)
+    assert custom_result.frame.columns.tolist() == ["trade_date", "ts_code", "con_code"]
+    assert custom_fake.calls == [
+        (
+            endpoint,
+            {"ts_code": symbol, "fields": "trade_date,ts_code,con_code"},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "request_type, method, symbol",
+    [
+        (EtfShConsRequest, "fetch_etf_sh_cons", "510050.SH"),
+        (EtfSzConsRequest, "fetch_etf_sz_cons", "159001.SZ"),
+    ],
+)
+def test_etf_cons_range_missing_column_and_native_non_mainland(request_type, method, symbol):
+    request = request_type(
+        empty_policy=EmptyPolicy.ALLOW,
+        ts_code=symbol,
+        start_date="20240101",
+        end_date="20240102",
+    )
+    valid = _etf_frame(
+        request_type,
+        [{"trade_date": "20240101", "ts_code": symbol, "con_code": "00001.HK"}],
+    )
+    assert (
+        getattr(client(EtfFake(request_type, valid)), method)(request).frame.con_code.iloc[0]
+        == "00001.HK"
+    )
+    for value in ("20231231", "20240103"):
+        bad = valid.copy()
+        bad.loc[0, "trade_date"] = value
+        with pytest.raises(SchemaMismatchError):
+            getattr(client(EtfFake(request_type, bad)), method)(request)
+    missing = valid.drop(columns=["con_name"])
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(EtfFake(request_type, missing)), method)(request)
+
+
+def test_etf_cons_stable_order_preserves_exact_and_differing_duplicates():
+    rows = [
+        {"trade_date": "20240102", "ts_code": "510050.SH", "con_code": "000002.SZ", "qty": 2},
+        {"trade_date": "20240101", "ts_code": "510050.SH", "con_code": "000001.SZ", "qty": 1},
+        {"trade_date": "20240101", "ts_code": "510050.SH", "con_code": "000001.SZ", "qty": 9},
+        {"trade_date": "20240101", "ts_code": "510050.SH", "con_code": "000001.SZ", "qty": 9},
+    ]
+    request = EtfShConsRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="510050.SH")
+    result = client(
+        EtfFake(EtfShConsRequest, _etf_frame(EtfShConsRequest, rows))
+    ).fetch_etf_sh_cons(request)
+    assert result.frame[["trade_date", "con_code", "qty"]].to_records(index=False).tolist() == [
+        ("20240101", "000001.SZ", 1),
+        ("20240101", "000001.SZ", 9),
+        ("20240101", "000001.SZ", 9),
+        ("20240102", "000002.SZ", 2),
+    ]
+
+
+@pytest.mark.parametrize(
+    "request_type, method, symbol",
+    [
+        (EtfShConsRequest, "fetch_etf_sh_cons", "510050.SH"),
+        (EtfSzConsRequest, "fetch_etf_sz_cons", "159001.SZ"),
+    ],
+)
+def test_etf_cons_client_schema_scope_null_empty_and_cap(request_type, method, symbol):
+    request = request_type(empty_policy=EmptyPolicy.ALLOW, ts_code=symbol)
+    empty = _etf_frame(request_type, [])
+    assert getattr(client(EtfFake(request_type, empty)), method)(request).frame.empty
+    with pytest.raises(EmptyResponseError):
+        getattr(client(EtfFake(request_type, empty)), method)(
+            replace(request, empty_policy=EmptyPolicy.ERROR)
+        )
+    valid = _etf_frame(
+        request_type, [{"trade_date": "20240102", "ts_code": symbol, "con_code": "000001.SZ"}]
+    )
+    for key in ("ts_code", "trade_date", "con_code"):
+        bad = valid.copy()
+        bad.loc[0, key] = None
+        with pytest.raises(SchemaMismatchError):
+            getattr(client(EtfFake(request_type, bad)), method)(request)
+    for key, value in (
+        ("ts_code", "999999.SH" if request_type is EtfShConsRequest else "000001.SZ"),
+        ("con_code", "000002.SZ"),
+        ("trade_date", "20240103"),
+    ):
+        bad = valid.copy()
+        bad.loc[0, key] = value
+        scoped = request_type(empty_policy=EmptyPolicy.ALLOW, ts_code=symbol)
+        if key == "con_code":
+            scoped = request_type(empty_policy=EmptyPolicy.ALLOW, con_code="000001.SZ")
+        elif key == "trade_date":
+            scoped = request_type(empty_policy=EmptyPolicy.ALLOW, trade_date="20240102")
+        with pytest.raises(SchemaMismatchError):
+            getattr(client(EtfFake(request_type, bad)), method)(scoped)
+    malformed = valid.copy()
+    malformed.loc[0, "trade_date"] = "20240230"
+    with pytest.raises(SchemaMismatchError):
+        getattr(client(EtfFake(request_type, malformed)), method)(request)
+    full = pd.concat([valid] * 3000, ignore_index=True)
+    with pytest.raises(PaginationError):
+        getattr(client(EtfFake(request_type, full)), method)(request)
+    below = pd.concat([valid] * 2999, ignore_index=True)
+    assert len(getattr(client(EtfFake(request_type, below)), method)(request).frame) == 2999
+
+
+def test_etf_cons_retry_and_provenance():
+    source = _etf_frame(
+        EtfShConsRequest,
+        [{"trade_date": "20240102", "ts_code": "510050.SH", "con_code": "000001.SZ"}],
+    )
+    fake = EtfFake(EtfShConsRequest, source, errors=[ConnectionError("temporary")])
+    result = client(
+        fake, retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0)
+    ).fetch_etf_sh_cons(EtfShConsRequest(empty_policy=EmptyPolicy.ERROR, ts_code="510050.SH"))
+    assert (
+        len(fake.calls) == 2
+        and result.provenance.endpoint == "etf_sh_cons"
+        and result.provenance.attempt_count == 2
+    )
 
 
 def test_non_dataframe_and_duplicate_and_cap_failures():

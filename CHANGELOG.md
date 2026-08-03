@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1 — 2026-08-03
+
+- Added typed Shanghai/Shenzhen ETF PCF constituent endpoints and deterministic
+  fail-closed windowed history retrieval around the provider 3000-row limit.
+
 ## 0.1.0 — 2026-08-02
 
 - Documented the v0.1.0 public-contract changes, fail-closed upgrade behavior,

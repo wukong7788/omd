@@ -21,6 +21,8 @@ from .endpoints import (
     DailyBasicRequest,
     EmptyPolicy,
     EtfBasicRequest,
+    EtfShConsRequest,
+    EtfSzConsRequest,
     FundAdjustmentRequest,
     FundBasicRequest,
     FundDailyRequest,
@@ -47,6 +49,8 @@ _KEYS: dict[str, tuple[str, ...]] = {
     "fund_share": ("ts_code", "trade_date"),
     "etf_basic": ("ts_code",),
     "dividend": ("ts_code",),
+    "etf_sh_cons": ("ts_code", "trade_date", "con_code"),
+    "etf_sz_cons": ("ts_code", "trade_date", "con_code"),
 }
 _NON_NULL_KEYS = {
     **_KEYS,
@@ -66,6 +70,8 @@ _UNIQUE_KEYS = {
     "index_weight": ("index_code", "trade_date", "con_code"),
     "etf_basic": ("ts_code",),
     "dividend": (),
+    "etf_sh_cons": (),
+    "etf_sz_cons": (),
 }
 _SORT_KEYS = {
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
@@ -92,6 +98,8 @@ _SORT_KEYS = {
         "cash_div_tax",
         "base_share",
     ),
+    "etf_sh_cons": ("ts_code", "trade_date", "con_code"),
+    "etf_sz_cons": ("ts_code", "trade_date", "con_code"),
 }
 _CAPS = {
     "fund_basic": 15000,
@@ -100,6 +108,8 @@ _CAPS = {
     "adj_factor": 6000,
     "fund_share": 2000,
     "daily_basic": 6000,
+    "etf_sh_cons": 3000,
+    "etf_sz_cons": 3000,
     "etf_basic": 5000,
 }
 
@@ -142,6 +152,18 @@ class TushareClient:
 
     def fetch_etf_basic(self, request: EtfBasicRequest) -> TushareFetchResult:
         return self._fetch_single(request)
+
+    def fetch_etf_sh_cons(self, request: EtfShConsRequest) -> TushareFetchResult:
+        return self._fetch_etf_cons(request)
+
+    def fetch_etf_sz_cons(self, request: EtfSzConsRequest) -> TushareFetchResult:
+        return self._fetch_etf_cons(request)
+
+    def _fetch_etf_cons(self, request: Any) -> TushareFetchResult:
+        result = self._fetch_single(request)
+        if not result.frame.empty:
+            self._validate_etf_cons_scope(result.frame, request)
+        return result
 
     def fetch_fund_daily(self, request: FundDailyRequest) -> TushareFetchResult:
         return self._fetch_single(request)
@@ -324,6 +346,8 @@ class TushareClient:
             raise SchemaMismatchError("response trade_date is outside request range")
         if request.end_date is not None and (dates > request.end_date).any():
             raise SchemaMismatchError("response trade_date is outside request range")
+        if request.end_date is not None and (dates > request.end_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
 
     @staticmethod
     def _validate_fund_nav_scope(frame: Any, request: FundNavRequest) -> None:
@@ -354,6 +378,32 @@ class TushareClient:
             allowed = {value.strip() for value in request.ts_code.split(",") if value.strip()}
             if (~symbols.isin(allowed)).any():
                 raise SchemaMismatchError("response ts_code is outside request scope")
+        dates = frame["trade_date"]
+        for value in dates.tolist():
+            if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                raise SchemaMismatchError("response trade_date is malformed")
+            try:
+                date(int(value[:4]), int(value[4:6]), int(value[6:]))
+            except ValueError as exc:
+                raise SchemaMismatchError("response trade_date is malformed") from exc
+        if request.trade_date is not None and (dates != request.trade_date).any():
+            raise SchemaMismatchError("response trade_date is outside request scope")
+        if request.start_date is not None and (dates < request.start_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+        if request.end_date is not None and (dates > request.end_date).any():
+            raise SchemaMismatchError("response trade_date is outside request range")
+
+    @staticmethod
+    def _validate_etf_cons_scope(frame: Any, request: Any) -> None:
+        symbols = frame["ts_code"]
+        if request.ts_code is not None:
+            allowed = {v.strip() for v in request.ts_code.split(",") if v.strip()}
+            if (~symbols.isin(allowed)).any():
+                raise SchemaMismatchError("response ts_code is outside request scope")
+        if request.con_code is not None:
+            allowed = {v.strip() for v in request.con_code.split(",") if v.strip()}
+            if (~frame["con_code"].isin(allowed)).any():
+                raise SchemaMismatchError("response con_code is outside request scope")
         dates = frame["trade_date"]
         for value in dates.tolist():
             if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
