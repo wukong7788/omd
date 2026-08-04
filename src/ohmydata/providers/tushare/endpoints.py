@@ -854,3 +854,167 @@ class EtfSzConsRequest(_EtfConsRequest):
 
     def __post_init__(self) -> None:
         self._init(".SZ", _ETF_SZ_CONS_FIELDS)
+
+
+_STOCK_BASIC_FIELDS = (
+    "ts_code",
+    "symbol",
+    "name",
+    "area",
+    "industry",
+    "market",
+    "exchange",
+    "list_status",
+    "list_date",
+    "delist_date",
+)
+_STOCK_BASIC_MARKETS = ("主板", "创业板", "科创板", "CDR", "北交所")
+_STOCK_BASIC_EXCHANGES = ("SSE", "SZSE", "BSE")
+_STOCK_BASIC_LIST_STATUSES = ("L", "D", "P", "G")
+_STOCK_BASIC_IS_HS = ("N", "H", "S")
+
+
+@dataclass(frozen=True)
+class StockBasicRequest(_BaseRequest):
+    """Typed ``stock_basic`` request frozen from the official contract.
+
+    ``industry`` is current-observation metadata from the provider; it never
+    gains an inferred historical effective interval in this SDK.
+    """
+
+    ts_code: str | None = None
+    name: str | None = None
+    market: str | None = None
+    list_status: str | None = None
+    exchange: str | None = None
+    is_hs: str | None = None
+    all_market: bool = False
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="stock_basic")
+
+    def __post_init__(self) -> None:
+        _validate_empty(self.empty_policy)
+        for value, name in (
+            (self.ts_code, "ts_code"),
+            (self.name, "name"),
+            (self.market, "market"),
+            (self.list_status, "list_status"),
+            (self.exchange, "exchange"),
+            (self.is_hs, "is_hs"),
+        ):
+            if value is not None:
+                _nonempty(value, name)
+        if self.market is not None and self.market not in _STOCK_BASIC_MARKETS:
+            raise ValueError("market must be a documented stock_basic market")
+        if self.exchange is not None and self.exchange not in _STOCK_BASIC_EXCHANGES:
+            raise ValueError("exchange must be SSE, SZSE, or BSE")
+        if self.list_status is not None and self.list_status not in _STOCK_BASIC_LIST_STATUSES:
+            raise ValueError("list_status must be L, D, P, or G")
+        if self.is_hs is not None and self.is_hs not in _STOCK_BASIC_IS_HS:
+            raise ValueError("is_hs must be N, H, or S")
+        if (
+            not any(
+                value is not None
+                for value in (
+                    self.ts_code,
+                    self.name,
+                    self.market,
+                    self.list_status,
+                    self.exchange,
+                    self.is_hs,
+                )
+            )
+            and not self.all_market
+        ):
+            raise ValueError("a broad all-market request requires all_market=True")
+        selected_fields = _fields(self.fields, _STOCK_BASIC_FIELDS)
+        if "ts_code" not in selected_fields:
+            raise ValueError("fields must include ts_code")
+        object.__setattr__(self, "fields", selected_fields)
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "ts_code": self.ts_code,
+                "name": self.name,
+                "market": self.market,
+                "list_status": self.list_status,
+                "exchange": self.exchange,
+                "is_hs": self.is_hs,
+            }
+        )
+
+
+_INDEX_MEMBER_ALL_FIELDS = (
+    "l1_code",
+    "l1_name",
+    "l2_code",
+    "l2_name",
+    "l3_code",
+    "l3_name",
+    "ts_code",
+    "name",
+    "in_date",
+    "out_date",
+    "is_new",
+)
+
+
+@dataclass(frozen=True)
+class IndexMemberAllRequest(_BaseRequest):
+    """Typed ``index_member_all`` request frozen from the official contract.
+
+    ``in_date``/``out_date`` are provider-native membership dates, not
+    publication times; snapshot observation evidence is required for PIT use.
+    ``complete_history`` is a local contract flag (never sent to the provider)
+    that restricts a completeness claim to one explicit ``ts_code``.
+    """
+
+    l1_code: str | None = None
+    l2_code: str | None = None
+    l3_code: str | None = None
+    ts_code: str | None = None
+    is_new: str | None = None
+    complete_history: bool = False
+    fields: tuple[str, ...] = ()
+    endpoint: str = field(init=False, default="index_member_all")
+
+    def __post_init__(self) -> None:
+        _validate_empty(self.empty_policy)
+        for value, name in (
+            (self.l1_code, "l1_code"),
+            (self.l2_code, "l2_code"),
+            (self.l3_code, "l3_code"),
+            (self.ts_code, "ts_code"),
+        ):
+            if value is not None:
+                _nonempty(value, name)
+        if self.is_new is not None and self.is_new not in ("Y", "N"):
+            raise ValueError("is_new must be 'Y' or 'N'")
+        if self.complete_history:
+            if self.ts_code is None or "," in self.ts_code:
+                raise ValueError("complete_history requires exactly one ts_code")
+            if any(value is not None for value in (self.l1_code, self.l2_code, self.l3_code)):
+                raise ValueError("complete_history cannot combine with industry selectors")
+        if not any(
+            value is not None for value in (self.l1_code, self.l2_code, self.l3_code, self.ts_code)
+        ):
+            raise ValueError("at least one classification or stock selector is required")
+        selected_fields = _fields(self.fields, _INDEX_MEMBER_ALL_FIELDS)
+        for required in ("ts_code", "in_date", "l1_code", "l2_code", "l3_code"):
+            if required not in selected_fields:
+                raise ValueError(f"fields must include {required}")
+        object.__setattr__(self, "fields", selected_fields)
+
+    @property
+    def spec(self) -> RequestSpec:
+        return self._spec(
+            {
+                "l1_code": self.l1_code,
+                "l2_code": self.l2_code,
+                "l3_code": self.l3_code,
+                "ts_code": self.ts_code,
+                "is_new": self.is_new,
+            }
+        )

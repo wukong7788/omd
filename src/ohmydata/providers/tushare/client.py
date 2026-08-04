@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,8 +31,10 @@ from .endpoints import (
     FundNavRequest,
     FundPortfolioRequest,
     FundShareRequest,
+    IndexMemberAllRequest,
     IndexWeightRequest,
     StockAdjustmentRequest,
+    StockBasicRequest,
     StockDailyRequest,
     StockDividendRequest,
     TradeCalendarRequest,
@@ -47,10 +50,13 @@ _KEYS: dict[str, tuple[str, ...]] = {
     "adj_factor": ("ts_code", "trade_date"),
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
     "fund_share": ("ts_code", "trade_date"),
+    "index_weight": ("index_code", "trade_date", "con_code"),
     "etf_basic": ("ts_code",),
     "dividend": ("ts_code",),
     "etf_sh_cons": ("ts_code", "trade_date", "con_code"),
     "etf_sz_cons": ("ts_code", "trade_date", "con_code"),
+    "stock_basic": ("ts_code",),
+    "index_member_all": ("ts_code", "in_date", "l1_code", "l2_code", "l3_code"),
 }
 _NON_NULL_KEYS = {
     **_KEYS,
@@ -60,6 +66,8 @@ _NON_NULL_KEYS = {
     "index_weight": ("index_code", "trade_date", "con_code"),
     "etf_basic": ("ts_code",),
     "dividend": ("ts_code",),
+    "stock_basic": ("ts_code",),
+    "index_member_all": ("ts_code", "in_date", "l1_code", "l2_code", "l3_code"),
 }
 _UNIQUE_KEYS = {
     **_KEYS,
@@ -72,6 +80,8 @@ _UNIQUE_KEYS = {
     "dividend": (),
     "etf_sh_cons": (),
     "etf_sz_cons": (),
+    "stock_basic": ("ts_code",),
+    "index_member_all": (),
 }
 _SORT_KEYS = {
     "fund_nav": ("ts_code", "nav_date", "ann_date"),
@@ -100,6 +110,8 @@ _SORT_KEYS = {
     ),
     "etf_sh_cons": ("ts_code", "trade_date", "con_code"),
     "etf_sz_cons": ("ts_code", "trade_date", "con_code"),
+    "stock_basic": ("ts_code",),
+    "index_member_all": ("ts_code", "in_date", "l1_code", "l2_code", "l3_code"),
 }
 _CAPS = {
     "fund_basic": 15000,
@@ -111,6 +123,8 @@ _CAPS = {
     "etf_sh_cons": 3000,
     "etf_sz_cons": 3000,
     "etf_basic": 5000,
+    "stock_basic": 6000,
+    "index_member_all": 2000,
 }
 
 
@@ -198,6 +212,12 @@ class TushareClient:
     def fetch_index_weight(self, request: IndexWeightRequest) -> TushareFetchResult:
         return self._fetch_single(request)
 
+    def fetch_stock_basic(self, request: StockBasicRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
+    def fetch_index_member_all(self, request: IndexMemberAllRequest) -> TushareFetchResult:
+        return self._fetch_single(request)
+
     def _fetch_single(self, request: Any) -> TushareFetchResult:
         self._validate_request_keys(request)
         method = getattr(self._client, request.endpoint, None)
@@ -215,6 +235,10 @@ class TushareClient:
             self._validate_fund_nav_scope(frame, request)
         if request.endpoint == "fund_share" and not frame.empty:
             self._validate_fund_share_scope(frame, request)
+        if request.endpoint == "stock_basic" and not frame.empty:
+            self._validate_stock_basic_scope(frame, request)
+        if request.endpoint == "index_member_all" and not frame.empty:
+            self._validate_index_member_all_scope(frame, request)
         frame = self._sort_and_validate(frame, request)
         if isinstance(request, FundBasicRequest) and request.required_ts_codes:
             present = set(frame["ts_code"].tolist())
@@ -418,6 +442,68 @@ class TushareClient:
             raise SchemaMismatchError("response trade_date is outside request range")
         if request.end_date is not None and (dates > request.end_date).any():
             raise SchemaMismatchError("response trade_date is outside request range")
+
+    @staticmethod
+    def _validate_stock_basic_scope(frame: Any, request: StockBasicRequest) -> None:
+        if request.ts_code is not None and (frame["ts_code"] != request.ts_code).any():
+            raise SchemaMismatchError("response ts_code is outside request scope")
+        if request.name is not None and (frame["name"] != request.name).any():
+            raise SchemaMismatchError("response name is outside request scope")
+        if request.market is not None and (frame["market"] != request.market).any():
+            raise SchemaMismatchError("response market is outside request scope")
+        if request.exchange is not None and (frame["exchange"] != request.exchange).any():
+            raise SchemaMismatchError("response exchange is outside request scope")
+        if request.list_status is not None and (frame["list_status"] != request.list_status).any():
+            raise SchemaMismatchError("response list_status is outside request scope")
+        if request.is_hs is not None:
+            if "is_hs" not in frame.columns:
+                raise SchemaMismatchError("response is missing requested is_hs")
+            if (frame["is_hs"] != request.is_hs).any():
+                raise SchemaMismatchError("response is_hs is outside request scope")
+
+    @staticmethod
+    def _validate_index_member_all_scope(frame: Any, request: IndexMemberAllRequest) -> None:
+        if request.ts_code is not None:
+            allowed = {v.strip() for v in request.ts_code.split(",") if v.strip()}
+            if (~frame["ts_code"].isin(allowed)).any():
+                raise SchemaMismatchError("response ts_code is outside request scope")
+        for name in ("l1_code", "l2_code", "l3_code"):
+            value = getattr(request, name)
+            if value is not None and (frame[name] != value).any():
+                raise SchemaMismatchError(f"response {name} is outside request scope")
+        if request.is_new is not None:
+            if "is_new" not in frame.columns:
+                raise SchemaMismatchError("response is missing requested is_new")
+            if (frame["is_new"] != request.is_new).any():
+                raise SchemaMismatchError("response is_new is outside request scope")
+        for column in ("in_date", "out_date"):
+            if column not in frame.columns:
+                continue
+            for value in frame[column].tolist():
+                import pandas as pd
+
+                is_missing = (
+                    value is None
+                    or value is pd.NA
+                    or value is pd.NaT
+                    or (isinstance(value, float) and math.isnan(value))
+                )
+                if is_missing:
+                    if column == "out_date":
+                        continue
+                    raise SchemaMismatchError(f"response {column} is null")
+                if not isinstance(value, str) or re.fullmatch(r"\d{8}", value) is None:
+                    raise SchemaMismatchError(f"response {column} is malformed")
+                try:
+                    date(int(value[:4]), int(value[4:6]), int(value[6:]))
+                except ValueError as exc:
+                    raise SchemaMismatchError(f"response {column} is malformed") from exc
+        identity = ("ts_code", "in_date", "l1_code", "l2_code", "l3_code")
+        conflicts = frame.duplicated(subset=list(identity), keep=False) & ~frame.duplicated(
+            subset=list(frame.columns), keep=False
+        )
+        if conflicts.any():
+            raise SchemaMismatchError("conflicting duplicate membership identity")
 
     @staticmethod
     def _sort_and_validate(frame: Any, request: Any) -> Any:

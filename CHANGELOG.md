@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.2 — 2026-08-04
+
+- Added deterministic observed-result capture
+  (`capture_tushare_result`, `TushareObservedResult`) that serializes
+  validated provider-native frames into append-only snapshots with explicit
+  `observed_at`, replay and round-trip verification, and no provider or
+  credential access.
+
+- Added typed `stock_basic` and `index_member_all` endpoints with strict
+  selector/scope/date validation, explicit all-market and complete-history
+  opt-ins, duplicate and conflicting-membership fail-closed semantics,
+  provider-native value preservation, and documented row-cap ambiguity
+  detection (6000 / 2000).
+
+- Added pure look-through evidence recipes: observed ETF→index mapping
+  versions (`build_etf_index_mapping_observations`), index-weight vintage
+  audits (`audit_index_weight_vintage`) with separate retrieval, weight-total,
+  expected-count, and economic-completeness statuses, and immutable
+  manifest-only source bundles (`build_lookthrough_source_bundle`). No
+  historical interval, `first_usable_session`, classification, or exposure is
+  inferred. Bundles fail closed on missing mapped-index vintages and missing
+  per-component industry observations.
+
+- Added `docs/v0.1.2-lookthrough-migration.md` documenting the field-by-field
+  consumer boundary and the explicit statement that the historical funmoney
+  B6 look-through audit remains blocked.
+
 ## Unreleased
 
 ## 0.1.1 — 2026-08-03

@@ -170,6 +170,55 @@ constituent. `weight` remains the provider-native percentage, including null
 or non-finite values; no effective period, availability timestamp, or weight
 renormalization is inferred.
 
+## Look-through source facts (v0.1.2)
+
+`capture_tushare_result` serializes an already validated `TushareFetchResult`
+deterministically into an append-only `SnapshotStore` and returns an immutable
+`TushareObservedResult` binding provenance, snapshot/observation/fact
+identities, availability evidence, and a content hash:
+
+```python
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ohmydata.core import SnapshotStore
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    EtfBasicRequest,
+    TushareClient,
+    capture_tushare_result,
+)
+
+request = EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, ts_code="510050.SH")
+result = TushareClient(client).fetch_etf_basic(request)
+observed = capture_tushare_result(
+    SnapshotStore(Path("snapshots")),
+    request,
+    result,
+    observed_at=datetime.now(UTC),
+)
+```
+
+`observed_at` is explicit and timezone-aware; the capture path never reads
+credentials or calls a provider. Typed `stock_basic` and `index_member_all`
+endpoints add current stock identity and dated Shenwan industry membership
+facts; broad all-market requests require an explicit opt-in, and responses at
+the documented row caps (6000 / 2000) fail closed.
+
+The pure recipes `build_etf_index_mapping_observations`,
+`audit_index_weight_vintage`, and `build_lookthrough_source_bundle` report
+observed ETF→index mapping versions, per-vintage weight/count/retrieval
+diagnostics, and a manifest-only source bundle. They never infer historical
+effective dates, `first_usable_session`, weight renormalization, industry
+backfill, style/cluster labels, or portfolio exposure. Every emitted fact
+remains `PIT_UNPROVEN` unless an auditable provider contract proves
+otherwise; `index_weight` retrieval completeness is unproven in this release
+by contract. Bundle manifests report mapped indices without a captured weight
+vintage and record industry-observation coverage for every captured component.
+
+Consumer gaps are documented field-by-field in
+[`docs/v0.1.2-lookthrough-migration.md`](docs/v0.1.2-lookthrough-migration.md).
+
 ## Local checks
 
 ```bash
