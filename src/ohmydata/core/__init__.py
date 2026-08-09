@@ -27,6 +27,13 @@ from .snapshot import (
     SnapshotStore,
 )
 from .specs import RequestSpec
+from .vintage import (
+    SourceFactObservation,
+    SourceFactRegistry,
+    SourceFactRegistryManifest,
+    SourceFactRevisionRef,
+    SourceResolutionStatus,
+)
 
 __all__ = [
     "AttemptRecord",
@@ -62,6 +69,11 @@ __all__ = [
     "SnapshotRef",
     "SnapshotReplay",
     "SnapshotStore",
+    "SourceFactObservation",
+    "SourceFactRegistry",
+    "SourceFactRegistryManifest",
+    "SourceFactRevisionRef",
+    "SourceResolutionStatus",
     "TransientProviderError",
     "execute_with_retry",
 ]

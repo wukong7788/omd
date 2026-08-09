@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 — 2026-08-09
+
+- Added provider-neutral append-only source-fact registry and bounded offline ETF benchmark/constituent vintage artifacts. Tushare observations remain current-only where source availability is undocumented; completeness is fail-closed.
+
 ## 0.1.2 — 2026-08-04
 
 - Added deterministic observed-result capture

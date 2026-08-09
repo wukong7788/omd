@@ -33,6 +33,13 @@ _OUTPUT_COLUMNS = (
     "fact_version",
     "mapping_observation_status",
     "quality_flags",
+    "mapping_source_type",
+    "source_effective_from",
+    "source_effective_to",
+    "source_available_at",
+    "availability_basis",
+    "availability_precision",
+    "supersedes_fact_version",
 )
 
 
@@ -80,6 +87,8 @@ def _is_missing(value: Any) -> bool:
 
 def build_etf_index_mapping_observations(
     observations: Sequence[TushareObservedResult],
+    *,
+    include_vintage_fields: bool = False,
 ) -> EtfIndexMappingObservationResult:
     """Build observed ETF-to-index mapping versions from captured etf_basic results.
 
@@ -94,7 +103,7 @@ def build_etf_index_mapping_observations(
         observations,
         key=lambda item: (item.snapshot_fetched_at, item.observation_identity),
     )
-    previous: dict[str, tuple[str | None, datetime]] = {}
+    previous: dict[str, tuple[str | None, datetime, str]] = {}
     rows: list[list[Any]] = []
     for observation in ordered:
         if observation.observation.endpoint != "etf_basic":
@@ -124,6 +133,7 @@ def build_etf_index_mapping_observations(
             previous[symbol] = (
                 None if missing else str(index_code),
                 first_observed if first_observed is not None else fetched,
+                observation.fact_version,
             )
             rows.append(
                 [
@@ -139,11 +149,27 @@ def build_etf_index_mapping_observations(
                     observation.fact_version,
                     status,
                     "PIT_UNPROVEN",
+                    "PROVIDER_DECLARED",
+                    None,
+                    None,
+                    None,
+                    "PROVIDER_FIRST_OBSERVED",
+                    "UNKNOWN",
+                    prior[2]
+                    if prior is not None and prior[0] != (None if missing else str(index_code))
+                    else None,
                 ]
             )
     import pandas as pd
 
+    columns = _OUTPUT_COLUMNS if include_vintage_fields else _OUTPUT_COLUMNS[:12]
     frame = pd.DataFrame(rows, columns=_OUTPUT_COLUMNS)
+    if not include_vintage_fields:
+        frame = frame.loc[:, columns]
+    else:
+        frame.insert(0, "etf_code", frame["etf_symbol"])
+        frame.insert(2, "benchmark_index_code", frame["index_code"])
+        frame["revision_status"] = frame["mapping_observation_status"]
     return EtfIndexMappingObservationResult(frame, len(ordered), canonical_frame_hash(frame))
 
 

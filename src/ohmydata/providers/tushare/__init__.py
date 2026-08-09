@@ -59,6 +59,16 @@ from .recipes import (
     fetch_adjusted_etf_bars,
     fetch_etf_pcf_history,
 )
+from .vintage_plane import (
+    CoverageItemResult,
+    CoverageItemStatus,
+    EtfBenchmarkConstituentBundle,
+    EtfBenchmarkConstituentScope,
+    assemble_etf_benchmark_constituent_vintages,
+    derive_cutoff_status,
+    match_scope_observations,
+    produce_etf_benchmark_constituent_vintages,
+)
 
 __all__ = [
     "DECIMAL_WEIGHT_UNIT",
@@ -68,12 +78,16 @@ __all__ = [
     "AdjustedEtfBarsRequest",
     "AdjustedEtfBarsResult",
     "AdjustmentCoveragePolicy",
+    "CoverageItemResult",
+    "CoverageItemStatus",
     "DailyBasicRequest",
     "DividendYieldCoveragePolicy",
     "DividendYieldWeightSource",
     "EconomicCompletenessStatus",
     "EmptyPolicy",
     "EtfBasicRequest",
+    "EtfBenchmarkConstituentBundle",
+    "EtfBenchmarkConstituentScope",
     "EtfIndexMappingObservationResult",
     "EtfPcfHistoryRequest",
     "EtfPcfHistoryResult",
@@ -105,6 +119,7 @@ __all__ = [
     "TushareObservedResult",
     "WeightTotalStatus",
     "WeightedDividendYieldResult",
+    "assemble_etf_benchmark_constituent_vintages",
     "audit_index_weight_vintage",
     "build_adjusted_etf_bars",
     "build_etf_index_mapping_observations",
@@ -113,8 +128,11 @@ __all__ = [
     "build_portfolio_dividend_yield",
     "capture_tushare_result",
     "classify_tushare_exception",
+    "derive_cutoff_status",
     "deserialize_tushare_frame",
     "fetch_adjusted_etf_bars",
     "fetch_etf_pcf_history",
+    "match_scope_observations",
+    "produce_etf_benchmark_constituent_vintages",
     "serialize_tushare_frame",
 ]

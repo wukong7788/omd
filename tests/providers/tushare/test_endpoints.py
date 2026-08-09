@@ -461,6 +461,14 @@ def test_public_exports_are_exact_and_no_arbitrary_fetch():
         "fetch_adjusted_etf_bars",
         "fetch_etf_pcf_history",
         "serialize_tushare_frame",
+        "EtfBenchmarkConstituentBundle",
+        "EtfBenchmarkConstituentScope",
+        "assemble_etf_benchmark_constituent_vintages",
+        "produce_etf_benchmark_constituent_vintages",
+        "CoverageItemStatus",
+        "CoverageItemResult",
+        "derive_cutoff_status",
+        "match_scope_observations",
     }
     assert "fetch" not in dir(tushare.TushareClient)
     source = inspect.getsource(tushare.TushareClient)

@@ -50,6 +50,11 @@ def test_core_exports_are_explicit() -> None:
         "SnapshotStore",
         "TransientProviderError",
         "execute_with_retry",
+        "SourceFactObservation",
+        "SourceFactRegistry",
+        "SourceFactRegistryManifest",
+        "SourceFactRevisionRef",
+        "SourceResolutionStatus",
     }
     assert set(core.__all__) == expected
 

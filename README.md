@@ -16,6 +16,37 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
 Pandas-backed adapter. Provider tests use fake clients and never call a network.
 
+The optional `ohmydata[vintage-plane]` extra provides the ETF benchmark and
+constituent vintage artifact assembler. It accepts only caller-constructed,
+bounded requests and synthetic captured observations; it never discovers
+credentials or universes. Current Tushare mappings are current-only evidence,
+not historical point-in-time availability, and `index_weight` retrieval and
+economic completeness remain explicitly unproven under the provider contract.
+
+```python
+from datetime import UTC, datetime
+from pathlib import Path
+from ohmydata.core import SnapshotStore, SourceFactRegistry
+from ohmydata.providers.tushare import (
+    EtfBenchmarkConstituentScope,
+    assemble_etf_benchmark_constituent_vintages,
+)
+
+# Offline synthetic assembly; no credentials or network are used.
+bundle = assemble_etf_benchmark_constituent_vintages(
+    [],
+    store=SnapshotStore(Path("snapshots")),
+    registry=SourceFactRegistry(Path("registry")),
+    scope=EtfBenchmarkConstituentScope(),
+    cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+    output_dir=Path("bundle"),
+)
+```
+
+OMD owns source evidence and immutable lineage only. Consumers own canonical
+cutoffs, trading calendars, session alignment, normalized datasets, and all
+strategy or portfolio semantics.
+
 The optional `ohmydata[polars]` extra provides explicit, eager representation
 adapters:
 
