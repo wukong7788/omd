@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import tempfile
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -26,10 +26,15 @@ from ohmydata.providers.sec.financials import (
 )
 from ohmydata.providers.sec.financials_dataset import write_financials_partition
 
+HAS_EDGAR = importlib.util.find_spec("edgar") is not None
+
 
 def test_ensure_edgar_available() -> None:
-    # edgartools is installed in test environment
-    ensure_edgar_available()
+    if HAS_EDGAR:
+        ensure_edgar_available()
+    else:
+        with pytest.raises(ImportError, match="edgartools is required"):
+            ensure_edgar_available()
 
 
 def test_validate_user_agent() -> None:
@@ -121,6 +126,7 @@ def test_vintage_requires_timezone_aware_accepted_at() -> None:
         )
 
 
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_parse_statement_rows_from_mock_statement() -> None:
     mock_statement = MagicMock()
     df_data = {
@@ -153,6 +159,7 @@ def test_parse_statement_rows_from_mock_statement() -> None:
     assert rd_2023.label == "Research and development"
 
 
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_client_from_config_and_runner_offline() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
@@ -248,6 +255,7 @@ def test_write_financials_partition_and_manifest() -> None:
         assert "Revenues" in concepts
 
 
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_parse_statement_rows_dimensional_filtering() -> None:
     mock_statement = MagicMock()
     df_data = {
@@ -277,6 +285,7 @@ def test_parse_statement_rows_dimensional_filtering() -> None:
     assert len(all_rows) == 3
 
 
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_client_fetch_company_financials_with_mocked_edgar_objects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -340,6 +349,7 @@ def test_client_fetch_company_financials_with_mocked_edgar_objects(
     assert v.rows[0].value == Decimal(29965000000)
 
 
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_cli_sec_financials_commands(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
