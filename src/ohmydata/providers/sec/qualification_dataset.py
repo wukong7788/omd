@@ -269,28 +269,16 @@ def _fsync_dir(path: Path) -> None:
         pass
 
 
-def write_qualification_bundle(
+def write_candidate_qualification_tables(
     *,
-    output_dir: Path,
+    stage_dir: Path,
     request_data: dict[str, Any],
     coverage_rows: list[dict[str, Any]],
     vintage_quality_rows: list[dict[str, Any]],
     amendment_facts_rows: list[dict[str, Any]],
     identifier_quality_rows: list[dict[str, Any]],
-    receipt_data: dict[str, Any],
-) -> dict[str, Any]:
-    """Deterministically and atomically writes the complete qualification bundle."""
-    from ...core.errors import SnapshotIntegrityError
-
-    resolved_output = output_dir.resolve()
-    if resolved_output.exists():
-        raise FileExistsError(f"output directory already exists: {output_dir}")
-    if output_dir.is_symlink():
-        raise SnapshotIntegrityError(f"output path is a symlink: {output_dir}")
-
-    parent = output_dir.parent
-    parent.mkdir(parents=True, exist_ok=True)
-
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Writes the 4 candidate fact tables and qualification_request.json to staging."""
     pa = _pa()
     pq: Any = importlib.import_module("pyarrow.parquet")
 
@@ -329,116 +317,165 @@ def write_qualification_bundle(
         ),
     )
 
-    # 2. Stage in sibling temporary directory
+    tables_to_write = (
+        (
+            "quarter_fund_coverage.parquet",
+            sorted_coverage,
+            get_coverage_schema(pa),
+            "quarter_fund_coverage",
+        ),
+        (
+            "vintage_quality.parquet",
+            sorted_vintage,
+            get_vintage_quality_schema(pa),
+            "vintage_quality",
+        ),
+        (
+            "amendment_facts.parquet",
+            sorted_amendment,
+            get_amendment_facts_schema(pa),
+            "amendment_facts",
+        ),
+        (
+            "identifier_quality.parquet",
+            sorted_identifier,
+            get_identifier_quality_schema(pa),
+            "identifier_quality",
+        ),
+    )
+
+    output_artifacts: dict[str, Any] = {}
+    schemas_desc: dict[str, Any] = {}
+
+    for file_name, rows, schema, table_key in tables_to_write:
+        file_path = stage_dir / file_name
+        arrow_table = pa.Table.from_pylist(rows, schema=schema)
+        pq.write_table(arrow_table, file_path, compression="zstd")
+
+        # fsync file
+        fd = os.open(file_path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+        size_bytes = file_path.stat().st_size
+        file_hash = _sha256_file(file_path)
+        fp = schema_fingerprint(schema)
+        log_hash = logical_table_hash(table_key, arrow_table.to_pylist())
+
+        output_artifacts[file_name] = {
+            "path": file_name,
+            "bytes": size_bytes,
+            "sha256": file_hash,
+            "row_count": len(rows),
+            "schema_fingerprint": fp,
+            "logical_hash": log_hash,
+        }
+        schemas_desc[table_key] = {
+            "fingerprint": fp,
+            "fields": [
+                {"name": f.name, "type": str(f.type), "nullable": f.nullable} for f in schema
+            ],
+        }
+
+    # Write qualification_request.json
+    req_path = stage_dir / "qualification_request.json"
+    req_content = json.dumps(request_data, indent=2, sort_keys=True)
+    req_path.write_text(req_content, encoding="utf-8")
+    fd = os.open(req_path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+    output_artifacts["qualification_request.json"] = {
+        "path": "qualification_request.json",
+        "bytes": req_path.stat().st_size,
+        "sha256": _sha256_file(req_path),
+        "row_count": 1,
+        "schema_fingerprint": canonical_hash(list(request_data.keys())),
+        "logical_hash": canonical_hash(request_data),
+    }
+
+    _fsync_dir(stage_dir)
+    return output_artifacts, schemas_desc
+
+
+def publish_qualification_receipt_and_rename(
+    *,
+    stage_dir: Path,
+    output_dir: Path,
+    receipt_data: dict[str, Any],
+) -> str:
+    """Writes receipt in staging, fsyncs, and atomically renames to output_dir."""
+    from ...core.errors import SnapshotIntegrityError
+
+    parent = output_dir.parent
+    rcp_path = stage_dir / "qualification_receipt.json"
+    rcp_content = json.dumps(receipt_data, indent=2, sort_keys=True)
+    rcp_path.write_text(rcp_content, encoding="utf-8")
+    fd = os.open(rcp_path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+    _fsync_dir(stage_dir)
+
+    try:
+        stage_dir.replace(output_dir)
+    except OSError as exc:
+        raise SnapshotIntegrityError(f"atomic publication failed: {exc}") from exc
+
+    _fsync_dir(parent)
+    return canonical_hash(receipt_data)
+
+
+def write_qualification_bundle(
+    *,
+    output_dir: Path,
+    request_data: dict[str, Any],
+    coverage_rows: list[dict[str, Any]],
+    vintage_quality_rows: list[dict[str, Any]],
+    amendment_facts_rows: list[dict[str, Any]],
+    identifier_quality_rows: list[dict[str, Any]],
+    receipt_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Deterministically and atomically writes the complete qualification bundle."""
+    from ...core.errors import SnapshotIntegrityError
+
+    resolved_output = output_dir.resolve()
+    if resolved_output.exists():
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+    if output_dir.is_symlink():
+        raise SnapshotIntegrityError(f"output path is a symlink: {output_dir}")
+
+    parent = output_dir.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
     stage_dir = parent / f".tmp-qualify-{uuid.uuid4().hex}"
     stage_dir.mkdir(parents=True, exist_ok=False)
 
     try:
-        tables_to_write = (
-            (
-                "quarter_fund_coverage.parquet",
-                sorted_coverage,
-                get_coverage_schema(pa),
-                "quarter_fund_coverage",
-            ),
-            (
-                "vintage_quality.parquet",
-                sorted_vintage,
-                get_vintage_quality_schema(pa),
-                "vintage_quality",
-            ),
-            (
-                "amendment_facts.parquet",
-                sorted_amendment,
-                get_amendment_facts_schema(pa),
-                "amendment_facts",
-            ),
-            (
-                "identifier_quality.parquet",
-                sorted_identifier,
-                get_identifier_quality_schema(pa),
-                "identifier_quality",
-            ),
+        artifacts, schemas = write_candidate_qualification_tables(
+            stage_dir=stage_dir,
+            request_data=request_data,
+            coverage_rows=coverage_rows,
+            vintage_quality_rows=vintage_quality_rows,
+            amendment_facts_rows=amendment_facts_rows,
+            identifier_quality_rows=identifier_quality_rows,
         )
+        receipt_data["output_artifacts"] = artifacts
+        receipt_data["schemas"] = schemas
 
-        output_artifacts: dict[str, Any] = {}
-        schemas_desc: dict[str, Any] = {}
-
-        for file_name, rows, schema, table_key in tables_to_write:
-            file_path = stage_dir / file_name
-            arrow_table = pa.Table.from_pylist(rows, schema=schema)
-            pq.write_table(arrow_table, file_path, compression="zstd")
-
-            # fsync file
-            fd = os.open(file_path, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-
-            size_bytes = file_path.stat().st_size
-            file_hash = _sha256_file(file_path)
-            fp = schema_fingerprint(schema)
-            log_hash = logical_table_hash(table_key, arrow_table.to_pylist())
-
-            output_artifacts[file_name] = {
-                "path": file_name,
-                "bytes": size_bytes,
-                "sha256": file_hash,
-                "row_count": len(rows),
-                "schema_fingerprint": fp,
-                "logical_hash": log_hash,
-            }
-            schemas_desc[table_key] = {
-                "fingerprint": fp,
-                "fields": [
-                    {"name": f.name, "type": str(f.type), "nullable": f.nullable} for f in schema
-                ],
-            }
-
-        # 3. Write qualification_request.json
-        req_path = stage_dir / "qualification_request.json"
-        req_content = json.dumps(request_data, indent=2, sort_keys=True)
-        req_path.write_text(req_content, encoding="utf-8")
-        fd = os.open(req_path, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
-        output_artifacts["qualification_request.json"] = {
-            "path": "qualification_request.json",
-            "bytes": req_path.stat().st_size,
-            "sha256": _sha256_file(req_path),
-            "row_count": 1,
-            "schema_fingerprint": canonical_hash(list(request_data.keys())),
-            "logical_hash": canonical_hash(request_data),
-        }
-
-        # 4. Finalize receipt and write qualification_receipt.json
-        receipt_data["output_artifacts"] = output_artifacts
-        receipt_data["schemas"] = schemas_desc
-        rcp_path = stage_dir / "qualification_receipt.json"
-        rcp_content = json.dumps(receipt_data, indent=2, sort_keys=True)
-        rcp_path.write_text(rcp_content, encoding="utf-8")
-        fd = os.open(rcp_path, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
-        _fsync_dir(stage_dir)
-
-        # 5. Atomic publication via directory rename
-        try:
-            stage_dir.replace(output_dir)
-        except OSError as exc:
-            raise SnapshotIntegrityError(f"atomic publication failed: {exc}") from exc
-
-        _fsync_dir(parent)
+        publish_qualification_receipt_and_rename(
+            stage_dir=stage_dir,
+            output_dir=output_dir,
+            receipt_data=receipt_data,
+        )
         return receipt_data
     except Exception:
-        # Cleanup temporary directory on error
         if stage_dir.exists():
             import shutil
 

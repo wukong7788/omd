@@ -1,8 +1,12 @@
 # SEC N-PORT Structural Qualification V1
 
-Status: **IMPLEMENTED AND ACCEPTED**
+Status: **0.1.7 IMPLEMENTED AND VERIFIED; PENDING RERUN ACCEPTANCE**
 
-Target release: `0.1.6`
+Target releases:
+
+- `0.1.6` — initial implementation;
+- `0.1.7` — independent-replay and atomic-publication correction defined in
+  section 14.
 
 Predecessors:
 
@@ -596,3 +600,110 @@ The plan is ready for implementation only after review confirms:
 Until those gates pass, the next legal action is plan review and amendment.
 Running a full qualification, publishing a release, migrating a consumer, or
 starting an economic experiment is outside this draft's authority.
+
+## 14. Release 0.1.7 corrective slice
+
+### 14.1 Trigger and evidence status
+
+The ignored local 9-fund, 27-quarter characterization run against OMD `0.1.6`
+completed with a reported `STRUCTURALLY_COMPLETE` status, but review found that
+the persisted success evidence does not satisfy sections 7.5, 8, and 9:
+
+1. the qualification receipt is finalized before post-persist replay updates
+   `replay_rows_read` and `replay_table_scans`, so the on-disk counters remain
+   zero even when the in-process return object records replay work;
+2. `ARTIFACTS_REOPENED` is persisted as passed before replay has actually
+   completed;
+3. the replay implementation reopens output files and compares them with the
+   same writer-produced receipt, but does not independently reconstruct facts
+   from the validated input partitions; and
+4. the replay contract therefore cannot detect a coherent writer defect that
+   produces mutually consistent but incorrect output tables and descriptors.
+
+The `0.1.6` characterization remains useful discovery evidence for coverage,
+runtime, and source-fact inspection. It is not a consumer-bindable final
+qualification receipt and must not authorize an economic experiment,
+promotion, or live/universe change.
+
+### 14.2 Frozen correction scope
+
+OMD `0.1.7` must correct evidence finalization without changing provider-native
+facts, selected partitions, schemas, row semantics, universe membership,
+availability policy, or consumer ownership boundaries.
+
+The corrected execution order is:
+
+1. validate the exact requested local artifact/catalog closure and resolve the
+   exact partition set;
+2. construct the four candidate fact tables in a private sibling staging
+   directory;
+3. reopen the canonical request and input descriptors from staged evidence;
+4. rerun production source validation against the exact input partitions;
+5. independently reconstruct all four fact tables from those validated source
+   partitions without calling the production output writer and without trusting
+   writer-produced rows, summaries, gates, or artifact descriptors;
+6. compare schemas, row counts, row values, logical hashes, and deterministic
+   Parquet bytes between the candidate and independently reconstructed tables;
+7. record the completed replay scans, rows, elapsed time, and peak memory in the
+   final receipt, and set replay-dependent gates only from completed checks;
+8. write and fsync the final receipt in staging, compute the receipt identity
+   from that exact persisted payload, and atomically rename the staging
+   directory to the requested output path; and
+9. on any validation, reconstruction, comparison, deadline, or publication
+   failure, remove only the invocation-owned private staging directory and
+   leave no success directory at the requested output path.
+
+`expected_receipt` or an equivalent comparison input must either participate in
+the verification contract or be removed. An unused trust-bearing parameter is
+not permitted.
+
+### 14.3 Receipt and API requirements
+
+The final on-disk receipt, CLI JSON result, and public Python return object must
+agree on:
+
+- receipt identity;
+- qualification status and every gate;
+- input partition and output artifact identities;
+- `replay_rows_read` and `replay_table_scans`;
+- replay and total elapsed time; and
+- final peak resident memory.
+
+`ARTIFACTS_REOPENED`, `SOURCE_VALIDATED`, and all reconstruction gates must not
+be true in a persisted success receipt until the corresponding independent
+checks have completed. No mutable counter object may be changed after its
+canonical receipt payload has been written.
+
+### 14.4 Required regression evidence
+
+Release `0.1.7` is not accepted until offline tests prove:
+
+1. on-disk replay counters equal the independently measured table scans and
+   rows, and match the CLI/API result;
+2. a coherent mutation of an output table plus its writer-produced descriptor
+   is rejected by source-based reconstruction;
+3. mutations of receipt gates, summaries, request identity, partition identity,
+   and every output artifact are rejected;
+4. mutation or replacement of an input partition between initial validation
+   and replay is rejected;
+5. replay failure, cancellation, and deadline expiry leave no published success
+   directory or orphaned staging directory;
+6. repeated runs in separate output roots produce byte-identical Parquet facts
+   and the expected canonical identity behavior for path-bearing receipt fields;
+7. the structural counters demonstrate one bounded source pass for production
+   construction and one bounded, explicit source pass for independent replay;
+   and
+8. the existing one-quarter probe and ignored 9-fund, 27-quarter
+   characterization both pass under the corrected implementation.
+
+### 14.5 Migration and acceptance
+
+After `0.1.7` is released, the 2019Q4--2026Q2 qualification must be rerun into a
+new immutable output directory. Consumers must bind only the new version,
+partition-set hash, artifact hashes, and corrected receipt identity. Existing
+`0.1.6` qualification directories are retained as non-authoritative diagnostic
+evidence; they are not overwritten, relabeled, or silently promoted.
+
+Only after independent review confirms the implementation and the rerun receipt
+may this plan return to **IMPLEMENTED AND ACCEPTED** and may a consumer begin
+session alignment, consumer-defined quality thresholds, or economic research.

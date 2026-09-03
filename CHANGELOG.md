@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7 — 2026-09-03
+
+- Corrected SEC N-PORT Structural Qualification pipeline with source-based independent replay
+  and atomic staging publication:
+  - Fact tables are staged in private sibling directories (`.tmp-qualify-{uuid}`) before publication.
+  - Independent replay independently reconstructs all 4 fact tables from validated source partitions
+    and compares schemas, row counts, row values, logical hashes, and file SHA-256 digests against
+    staged candidate tables, catching coherent writer defects in tables and descriptors.
+  - Qualification receipts written to disk now record exact measured replay counters
+    (`replay_rows_read`, `replay_table_scans`), resolving zero counters on disk.
+  - Replay-dependent gates (`ARTIFACTS_REOPENED`, `SOURCE_VALIDATED`, and reconstruction gates)
+    are only set to True in the persisted receipt after independent validation succeeds.
+  - Directory publication is atomic (`stage_dir.replace(output)`), and any error, cancellation,
+    or deadline expiry leaves no published output directory and removes staging.
+  - `expected_receipt` in `reconstruct_and_verify_qualification` participates fully in verification
+    contracts.
+
 ## 0.1.6 — 2026-09-03
 
 - Added SEC N-PORT Structural Qualification V1 subsystem (`omd sec nport qualify`

@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib
 import json
 import resource
+import shutil
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -25,6 +27,7 @@ from .batch import (
     SecNportBatch,
     canonical_hash,
 )
+from .core_dataset import validate_tables
 from .qualification_dataset import (
     QUALIFICATION_RECEIPT_SCHEMA,
     _sha256_file,
@@ -33,8 +36,9 @@ from .qualification_dataset import (
     get_identifier_quality_schema,
     get_vintage_quality_schema,
     logical_table_hash,
+    publish_qualification_receipt_and_rename,
     schema_fingerprint,
-    write_qualification_bundle,
+    write_candidate_qualification_tables,
 )
 
 
@@ -44,101 +48,64 @@ class SecNportPartitionSetEntry:
     partition_identity: str
     manifest_hash: str
 
-
-@dataclass(frozen=True)
-class SecNportPartitionSet:
-    entries: tuple[SecNportPartitionSetEntry, ...]
-    manifest_hash: str = ""
-
-    def __post_init__(self) -> None:
-        raw_entries = [
-            {
-                "source_quarter": e.source_quarter,
-                "partition_identity": e.partition_identity,
-                "manifest_hash": e.manifest_hash,
-            }
-            for e in self.entries
-        ]
-        computed_hash = canonical_hash(
-            {
-                "schema_version": "sec-nport-partition-set-v1",
-                "entries": raw_entries,
-            }
-        )
-        if not self.manifest_hash:
-            object.__setattr__(self, "manifest_hash", computed_hash)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SecNportPartitionSet:
-        if data.get("schema_version") != "sec-nport-partition-set-v1":
-            raise SchemaMismatchError(f"invalid partition-set schema: {data.get('schema_version')}")
-        raw_entries = data.get("entries")
-        if not isinstance(raw_entries, list):
-            raise SchemaMismatchError("partition-set entries must be a list")
-
-        seen_quarters: set[str] = set()
-        entries: list[SecNportPartitionSetEntry] = []
-        for item in raw_entries:
-            if not isinstance(item, dict):
-                raise SchemaMismatchError("invalid partition-set entry")
-            q = str(item.get("source_quarter", ""))
-            pid = str(item.get("partition_identity", ""))
-            mhash = str(item.get("manifest_hash", ""))
-            if not q or not pid or not mhash:
-                raise SchemaMismatchError("partition-set entry missing required keys")
-            if q in seen_quarters:
-                raise SchemaMismatchError(f"duplicate quarter in partition set: {q}")
-            seen_quarters.add(q)
-            entries.append(SecNportPartitionSetEntry(q, pid, mhash))
-
-        entries.sort(key=lambda e: Quarter.parse(e.source_quarter))
-        return cls(tuple(entries))
-
-    @classmethod
-    def load(cls, path: str | Path) -> SecNportPartitionSet:
-        p = Path(path)
-        if not p.is_file():
-            raise CoverageError(f"partition-set file not found: {path}")
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise SchemaMismatchError(f"invalid partition-set JSON: {exc}") from exc
-        return cls.from_dict(data)
-
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, str]:
         return {
-            "schema_version": "sec-nport-partition-set-v1",
-            "entries": [
-                {
-                    "source_quarter": e.source_quarter,
-                    "partition_identity": e.partition_identity,
-                    "manifest_hash": e.manifest_hash,
-                }
-                for e in self.entries
-            ],
+            "source_quarter": self.source_quarter,
+            "partition_identity": self.partition_identity,
             "manifest_hash": self.manifest_hash,
         }
 
 
 @dataclass(frozen=True)
+class SecNportPartitionSet:
+    entries: tuple[SecNportPartitionSetEntry, ...]
+
+    def __post_init__(self) -> None:
+        seen_quarters: set[str] = set()
+        for e in self.entries:
+            if e.source_quarter in seen_quarters:
+                raise SchemaMismatchError(f"duplicate quarter in partition set: {e.source_quarter}")
+            seen_quarters.add(e.source_quarter)
+
+    @classmethod
+    def load(cls, path: str | Path) -> SecNportPartitionSet:
+        p = Path(path)
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("schema_version") != "sec-nport-partition-set-v1":
+            raise SchemaMismatchError("invalid partition set schema version")
+        entries = tuple(
+            SecNportPartitionSetEntry(
+                source_quarter=str(e["source_quarter"]),
+                partition_identity=str(e["partition_identity"]),
+                manifest_hash=str(e["manifest_hash"]),
+            )
+            for e in data.get("entries", [])
+        )
+        return cls(entries=entries)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "schema_version": "sec-nport-partition-set-v1",
+            "entries": [e.to_dict() for e in self.entries],
+        }
+        d["manifest_hash"] = canonical_hash(d)
+        return d
+
+
+@dataclass
 class Deadline:
-    timeout_seconds: float
+    timeout_seconds: float | None = None
     start_time: float = field(default_factory=time.monotonic)
 
     def check(self) -> None:
-        if time.monotonic() - self.start_time > self.timeout_seconds:
-            raise ResourceLimitError("qualification deadline exceeded")
+        if self.timeout_seconds is not None and (
+            time.monotonic() - self.start_time > self.timeout_seconds
+        ):
+            raise ResourceLimitError("qualification execution deadline exceeded")
 
 
 class QualificationProgress(Protocol):
-    def report(
-        self,
-        phase: str,
-        quarter: str | None = None,
-        partition_index: int = 0,
-        partition_count: int = 0,
-        rows_read: int = 0,
-    ) -> None: ...
+    def report(self, phase: str, **kwargs: Any) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -152,7 +119,7 @@ class SecNportQualificationRequest:
     partition_set_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "root": self.root,
             "quarters": list(self.quarters),
             "universe_hash": self.universe_hash,
@@ -161,6 +128,8 @@ class SecNportQualificationRequest:
             "output": self.output,
             "partition_set_hash": self.partition_set_hash,
         }
+        d["request_hash"] = canonical_hash(d)
+        return d
 
 
 @dataclass(frozen=True)
@@ -173,6 +142,7 @@ class SecNportQualificationRef:
 
 
 def select_exact_partitions(
+    *,
     batch: SecNportBatch,
     quarters: tuple[Quarter, ...],
     universe: SecEquityEtfUniverse,
@@ -180,144 +150,90 @@ def select_exact_partitions(
     lag_days: int | None,
     partition_set: SecNportPartitionSet | None = None,
 ) -> list[dict[str, Any]]:
-    """Resolves exactly one partition per requested quarter or raises an explicit error."""
-    validated_entries = batch.iter_validated_partitions(quarters)
-
-    effective_lag: int | None = None if availability_policy == "observation-only" else lag_days
-
+    """Resolves exactly one validated partition per quarter, failing on ambiguity."""
+    validated = batch.iter_validated_partitions(quarters)
     selected: list[dict[str, Any]] = []
 
     if partition_set is not None:
-        # Caller provided an explicit partition set
         set_quarters = {Quarter.parse(e.source_quarter) for e in partition_set.entries}
         req_quarters = set(quarters)
         if set_quarters != req_quarters:
-            raise CoverageError(
-                f"partition set quarters {set_quarters} do not match requested quarters {req_quarters}"
-            )
+            raise CoverageError("partition set quarters do not match requested quarters")
 
-        by_quarter_entry = {e.source_quarter: e for e in partition_set.entries}
-        for q in quarters:
-            ps_entry = by_quarter_entry[str(q)]
-            matches = [
-                e
-                for e in validated_entries
-                if str(e.get("source_quarter")) == ps_entry.source_quarter
-                and str(e.get("partition_identity")) == ps_entry.partition_identity
-                and str(e.get("manifest_hash")) == ps_entry.manifest_hash
+    for q in quarters:
+        candidates = [
+            e
+            for e in validated
+            if str(e.get("source_quarter")) == str(q)
+            and str(e.get("universe_hash")) == universe.universe_hash
+            and str(e.get("availability_policy")) == availability_policy
+            and (e.get("lag_days") == lag_days or (lag_days is None and e.get("lag_days") == 0))
+        ]
+
+        if not candidates:
+            raise CoverageError(f"no matching partition found for quarter {q}")
+
+        if partition_set is not None:
+            entry_map = {
+                e.source_quarter: (e.partition_identity, e.manifest_hash)
+                for e in partition_set.entries
+            }
+            target_identity, target_hash = entry_map[str(q)]
+            exact = [
+                c
+                for c in candidates
+                if str(c.get("partition_identity")) == target_identity
+                and str(c.get("manifest_hash")) == target_hash
             ]
-            if not matches:
-                raise CoverageError(
-                    f"partition-set entry {ps_entry.source_quarter}/{ps_entry.partition_identity} not found in validated catalog"
-                )
-            match = matches[0]
-            if (
-                str(match.get("universe_hash")) != universe.universe_hash
-                or str(match.get("availability_policy")) != availability_policy
-                or match.get("lag_days") != effective_lag
-            ):
-                raise SchemaMismatchError(
-                    f"partition-set partition {ps_entry.partition_identity} does not match request dimensions"
-                )
-            selected.append(match)
-    else:
-        # Implicit selection: must find exactly 1 matching partition per quarter
-        for q in quarters:
-            matches = [
-                e
-                for e in validated_entries
-                if str(e.get("source_quarter")) == str(q)
-                and str(e.get("universe_hash")) == universe.universe_hash
-                and str(e.get("availability_policy")) == availability_policy
-                and e.get("lag_days") == effective_lag
-            ]
-            if len(matches) == 0:
-                raise CoverageError(f"no matching partition found for quarter {q}")
-            if len(matches) > 1:
+            if not exact:
+                raise CoverageError(f"partition set target not found for quarter {q}")
+            if len(exact) > 1:
                 raise AmbiguousPartitionError(
-                    f"ambiguous partition selection for quarter {q}: found {len(matches)} matching partitions"
+                    f"duplicate matching partition in catalog for quarter {q}"
                 )
-            selected.append(matches[0])
+            selected.append(exact[0])
+        else:
+            if len(candidates) > 1:
+                distinct_identities = {str(c.get("partition_identity")) for c in candidates}
+                if len(distinct_identities) > 1:
+                    raise AmbiguousPartitionError(
+                        f"ambiguous candidate partitions for quarter {q}; explicit partition_set required"
+                    )
+            selected.append(candidates[0])
 
+    selected.sort(key=lambda x: str(x.get("source_quarter", "")))
     return selected
 
 
 def _safe_rss_bytes() -> int:
     try:
-        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # On macOS ru_maxrss is in bytes, on Linux in kilobytes
         import sys
 
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return usage if sys.platform == "darwin" else usage * 1024
     except (OSError, AttributeError):
         return 0
 
 
-def qualify_sec_nport(
+def extract_qualification_facts(
     *,
     root: Path,
-    quarters: tuple[Quarter, ...],
+    selected_catalog_entries: list[dict[str, Any]],
     universe: SecEquityEtfUniverse,
-    availability_policy: str,
-    lag_days: int | None,
-    output: Path,
-    partition_set: SecNportPartitionSet | None = None,
-    progress: QualificationProgress | None = None,
+    counters: dict[str, Any],
+    is_replay: bool = False,
     deadline: Deadline | None = None,
-) -> SecNportQualificationRef:
-    """Core entrypoint for SEC N-PORT structural qualification."""
-    start_time = time.monotonic()
-    started_at_iso = datetime.now(UTC).isoformat()
-
-    if not quarters:
-        raise ValueError("quarters cannot be empty")
-    if len(quarters) != len(set(quarters)):
-        raise ValueError("quarters must not contain duplicate entries")
-    if sorted(quarters) != list(quarters):
-        raise ValueError("quarters must be in canonical sorted order")
-    if availability_policy not in ("observation-only", "accepted-at-plus-lag"):
-        raise ValueError(f"unsupported availability policy: {availability_policy}")
-    if availability_policy == "observation-only" and lag_days not in (None, 0):
-        raise ValueError("lag_days is invalid for observation-only policy")
-
-    if output.resolve().exists():
-        raise FileExistsError(f"output directory already exists: {output}")
-
-    if deadline:
-        deadline.check()
-
-    if progress:
-        progress.report("VALIDATING_SOURCES", partition_count=len(quarters))
-
-    batch = SecNportBatch(root)
-    # Step 1: Select exact partitions with integrity validation
-    selected_catalog_entries = select_exact_partitions(
-        batch=batch,
-        quarters=quarters,
-        universe=universe,
-        availability_policy=availability_policy,
-        lag_days=lag_days,
-        partition_set=partition_set,
-    )
-
-    if progress:
-        progress.report("SOURCES_VALIDATED", partition_count=len(selected_catalog_entries))
-
-    # Counters
-    counters: dict[str, Any] = {
-        "partitions_selected": len(selected_catalog_entries),
-        "fund_vintage_rows_read": 0,
-        "holding_rows_read": 0,
-        "identifier_rows_read": 0,
-        "table_scans": 0,
-        "row_groups_read": 0,
-        "qualification_rows_written": 0,
-        "replay_rows_read": 0,
-        "replay_table_scans": 0,
-        "phase_elapsed_seconds": 0.0,
-        "peak_rss_bytes": _safe_rss_bytes(),
-    }
-
+    progress: QualificationProgress | None = None,
+) -> tuple[
+    list[dict[str, Any]],  # coverage_rows
+    list[dict[str, Any]],  # vintage_quality_rows
+    list[dict[str, Any]],  # amendment_facts_rows
+    list[dict[str, Any]],  # identifier_quality_rows
+    bool,  # has_ambiguity
+    bool,  # has_partial_coverage
+    set[str],  # all_vintage_identities
+]:
+    """Pure fact extraction from validated input partitions."""
     pq: Any = importlib.import_module("pyarrow.parquet")
 
     coverage_rows: list[dict[str, Any]] = []
@@ -337,7 +253,7 @@ def qualify_sec_nport(
         quarter = Quarter.parse(q_str)
         part_path = root / str(entry["partition_path"])
 
-        if progress:
+        if progress and not is_replay:
             progress.report(
                 "PROCESSING_PARTITION",
                 quarter=q_str,
@@ -347,28 +263,43 @@ def qualify_sec_nport(
 
         # 1. Read fund_vintages
         v_file = pq.ParquetFile(part_path / "fund_vintages.parquet")
-        counters["table_scans"] += 1
-        counters["row_groups_read"] += v_file.num_row_groups
-        v_table = v_file.read()
-        v_rows: list[dict[str, Any]] = v_table.to_pylist()
-        counters["fund_vintage_rows_read"] += len(v_rows)
-
+        if not is_replay:
+            counters["table_scans"] += 1
+            counters["row_groups_read"] += v_file.num_row_groups
+            v_table = v_file.read()
+            v_rows: list[dict[str, Any]] = v_table.to_pylist()
+            counters["fund_vintage_rows_read"] += len(v_rows)
+        else:
+            counters["replay_table_scans"] += 1
+            v_table = v_file.read()
+            v_rows = v_table.to_pylist()
+            counters["replay_rows_read"] += len(v_rows)
         # 2. Read holdings
         h_file = pq.ParquetFile(part_path / "holdings.parquet")
-        counters["table_scans"] += 1
-        counters["row_groups_read"] += h_file.num_row_groups
-        h_table = h_file.read()
-        h_rows: list[dict[str, Any]] = h_table.to_pylist()
-        counters["holding_rows_read"] += len(h_rows)
-
+        if not is_replay:
+            counters["table_scans"] += 1
+            counters["row_groups_read"] += h_file.num_row_groups
+            h_table = h_file.read()
+            h_rows: list[dict[str, Any]] = h_table.to_pylist()
+            counters["holding_rows_read"] += len(h_rows)
+        else:
+            counters["replay_table_scans"] += 1
+            h_table = h_file.read()
+            h_rows = h_table.to_pylist()
+            counters["replay_rows_read"] += len(h_rows)
         # 3. Read identifiers
         id_file = pq.ParquetFile(part_path / "identifiers.parquet")
-        counters["table_scans"] += 1
-        counters["row_groups_read"] += id_file.num_row_groups
-        id_table = id_file.read()
-        id_rows: list[dict[str, Any]] = id_table.to_pylist()
-        counters["identifier_rows_read"] += len(id_rows)
-
+        if not is_replay:
+            counters["table_scans"] += 1
+            counters["row_groups_read"] += id_file.num_row_groups
+            id_table = id_file.read()
+            id_rows: list[dict[str, Any]] = id_table.to_pylist()
+            counters["identifier_rows_read"] += len(id_rows)
+        else:
+            counters["replay_table_scans"] += 1
+            id_table = id_file.read()
+            id_rows = id_table.to_pylist()
+            counters["replay_rows_read"] += len(id_rows)
         # Check unique vintage identities
         for v in v_rows:
             v_id = str(v["vintage_identity"])
@@ -756,150 +687,459 @@ def qualify_sec_nport(
                 }
             )
 
-    counters["qualification_rows_written"] = (
-        len(coverage_rows)
-        + len(vintage_quality_rows)
-        + len(amendment_facts_rows)
-        + len(identifier_quality_rows)
+    return (
+        coverage_rows,
+        vintage_quality_rows,
+        amendment_facts_rows,
+        identifier_quality_rows,
+        has_ambiguity,
+        has_partial_coverage,
+        all_vintage_identities,
     )
 
-    # Assess status & gates
-    if has_ambiguity:
-        status = "STRUCTURALLY_AMBIGUOUS"
-    elif has_partial_coverage:
-        status = "STRUCTURALLY_PARTIAL"
-    else:
-        status = "STRUCTURALLY_COMPLETE"
 
-    gates = {
-        "SOURCE_VALIDATED": True,
-        "PARTITION_SET_EXACT": True,
-        "EXPECTED_FUND_QUARTERS_ACCOUNTED": not has_partial_coverage,
-        "FUND_IDENTITIES_EXACT": True,
-        "VINTAGE_IDENTITIES_UNIQUE": len(all_vintage_identities) == len(vintage_quality_rows),
-        "AMENDMENT_FAMILIES_DETERMINISTIC": not has_ambiguity,
-        "WEIGHT_FACTS_RECONSTRUCTED": len(vintage_quality_rows) == len(all_vintage_identities),
-        "IDENTIFIER_FACTS_RECONSTRUCTED": len(identifier_quality_rows)
-        == len(all_vintage_identities),
-        "AVAILABILITY_FACTS_RECONSTRUCTED": True,
-        "ARTIFACTS_REOPENED": True,
-        "RESOURCE_ENVELOPE_PASSED": True,
-    }
+def reconstruct_and_verify_candidate_bundle(
+    *,
+    root: Path,
+    stage_dir: Path,
+    selected_catalog_entries: list[dict[str, Any]],
+    universe: SecEquityEtfUniverse,
+    request_obj: SecNportQualificationRequest,
+    output_artifacts: dict[str, Any],
+    counters: dict[str, Any],
+    deadline: Deadline | None = None,
+) -> None:
+    """Independently reconstructs facts from validated source partitions and verifies against candidate tables in staging."""
+    pa = importlib.import_module("pyarrow")
+    pq: Any = importlib.import_module("pyarrow.parquet")
 
-    # Construct partition set document for receipt
-    pset_dict = (
-        partition_set.to_dict()
-        if partition_set is not None
-        else SecNportPartitionSet(
-            tuple(
-                SecNportPartitionSetEntry(
-                    str(e["source_quarter"]),
-                    str(e["partition_identity"]),
-                    str(e["manifest_hash"]),
-                )
-                for e in selected_catalog_entries
+    if deadline:
+        deadline.check()
+
+    # 1. Reopen request JSON and verify
+    req_path = stage_dir / "qualification_request.json"
+    if not req_path.is_file():
+        raise SnapshotIntegrityError("qualification_request.json missing in staging")
+    staged_req = json.loads(req_path.read_text(encoding="utf-8"))
+    if staged_req != request_obj.to_dict():
+        raise SnapshotIntegrityError("staged request does not match canonical request")
+    if _sha256_file(req_path) != output_artifacts["qualification_request.json"]["sha256"]:
+        raise SnapshotIntegrityError("qualification_request.json sha256 mismatch")
+    if req_path.stat().st_size != output_artifacts["qualification_request.json"]["bytes"]:
+        raise SnapshotIntegrityError("qualification_request.json bytes mismatch")
+
+    # 2. Rerun production source validation on input partitions
+    for entry in selected_catalog_entries:
+        if deadline:
+            deadline.check()
+        part_path = root / str(entry["partition_path"])
+        manifest_path = part_path / "manifest.json"
+        if not manifest_path.is_file():
+            raise CoverageError(f"partition manifest missing for {entry.get('source_quarter')}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if canonical_hash(manifest) != entry.get("manifest_hash"):
+            raise SnapshotIntegrityError("catalog manifest mismatch during replay")
+        try:
+            validated = validate_tables(part_path)
+        except Exception as exc:
+            raise SnapshotIntegrityError(
+                f"source partition validation failed during replay: {exc}"
+            ) from exc
+        if validated["files"] != entry.get("file_hashes"):
+            raise SnapshotIntegrityError("source partition file hash mismatch during replay")
+        actual_counts = {
+            n: pq.ParquetFile(part_path / f"{n}.parquet").metadata.num_rows
+            for n in ("fund_vintages", "holdings", "identifiers")
+        }
+        if manifest.get("row_counts") != actual_counts:
+            raise SnapshotIntegrityError("source row count mismatch during replay")
+
+    # 3. Independently reconstruct all 4 fact tables from validated source partitions
+    (
+        recon_cov,
+        recon_vint,
+        recon_amend,
+        recon_id,
+        _,
+        _,
+        _,
+    ) = extract_qualification_facts(
+        root=root,
+        selected_catalog_entries=selected_catalog_entries,
+        universe=universe,
+        counters=counters,
+        is_replay=True,
+        deadline=deadline,
+        progress=None,
+    )
+
+    # 4. Lexically sort reconstructed rows
+    sorted_recon_cov = sorted(
+        recon_cov,
+        key=lambda r: (str(r.get("source_quarter")), str(r.get("fund_symbol"))),
+    )
+    sorted_recon_vint = sorted(
+        recon_vint,
+        key=lambda r: (
+            str(r.get("source_quarter")),
+            str(r.get("fund_symbol")),
+            str(r.get("report_date")),
+            str(r.get("accession_number")),
+            str(r.get("vintage_identity")),
+        ),
+    )
+    sorted_recon_amend = sorted(
+        recon_amend,
+        key=lambda r: (
+            str(r.get("cik")),
+            str(r.get("series_id") or ""),
+            str(r.get("report_date")),
+            int(r.get("family_order", 0)),
+            str(r.get("accession_number")),
+        ),
+    )
+    sorted_recon_id = sorted(
+        recon_id,
+        key=lambda r: (
+            str(r.get("source_quarter")),
+            str(r.get("fund_symbol")),
+            str(r.get("accession_number")),
+            str(r.get("vintage_identity")),
+        ),
+    )
+
+    # 5. Reopen candidate tables from staging and compare
+    tables_to_check = (
+        (
+            "quarter_fund_coverage.parquet",
+            sorted_recon_cov,
+            get_coverage_schema(pa),
+            "quarter_fund_coverage",
+        ),
+        (
+            "vintage_quality.parquet",
+            sorted_recon_vint,
+            get_vintage_quality_schema(pa),
+            "vintage_quality",
+        ),
+        (
+            "amendment_facts.parquet",
+            sorted_recon_amend,
+            get_amendment_facts_schema(pa),
+            "amendment_facts",
+        ),
+        (
+            "identifier_quality.parquet",
+            sorted_recon_id,
+            get_identifier_quality_schema(pa),
+            "identifier_quality",
+        ),
+    )
+
+    for file_name, sorted_recon, schema, table_key in tables_to_check:
+        if deadline:
+            deadline.check()
+        file_path = stage_dir / file_name
+        if not file_path.is_file():
+            raise CoverageError(f"qualification artifact {file_name} missing on disk")
+        art_desc = output_artifacts.get(file_name)
+        if not art_desc:
+            raise SnapshotIntegrityError(f"artifact descriptor missing for {file_name}")
+
+        actual_sha = _sha256_file(file_path)
+        actual_bytes = file_path.stat().st_size
+        if actual_sha != art_desc.get("sha256") or actual_bytes != art_desc.get("bytes"):
+            raise SnapshotIntegrityError(f"hash or byte mismatch for artifact {file_name}")
+
+        counters["replay_table_scans"] += 1
+        tbl = pq.read_table(file_path)
+        counters["replay_rows_read"] += tbl.num_rows
+
+        if tbl.num_rows != len(sorted_recon) or tbl.num_rows != art_desc.get("row_count"):
+            raise SnapshotIntegrityError(f"row count mismatch for {file_name}")
+
+        expected_fp = schema_fingerprint(schema)
+        actual_fp = schema_fingerprint(tbl.schema)
+        if actual_fp != expected_fp or actual_fp != art_desc.get("schema_fingerprint"):
+            raise SchemaMismatchError(f"schema fingerprint mismatch for {file_name}")
+
+        recon_tbl = pa.Table.from_pylist(sorted_recon, schema=schema)
+        recon_rows = recon_tbl.to_pylist()
+
+        actual_rows = tbl.to_pylist()
+        if actual_rows != recon_rows:
+            raise SnapshotIntegrityError(
+                f"reconstructed rows mismatch candidate rows for {file_name}"
             )
-        ).to_dict()
-    )
 
-    request_obj = SecNportQualificationRequest(
-        root=str(root.resolve()),
-        quarters=tuple(str(q) for q in quarters),
-        universe_hash=universe.universe_hash,
+        actual_log_hash = logical_table_hash(table_key, actual_rows)
+        if actual_log_hash != art_desc.get("logical_hash"):
+            raise SnapshotIntegrityError(f"logical table hash mismatch for {file_name}")
+        recon_log_hash = logical_table_hash(table_key, recon_rows)
+        if recon_log_hash != art_desc.get("logical_hash"):
+            raise SnapshotIntegrityError(f"reconstructed logical hash mismatch for {file_name}")
+
+
+def qualify_sec_nport(
+    *,
+    root: Path,
+    quarters: tuple[Quarter, ...],
+    universe: SecEquityEtfUniverse,
+    availability_policy: str,
+    lag_days: int | None,
+    output: Path,
+    partition_set: SecNportPartitionSet | None = None,
+    progress: QualificationProgress | None = None,
+    deadline: Deadline | None = None,
+) -> SecNportQualificationRef:
+    """Core entrypoint for SEC N-PORT structural qualification."""
+    start_time = time.monotonic()
+    started_at_iso = datetime.now(UTC).isoformat()
+
+    if not quarters:
+        raise ValueError("quarters cannot be empty")
+    if len(quarters) != len(set(quarters)):
+        raise ValueError("quarters must not contain duplicate entries")
+    if sorted(quarters) != list(quarters):
+        raise ValueError("quarters must be in canonical sorted order")
+    if availability_policy not in ("observation-only", "accepted-at-plus-lag"):
+        raise ValueError(f"unsupported availability policy: {availability_policy}")
+    if availability_policy == "observation-only" and lag_days not in (None, 0):
+        raise ValueError("lag_days is invalid for observation-only policy")
+
+    if output.resolve().exists():
+        raise FileExistsError(f"output directory already exists: {output}")
+    if output.is_symlink():
+        raise SnapshotIntegrityError(f"output path is a symlink: {output}")
+
+    if deadline:
+        deadline.check()
+
+    if progress:
+        progress.report("VALIDATING_SOURCES", partition_count=len(quarters))
+
+    batch = SecNportBatch(root)
+    # Step 1: Select exact partitions with integrity validation
+    selected_catalog_entries = select_exact_partitions(
+        batch=batch,
+        quarters=quarters,
+        universe=universe,
         availability_policy=availability_policy,
         lag_days=lag_days,
-        output=str(output.resolve()),
-        partition_set_hash=pset_dict.get("manifest_hash"),
+        partition_set=partition_set,
     )
 
-    completed_at_iso = datetime.now(UTC).isoformat()
-    elapsed = time.monotonic() - start_time
-    counters["phase_elapsed_seconds"] = elapsed
-    counters["peak_rss_bytes"] = max(counters["peak_rss_bytes"], _safe_rss_bytes())
+    if progress:
+        progress.report("SOURCES_VALIDATED", partition_count=len(selected_catalog_entries))
 
-    receipt_dict: dict[str, Any] = {
-        "schema_version": QUALIFICATION_RECEIPT_SCHEMA,
-        "request": request_obj.to_dict(),
-        "universe": {
-            "schema_version": "sec-equity-etf-universe-v1",
-            "universe_hash": universe.universe_hash,
-            "fund_count": len(universe.funds),
-        },
-        "partition_set": pset_dict,
-        "input_partitions": [
-            {
-                "source_quarter": str(e["source_quarter"]),
-                "partition_identity": str(e["partition_identity"]),
-                "manifest_hash": str(e["manifest_hash"]),
-                "artifact_sha256": str(e["artifact_sha256"]),
-            }
-            for e in selected_catalog_entries
-        ],
-        "output_artifacts": {},  # Populated by writer
-        "schemas": {},  # Populated by writer
-        "counters": counters,
-        "coverage_summary": {
-            "requested_quarters": len(quarters),
-            "expected_funds": len(coverage_rows),
-            "total_vintages": len(vintage_quality_rows),
-            "status": status,
-        },
-        "availability_summary": {
-            "policy": availability_policy,
-            "lag_days": lag_days,
-            "total_vintages": len(vintage_quality_rows),
-            "unknown_anchors": sum(
-                1 for v in vintage_quality_rows if v.get("availability_anchor") is None
-            ),
-        },
-        "gates": gates,
-        "qualification_status": status,
-        "started_at": started_at_iso,
-        "completed_at": completed_at_iso,
-        "elapsed_seconds": elapsed,
-        "peak_rss_bytes": counters["peak_rss_bytes"],
+    # Counters
+    counters: dict[str, Any] = {
+        "partitions_selected": len(selected_catalog_entries),
+        "fund_vintage_rows_read": 0,
+        "holding_rows_read": 0,
+        "identifier_rows_read": 0,
+        "table_scans": 0,
+        "row_groups_read": 0,
+        "qualification_rows_written": 0,
+        "replay_rows_read": 0,
+        "replay_table_scans": 0,
+        "phase_elapsed_seconds": 0.0,
+        "peak_rss_bytes": _safe_rss_bytes(),
     }
 
-    if progress:
-        progress.report("WRITING_BUNDLE")
+    # Prepare private sibling staging directory
+    parent = output.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    stage_dir = parent / f".tmp-qualify-{uuid.uuid4().hex}"
+    stage_dir.mkdir(parents=True, exist_ok=False)
 
-    # Step 2: Write bundle atomically
-    published_receipt = write_qualification_bundle(
-        output_dir=output,
-        request_data=request_obj.to_dict(),
-        coverage_rows=coverage_rows,
-        vintage_quality_rows=vintage_quality_rows,
-        amendment_facts_rows=amendment_facts_rows,
-        identifier_quality_rows=identifier_quality_rows,
-        receipt_data=receipt_dict,
-    )
+    try:
+        if progress:
+            progress.report(
+                "CONSTRUCTING_CANDIDATE_FACTS",
+                partition_count=len(selected_catalog_entries),
+            )
 
-    if progress:
-        progress.report("INDEPENDENT_REPLAY_VALIDATION")
+        # Production extraction pass
+        (
+            coverage_rows,
+            vintage_quality_rows,
+            amendment_facts_rows,
+            identifier_quality_rows,
+            has_ambiguity,
+            has_partial_coverage,
+            all_vintage_identities,
+        ) = extract_qualification_facts(
+            root=root,
+            selected_catalog_entries=selected_catalog_entries,
+            universe=universe,
+            counters=counters,
+            is_replay=False,
+            deadline=deadline,
+            progress=progress,
+        )
 
-    # Step 3: Independent post-persist validation
-    reconstruct_and_verify_qualification(
-        output_dir=output,
-        expected_receipt=published_receipt,
-        counters=counters,
-    )
+        counters["qualification_rows_written"] = (
+            len(coverage_rows)
+            + len(vintage_quality_rows)
+            + len(amendment_facts_rows)
+            + len(identifier_quality_rows)
+        )
 
-    receipt_identity = canonical_hash(published_receipt)
-    return SecNportQualificationRef(
-        output_dir=output,
-        receipt_identity=receipt_identity,
-        receipt=published_receipt,
-        counters=counters,
-        status=status,
-    )
+        # Construct partition set document for receipt
+        pset_dict = (
+            partition_set.to_dict()
+            if partition_set is not None
+            else SecNportPartitionSet(
+                tuple(
+                    SecNportPartitionSetEntry(
+                        str(e["source_quarter"]),
+                        str(e["partition_identity"]),
+                        str(e["manifest_hash"]),
+                    )
+                    for e in selected_catalog_entries
+                )
+            ).to_dict()
+        )
+
+        request_obj = SecNportQualificationRequest(
+            root=str(root.resolve()),
+            quarters=tuple(str(q) for q in quarters),
+            universe_hash=universe.universe_hash,
+            availability_policy=availability_policy,
+            lag_days=lag_days,
+            output=str(output.resolve()),
+            partition_set_hash=pset_dict.get("manifest_hash"),
+        )
+
+        if progress:
+            progress.report("WRITING_CANDIDATE_TABLES")
+
+        output_artifacts, schemas_desc = write_candidate_qualification_tables(
+            stage_dir=stage_dir,
+            request_data=request_obj.to_dict(),
+            coverage_rows=coverage_rows,
+            vintage_quality_rows=vintage_quality_rows,
+            amendment_facts_rows=amendment_facts_rows,
+            identifier_quality_rows=identifier_quality_rows,
+        )
+
+        if progress:
+            progress.report("INDEPENDENT_REPLAY_VALIDATION")
+
+        # Independent replay & source reconstruction
+        reconstruct_and_verify_candidate_bundle(
+            root=root,
+            stage_dir=stage_dir,
+            selected_catalog_entries=selected_catalog_entries,
+            universe=universe,
+            request_obj=request_obj,
+            output_artifacts=output_artifacts,
+            counters=counters,
+            deadline=deadline,
+        )
+
+        # Assess status & gates (only after replay completes successfully)
+        if has_ambiguity:
+            status = "STRUCTURALLY_AMBIGUOUS"
+        elif has_partial_coverage:
+            status = "STRUCTURALLY_PARTIAL"
+        else:
+            status = "STRUCTURALLY_COMPLETE"
+
+        gates = {
+            "SOURCE_VALIDATED": True,
+            "PARTITION_SET_EXACT": True,
+            "EXPECTED_FUND_QUARTERS_ACCOUNTED": not has_partial_coverage,
+            "FUND_IDENTITIES_EXACT": True,
+            "VINTAGE_IDENTITIES_UNIQUE": len(all_vintage_identities) == len(vintage_quality_rows),
+            "AMENDMENT_FAMILIES_DETERMINISTIC": not has_ambiguity,
+            "WEIGHT_FACTS_RECONSTRUCTED": True,
+            "IDENTIFIER_FACTS_RECONSTRUCTED": True,
+            "AVAILABILITY_FACTS_RECONSTRUCTED": True,
+            "ARTIFACTS_REOPENED": True,
+            "RESOURCE_ENVELOPE_PASSED": True,
+        }
+
+        completed_at_iso = datetime.now(UTC).isoformat()
+        elapsed = time.monotonic() - start_time
+        counters["phase_elapsed_seconds"] = elapsed
+        counters["peak_rss_bytes"] = max(counters["peak_rss_bytes"], _safe_rss_bytes())
+
+        receipt_dict: dict[str, Any] = {
+            "schema_version": QUALIFICATION_RECEIPT_SCHEMA,
+            "request": request_obj.to_dict(),
+            "universe": {
+                "schema_version": "sec-equity-etf-universe-v1",
+                "universe_hash": universe.universe_hash,
+                "fund_count": len(universe.funds),
+            },
+            "partition_set": pset_dict,
+            "input_partitions": [
+                {
+                    "source_quarter": str(e["source_quarter"]),
+                    "partition_identity": str(e["partition_identity"]),
+                    "manifest_hash": str(e["manifest_hash"]),
+                    "artifact_sha256": str(e["artifact_sha256"]),
+                }
+                for e in selected_catalog_entries
+            ],
+            "output_artifacts": output_artifacts,
+            "schemas": schemas_desc,
+            "counters": dict(counters),
+            "coverage_summary": {
+                "requested_quarters": len(quarters),
+                "expected_funds": len(coverage_rows),
+                "total_vintages": len(vintage_quality_rows),
+                "status": status,
+            },
+            "availability_summary": {
+                "policy": availability_policy,
+                "lag_days": lag_days,
+                "total_vintages": len(vintage_quality_rows),
+                "unknown_anchors": sum(
+                    1 for v in vintage_quality_rows if v.get("availability_anchor") is None
+                ),
+            },
+            "gates": gates,
+            "qualification_status": status,
+            "started_at": started_at_iso,
+            "completed_at": completed_at_iso,
+            "elapsed_seconds": elapsed,
+            "peak_rss_bytes": counters["peak_rss_bytes"],
+        }
+
+        if progress:
+            progress.report("PUBLISHING_BUNDLE")
+
+        receipt_identity = publish_qualification_receipt_and_rename(
+            stage_dir=stage_dir,
+            output_dir=output,
+            receipt_data=receipt_dict,
+        )
+
+        return SecNportQualificationRef(
+            output_dir=output,
+            receipt_identity=receipt_identity,
+            receipt=receipt_dict,
+            counters=counters,
+            status=status,
+        )
+    finally:
+        if stage_dir.exists():
+            shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def reconstruct_and_verify_qualification(
     *,
     output_dir: Path,
-    expected_receipt: dict[str, Any],
-    counters: dict[str, Any],
-) -> None:
+    expected_receipt: dict[str, Any] | None = None,
+    counters: dict[str, Any] | None = None,
+    root: Path | None = None,
+    universe: SecEquityEtfUniverse | None = None,
+    partition_set: SecNportPartitionSet | None = None,
+    deadline: Deadline | None = None,
+) -> dict[str, Any]:
     """Independently reopens and validates the published qualification bundle."""
     pa = importlib.import_module("pyarrow")
     pq: Any = importlib.import_module("pyarrow.parquet")
@@ -913,6 +1153,12 @@ def reconstruct_and_verify_qualification(
     rcp_on_disk = json.loads(rcp_path.read_text(encoding="utf-8"))
     if rcp_on_disk.get("schema_version") != QUALIFICATION_RECEIPT_SCHEMA:
         raise SchemaMismatchError("qualification receipt schema mismatch on disk")
+
+    if expected_receipt is not None and (
+        canonical_hash(rcp_on_disk) != canonical_hash(expected_receipt)
+        or rcp_on_disk != expected_receipt
+    ):
+        raise SnapshotIntegrityError("on-disk receipt does not match expected receipt")
 
     artifacts = rcp_on_disk.get("output_artifacts", {})
     for name, schema_fn in (
@@ -935,9 +1181,11 @@ def reconstruct_and_verify_qualification(
             raise SnapshotIntegrityError(f"hash or byte mismatch for artifact {name}")
 
         # Reopen table and verify schema & row count
-        counters["replay_table_scans"] = counters.get("replay_table_scans", 0) + 1
+        if counters is not None:
+            counters["replay_table_scans"] = counters.get("replay_table_scans", 0) + 1
         tbl = pq.read_table(p)
-        counters["replay_rows_read"] = counters.get("replay_rows_read", 0) + tbl.num_rows
+        if counters is not None:
+            counters["replay_rows_read"] = counters.get("replay_rows_read", 0) + tbl.num_rows
 
         if tbl.num_rows != art_desc.get("row_count"):
             raise SnapshotIntegrityError(f"row count mismatch for {name}")
@@ -953,3 +1201,73 @@ def reconstruct_and_verify_qualification(
         actual_log_hash = logical_table_hash(table_key, tbl.to_pylist())
         if actual_log_hash != art_desc.get("logical_hash"):
             raise SnapshotIntegrityError(f"logical table hash mismatch for {name}")
+
+    if root is not None and universe is not None:
+        req_dict = rcp_on_disk.get("request", {})
+        quarters = tuple(Quarter.parse(q) for q in req_dict.get("quarters", []))
+        batch = SecNportBatch(root)
+        selected = select_exact_partitions(
+            batch=batch,
+            quarters=quarters,
+            universe=universe,
+            availability_policy=req_dict.get("availability_policy", ""),
+            lag_days=req_dict.get("lag_days"),
+            partition_set=partition_set,
+        )
+        dummy_counters: dict[str, Any] = {
+            "replay_table_scans": 0,
+            "replay_rows_read": 0,
+        }
+        recon_cov, recon_vint, recon_amend, recon_id, _, _, _ = extract_qualification_facts(
+            root=root,
+            selected_catalog_entries=selected,
+            universe=universe,
+            counters=dummy_counters,
+            is_replay=True,
+            deadline=deadline,
+        )
+        check_pairs = (
+            (
+                "quarter_fund_coverage.parquet",
+                recon_cov,
+                lambda r: (str(r.get("source_quarter")), str(r.get("fund_symbol"))),
+            ),
+            (
+                "vintage_quality.parquet",
+                recon_vint,
+                lambda r: (
+                    str(r.get("source_quarter")),
+                    str(r.get("fund_symbol")),
+                    str(r.get("report_date")),
+                    str(r.get("accession_number")),
+                    str(r.get("vintage_identity")),
+                ),
+            ),
+            (
+                "amendment_facts.parquet",
+                recon_amend,
+                lambda r: (
+                    str(r.get("cik")),
+                    str(r.get("series_id") or ""),
+                    str(r.get("report_date")),
+                    int(r.get("family_order", 0)),
+                    str(r.get("accession_number")),
+                ),
+            ),
+            (
+                "identifier_quality.parquet",
+                recon_id,
+                lambda r: (
+                    str(r.get("source_quarter")),
+                    str(r.get("fund_symbol")),
+                    str(r.get("accession_number")),
+                    str(r.get("vintage_identity")),
+                ),
+            ),
+        )
+        for fname, rows, sort_fn in check_pairs:
+            tbl_rows = pq.read_table(output_dir / fname).to_pylist()
+            if tbl_rows != sorted(rows, key=sort_fn):
+                raise SnapshotIntegrityError(f"source reconstruction mismatch for {fname}")
+
+    return rcp_on_disk

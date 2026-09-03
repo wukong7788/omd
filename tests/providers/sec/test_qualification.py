@@ -24,6 +24,7 @@ from ohmydata.providers.sec.batch import (
     SecEquityEtfUniverse,
     SecNportBatch,
     atomic_json,
+    canonical_hash,
     receipt_hashes,
 )
 from ohmydata.providers.sec.core_dataset import (
@@ -37,6 +38,7 @@ from ohmydata.providers.sec.qualification import (
     SecNportPartitionSet,
     SecNportPartitionSetEntry,
     qualify_sec_nport,
+    reconstruct_and_verify_qualification,
 )
 
 
@@ -777,18 +779,18 @@ def test_post_persist_replay_catches_tampering(
     out = tmp_path / "qualified"
     universe, _ = make_synthetic_env(root)
 
-    # Monkeypatch write_qualification_bundle to simulate disk tampering before verification
+    # Monkeypatch write_candidate_qualification_tables to simulate staging corruption
     import ohmydata.providers.sec.qualification as q_mod
 
-    original_write = q_mod.write_qualification_bundle
+    original_write = q_mod.write_candidate_qualification_tables
 
-    def tampered_write(**kwargs: Any) -> dict[str, Any]:
-        res = original_write(**kwargs)
-        # Corrupt one file after write
-        (kwargs["output_dir"] / "quarter_fund_coverage.parquet").write_bytes(b"corrupted")
-        return res
+    def tampered_write(**kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        arts, schemas = original_write(**kwargs)
+        # Corrupt one candidate file in staging
+        (kwargs["stage_dir"] / "quarter_fund_coverage.parquet").write_bytes(b"corrupted")
+        return arts, schemas
 
-    monkeypatch.setattr(q_mod, "write_qualification_bundle", tampered_write)
+    monkeypatch.setattr(q_mod, "write_candidate_qualification_tables", tampered_write)
 
     with pytest.raises(SnapshotIntegrityError, match="hash or byte mismatch"):
         qualify_sec_nport(
@@ -799,6 +801,7 @@ def test_post_persist_replay_catches_tampering(
             lag_days=None,
             output=out,
         )
+    assert not out.exists()
 
 
 # --- Test 13: Deadline Exceeded -> ResourceLimitError ---
@@ -819,6 +822,7 @@ def test_deadline_exceeded_raises_resource_limit_error(tmp_path: Path) -> None:
             output=out,
             deadline=deadline,
         )
+    assert not out.exists()
 
 
 # --- Test 14: Structural Counters ---
@@ -842,8 +846,18 @@ def test_structural_counters_recorded(tmp_path: Path) -> None:
     assert c["holding_rows_read"] == 2
     assert c["identifier_rows_read"] == 1
     assert c["table_scans"] == 3
-    assert c["replay_table_scans"] == 4
-    assert c["replay_rows_read"] == c["qualification_rows_written"]
+    # 3 source partition scans + 4 candidate table scans = 7
+    assert c["replay_table_scans"] == 7
+    # 4 source rows (1 vintage + 2 holdings + 1 id) + 4 candidate rows = 8
+    assert c["replay_rows_read"] == 8
+    assert c["qualification_rows_written"] == 4
+
+    # Verify on-disk receipt counters match exactly
+    disk_receipt = json.loads((out / "qualification_receipt.json").read_text(encoding="utf-8"))
+    assert disk_receipt["counters"] == ref.counters
+    assert disk_receipt["counters"]["replay_table_scans"] == 7
+    assert disk_receipt["counters"]["replay_rows_read"] == 8
+    assert ref.receipt_identity == canonical_hash(disk_receipt)
 
 
 # --- Test 15: CLI Integration ---
@@ -877,3 +891,248 @@ def test_cli_qualify_command(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert payload["qualification_status"] == "STRUCTURALLY_COMPLETE"
+    assert payload["counters"]["replay_table_scans"] == 7
+    assert payload["counters"]["replay_rows_read"] == 8
+
+
+# --- Section 14 Regression Tests (0.1.7) ---
+
+
+def test_on_disk_replay_counters_equal_measured_scans_and_rows(tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "dataset"
+    out = tmp_path / "qualified"
+    universe, _ = make_synthetic_env(root)
+
+    ref = qualify_sec_nport(
+        root=root,
+        quarters=(Quarter(2024, 2),),
+        universe=universe,
+        availability_policy="observation-only",
+        lag_days=None,
+        output=out,
+    )
+
+    rcp_disk = json.loads((out / "qualification_receipt.json").read_text(encoding="utf-8"))
+    assert rcp_disk["counters"]["replay_table_scans"] == ref.counters["replay_table_scans"]
+    assert rcp_disk["counters"]["replay_rows_read"] == ref.counters["replay_rows_read"]
+    assert rcp_disk["counters"]["replay_rows_read"] > 0
+    assert (
+        rcp_disk["counters"]["replay_table_scans"] == 3 * len(ref.receipt["input_partitions"]) + 4
+    )
+    assert ref.receipt_identity == canonical_hash(rcp_disk)
+
+
+def test_coherent_mutation_of_output_table_and_descriptor_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A coherent defect mutating table and descriptor is caught by source reconstruction."""
+    pytest.importorskip("pyarrow")
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    root = tmp_path / "dataset"
+    out = tmp_path / "qualified"
+    universe, _ = make_synthetic_env(root)
+
+    import ohmydata.providers.sec.qualification as q_mod
+
+    orig_write = q_mod.write_candidate_qualification_tables
+
+    def tampered_write(**kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        arts, schemas = orig_write(**kwargs)
+        # Coherently tamper with quarter_fund_coverage.parquet: change a value and recompute descriptor
+        p = kwargs["stage_dir"] / "quarter_fund_coverage.parquet"
+        tbl = pq.read_table(p)
+        rows = tbl.to_pylist()
+        rows[0]["vintage_count"] = 999  # Defect mutated vintage_count
+        new_tbl = pa.Table.from_pylist(rows, schema=tbl.schema)
+        pq.write_table(new_tbl, p, compression="zstd")
+
+        # Update descriptor so byte, hash, schema, row_count all match the tampered file
+        from ohmydata.providers.sec.qualification_dataset import (
+            _sha256_file,
+            logical_table_hash,
+            schema_fingerprint,
+        )
+
+        arts["quarter_fund_coverage.parquet"] = {
+            "path": "quarter_fund_coverage.parquet",
+            "bytes": p.stat().st_size,
+            "sha256": _sha256_file(p),
+            "row_count": len(rows),
+            "schema_fingerprint": schema_fingerprint(tbl.schema),
+            "logical_hash": logical_table_hash("quarter_fund_coverage", rows),
+        }
+        return arts, schemas
+
+    monkeypatch.setattr(q_mod, "write_candidate_qualification_tables", tampered_write)
+
+    # Must fail because source reconstruction will compute true vintage_count = 1, not 999
+    with pytest.raises(SnapshotIntegrityError, match="reconstructed rows mismatch candidate rows"):
+        qualify_sec_nport(
+            root=root,
+            quarters=(Quarter(2024, 2),),
+            universe=universe,
+            availability_policy="observation-only",
+            lag_days=None,
+            output=out,
+        )
+
+    assert not out.exists()
+    # Confirm no staging directories leaked in parent
+    tmp_dirs = list(out.parent.glob(".tmp-qualify-*"))
+    assert len(tmp_dirs) == 0
+
+
+def test_mutation_of_receipt_gates_summaries_and_artifacts_rejected(tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "dataset"
+    out = tmp_path / "qualified"
+    universe, _ = make_synthetic_env(root)
+
+    ref = qualify_sec_nport(
+        root=root,
+        quarters=(Quarter(2024, 2),),
+        universe=universe,
+        availability_policy="observation-only",
+        lag_days=None,
+        output=out,
+    )
+
+    # 1. Tampered gate in expected receipt
+    tampered_rcp = json.loads(json.dumps(ref.receipt))
+    tampered_rcp["gates"]["RESOURCE_ENVELOPE_PASSED"] = False
+    with pytest.raises(
+        SnapshotIntegrityError, match="on-disk receipt does not match expected receipt"
+    ):
+        reconstruct_and_verify_qualification(output_dir=out, expected_receipt=tampered_rcp)
+
+    # 2. Tampered coverage summary
+    tampered_rcp2 = json.loads(json.dumps(ref.receipt))
+    tampered_rcp2["coverage_summary"]["expected_funds"] = 999
+    with pytest.raises(
+        SnapshotIntegrityError, match="on-disk receipt does not match expected receipt"
+    ):
+        reconstruct_and_verify_qualification(output_dir=out, expected_receipt=tampered_rcp2)
+
+    # 3. Tampered artifact descriptor
+    tampered_rcp3 = json.loads(json.dumps(ref.receipt))
+    tampered_rcp3["output_artifacts"]["quarter_fund_coverage.parquet"]["sha256"] = "0" * 64
+    with pytest.raises(
+        SnapshotIntegrityError, match="on-disk receipt does not match expected receipt"
+    ):
+        reconstruct_and_verify_qualification(output_dir=out, expected_receipt=tampered_rcp3)
+
+
+def test_input_partition_mutation_between_initial_validation_and_replay_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "dataset"
+    out = tmp_path / "qualified"
+    universe, _ = make_synthetic_env(root)
+
+    import ohmydata.providers.sec.qualification as q_mod
+
+    orig_write = q_mod.write_candidate_qualification_tables
+
+    def tamper_source_after_candidate_write(**kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        res = orig_write(**kwargs)
+        # Corrupt a source file before replay pass runs
+        src_file = next(
+            root.glob(
+                "core/sec-fund-holdings-pit-v1/source_quarter=*/artifact=*/partition=*/fund_vintages.parquet"
+            )
+        )
+        src_file.write_bytes(b"tampered_source_file")
+        return res
+
+    monkeypatch.setattr(
+        q_mod, "write_candidate_qualification_tables", tamper_source_after_candidate_write
+    )
+
+    with pytest.raises(SnapshotIntegrityError, match="source partition.*during replay"):
+        qualify_sec_nport(
+            root=root,
+            quarters=(Quarter(2024, 2),),
+            universe=universe,
+            availability_policy="observation-only",
+            lag_days=None,
+            output=out,
+        )
+
+    assert not out.exists()
+    assert len(list(out.parent.glob(".tmp-qualify-*"))) == 0
+
+
+def test_replay_failure_leaves_no_output_or_orphaned_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "dataset"
+    out = tmp_path / "qualified"
+    universe, _ = make_synthetic_env(root)
+
+    import ohmydata.providers.sec.qualification as q_mod
+
+    def fail_replay(**kwargs: Any) -> None:
+        raise RuntimeError("simulated unexpected replay failure")
+
+    monkeypatch.setattr(q_mod, "reconstruct_and_verify_candidate_bundle", fail_replay)
+
+    with pytest.raises(RuntimeError, match="simulated unexpected replay failure"):
+        qualify_sec_nport(
+            root=root,
+            quarters=(Quarter(2024, 2),),
+            universe=universe,
+            availability_policy="observation-only",
+            lag_days=None,
+            output=out,
+        )
+
+    assert not out.exists()
+    assert len(list(out.parent.glob(".tmp-qualify-*"))) == 0
+
+
+def test_qualification_repeated_runs_separate_roots_byte_identical(tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    root = tmp_path / "dataset"
+    out1 = tmp_path / "qualified1"
+    out2 = tmp_path / "qualified2"
+    universe, _ = make_synthetic_env(root)
+
+    ref1 = qualify_sec_nport(
+        root=root,
+        quarters=(Quarter(2024, 2),),
+        universe=universe,
+        availability_policy="observation-only",
+        lag_days=None,
+        output=out1,
+    )
+    ref2 = qualify_sec_nport(
+        root=root,
+        quarters=(Quarter(2024, 2),),
+        universe=universe,
+        availability_policy="observation-only",
+        lag_days=None,
+        output=out2,
+    )
+
+    for tbl in (
+        "quarter_fund_coverage.parquet",
+        "vintage_quality.parquet",
+        "amendment_facts.parquet",
+        "identifier_quality.parquet",
+    ):
+        bytes1 = (out1 / tbl).read_bytes()
+        bytes2 = (out2 / tbl).read_bytes()
+        assert bytes1 == bytes2
+        assert (
+            ref1.receipt["output_artifacts"][tbl]["sha256"]
+            == ref2.receipt["output_artifacts"][tbl]["sha256"]
+        )
+        assert (
+            ref1.receipt["output_artifacts"][tbl]["logical_hash"]
+            == ref2.receipt["output_artifacts"][tbl]["logical_hash"]
+        )

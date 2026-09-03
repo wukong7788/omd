@@ -433,6 +433,7 @@ def run_qualify(args: Any) -> int:
             partition_index: int = 0,
             partition_count: int = 0,
             rows_read: int = 0,
+            **kwargs: Any,
         ) -> None:
             if not quiet:
                 msg = f"[{phase}]"
