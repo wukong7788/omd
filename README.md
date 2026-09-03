@@ -371,6 +371,72 @@ units, and nulls remain provider-native: daily `pct_chg` is a percentage,
 Suspended rows are not synthesized, and no adjusted-price calculation or
 point-in-time availability claim is made.
 
+## SEC N-PORT holdings CLI
+
+The `ohmydata.providers.sec` package provides offline-testable primitives for
+the official quarterly N-PORT data set: caller-selected series, immutable
+artifact retention, native Decimal/date/null values, and EDGAR acceptance
+metadata. It deliberately does not classify funds, resolve tickers, compute
+trading sessions, or perform an implicit live download; network access requires
+an explicit caller-created client and contact User-Agent.
+
+Install the Parquet writer and run the batch CLI with a reviewed equity-ETF
+universe containing exact CIK/series identities:
+
+```bash
+uv sync --extra sec-cli
+
+# Run full-history sync via a configuration file:
+uv run omd sec nport sync --config artifacts/sec-sync.yaml
+
+# Or inspect plan, fetch, or validate using the same configuration:
+uv run omd sec nport plan --config artifacts/sec-sync.yaml
+uv run omd sec nport validate --config artifacts/sec-sync.yaml
+
+# Or with explicit flags (--quarters full expands 2019q4 through the latest completed quarter):
+uv run omd sec nport sync \
+  --quarters full \
+  --root artifacts/sec-nport \
+  --universe artifacts/sec-equity-etfs.json \
+  --user-agent-file /path/to/private-sec-contact.txt \
+  --availability-policy accepted-at-plus-lag \
+  --lag-days 0
+```
+
+`--config FILE` accepts `.json`, `.yaml`, `.yml`, or `.toml` mappings (such as
+`artifacts/sec-sync.yaml` with `quarters: full`, `root: artifacts/sec-nport-full`,
+`universe: artifacts/sec-equity-etf-universe.json`, `user_agent_file: artifacts/sec-contact.txt`,
+`availability_policy: accepted-at-plus-lag`, and `lag_days: 0`) to eliminate
+repetitive flags; explicit CLI options override configuration values.
+`--quarters full` expands to `2019q4` through the latest completed calendar
+quarter, while single-quarter tokens (e.g. `--quarters 2026q2`, or
+`--quarter latest` for `inspect`) are supported as shorthands.
+
+`fetch` retains each replay-valid quarterly ZIP and the exact EDGAR metadata
+closure, while `build` works offline from those retained artifacts. `sync`
+processes one quarter at a time and resumes without downloading a completed
+quarter again. `validate` checks the complete local artifact/catalog closure;
+`inspect` prints safe summaries and only emits holding rows when `--rows` is
+explicitly supplied. `fetch`, `build`, and `sync` emit safe progress milestones
+to stderr (quarter indices, download bytes, and build timing), which can be
+silenced with `--quiet`. Quarterly ZIP responses are streamed to immutable
+storage; `build` and `sync` also accept positive `--max-selected-rows` and
+`--max-output-bytes` limits (defaulting to 5,000,000 rows and 2 GiB) and fail
+before partition publication when either bound is exceeded.
+
+Each immutable core partition contains `fund_vintages.parquet`,
+`holdings.parquet`, and `identifiers.parquet`, plus quality and manifest JSON.
+Provider-native percentages remain percentage points, numeric text is preserved
+beside exact Decimal values, and missing values remain missing. Consumers own
+security-master mapping, exchange calendars, first-usable-session alignment,
+and strategy features.
+
+The output root must be outside the repository or already Git-ignored. Contact
+data is accepted only through a file or explicit stdin and is never written to
+artifacts or output. Universe classification is caller-reviewed; the intended
+equity-ETF research universe excludes GLD, bond ETFs, and money-market/currency
+ETFs.
+
 ## ETF PCF constituent endpoints (v0.1.1)
 
 `EtfShConsRequest` and `EtfSzConsRequest` expose the exchange-native

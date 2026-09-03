@@ -493,6 +493,11 @@ Target milestones:
 - `v0.1.0`: stable Tushare core plus the reviewed, versioned,
   availability-aware constituent-market-fact vertical slice defined in the
   dedicated version plan;
+- SEC N-PORT fund holdings: separately planned after the Tushare-first release
+  under
+  [`docs/plans/sec-nport-fund-holdings-pit-v1.md`](docs/plans/sec-nport-fund-holdings-pit-v1.md);
+  it is a provider-native, availability-aware holdings domain and does not
+  generalize Tushare contracts or move consumer session/feature policy into OMD;
 - `v0.2.0`: yfinance provider after separate inventory and plan update;
 - FMP version is intentionally unscheduled.
 

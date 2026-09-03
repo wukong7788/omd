@@ -223,13 +223,16 @@ wheels = [
 
 [[package]]
 name = "ohmydata"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "." }
 
 [package.optional-dependencies]
 polars = [
     { name = "pandas" },
     { name = "polars" },
+    { name = "pyarrow" },
+]
+sec-cli = [
     { name = "pyarrow" },
 ]
 tushare = [
@@ -259,10 +262,11 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'vintage-plane'", specifier = ">=2.0,<3.0" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.38.1,<2.0" },
     { name = "pyarrow", marker = "extra == 'polars'", specifier = ">=23.0.1,<24.0" },
+    { name = "pyarrow", marker = "extra == 'sec-cli'", specifier = ">=23.0.1,<24.0" },
     { name = "pyarrow", marker = "extra == 'vintage-plane'", specifier = ">=23.0.1,<24.0" },
     { name = "tushare", marker = "extra == 'tushare'", specifier = ">=1.4,<2.0" },
 ]
-provides-extras = ["tushare", "polars", "vintage-plane"]
+provides-extras = ["tushare", "polars", "vintage-plane", "sec-cli"]
 
 [package.metadata.requires-dev]
 dev = [

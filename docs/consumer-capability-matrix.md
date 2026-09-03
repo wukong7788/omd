@@ -1,6 +1,12 @@
 # OMD / Stock Notify / Funmoney Backtest Capability Matrix
 
-Status: `CURRENT-STATE EVIDENCE — 2026-08-01`
+Status: `SUPERSEDED CURRENT-STATE SNAPSHOT — 2026-08-01`
+
+> This document preserves the pre-cutover capability comparison. Its funmoney
+> migration-status statements are no longer current: the canonical daily
+> provider cutover was accepted on 2026-08-02. Current direct-call ownership
+> and the M2 ledger are maintained in the consumer-owned
+> `funmoney_backtest/docs/plans/omd_tushare_direct_call_inventory.md`.
 
 本文回答两个问题：
 

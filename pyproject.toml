@@ -4,12 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohmydata"
-version = "0.1.3"
+version = "0.1.4"
 description = "Offline-first market-data SDK scaffold"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [{ name = "OMD contributors" }]
 dependencies = []
+
+[project.scripts]
+omd = "ohmydata.cli:main"
 
 [project.optional-dependencies]
 tushare = ["pandas>=2.0,<3.0", "tushare>=1.4,<2.0"]
@@ -19,6 +22,7 @@ polars = [
   "pyarrow>=23.0.1,<24.0",
 ]
 vintage-plane = ["pandas>=2.0,<3.0", "pyarrow>=23.0.1,<24.0"]
+sec-cli = ["pyarrow>=23.0.1,<24.0"]
 
 [dependency-groups]
 dev = [

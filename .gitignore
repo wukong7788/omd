@@ -9,6 +9,13 @@
 credentials.json
 secrets.json
 token.json
+*.local.*
+config.yaml
+config.yml
+config.json
+*sync*.yaml
+*sync*.yml
+*sync*.json
 
 # Provider responses and local data
 data/

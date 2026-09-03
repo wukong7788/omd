@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.4 — 2026-09-03
+
+- Added offline SEC N-PORT request, transport, artifact, parsing, and EDGAR
+  metadata primitives for caller-selected equity ETF series. Tests remain
+  offline; network access is explicit and caller-injected.
+- Added the resumable `omd sec nport` batch CLI and immutable
+  `fund_vintages`/`holdings`/`identifiers` Parquet core dataset, with exact
+  receipt lineage, `--config` file support (JSON, YAML, TOML), `--quarters full`
+  and single-quarter shorthands, real-time stderr progress reporting and
+  `--quiet` suppression, offline validation/inspection, explicit availability
+  policy, and Git-safe output-root enforcement.
+- Optimized core batch extraction performance with TSV predicate pushdown,
+  in-memory collision verification, and cached vintage payload hash properties,
+  achieving a >10x extraction speedup across multi-million row quarterly N-PORT
+  archives.
+- Added support for SEC EDGAR historical submissions files with raw column
+  dictionaries and resilient single-series CIK matching across UIT Series ID
+  registrations.
+
 ## 0.1.3 — 2026-08-09
 
 - Added provider-neutral append-only source-fact registry and bounded offline ETF benchmark/constituent vintage artifacts. Tushare observations remain current-only where source availability is undocumented; completeness is fail-closed.
@@ -30,8 +49,6 @@
 - Added `docs/v0.1.2-lookthrough-migration.md` documenting the field-by-field
   consumer boundary and the explicit statement that the historical funmoney
   B6 look-through audit remains blocked.
-
-## Unreleased
 
 ## 0.1.1 — 2026-08-03
 
