@@ -135,7 +135,7 @@ exists, canonical checks are:
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-uv run pyright
+uv run ty check
 uv build
 git diff --check
 ```
@@ -187,7 +187,7 @@ version after `v1.0.0`.
   `uv.lock`, the exact version assertion in `tests/test_package.py`, and
   `CHANGELOG.md`. Documentation describing changed public behavior must be
   updated in that commit as well.
-- Before committing, run the canonical test, Ruff, format, Pyright, build, and
+- Before committing, run the canonical test, Ruff, format, ty check, build, and
   `git diff --check` gates; inspect the built wheel/sdist version and the
   staged diff, and run the secret scan. Never publish a version that is
   inconsistent across those files or already exists on PyPI.

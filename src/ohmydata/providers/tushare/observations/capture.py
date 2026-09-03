@@ -31,8 +31,11 @@ from .serialization import (
 class SupportedTushareRequest(Protocol):
     """Minimal request surface required by the capture path."""
 
-    endpoint: str
-    spec: RequestSpec
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def spec(self) -> RequestSpec: ...
 
 
 @dataclass(frozen=True, init=False)

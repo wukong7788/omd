@@ -33,7 +33,22 @@ from .edgar import (
     parse_submissions,
     resolve_submissions,
 )
+from .edgartools_adapter import (
+    SecFinancialsClient,
+    ensure_edgar_available,
+    parse_statement_rows,
+    validate_user_agent,
+)
 from .endpoints import SecEdgarSubmissionsRequest, SecEmptyPolicy, SecNportQuarterRequest
+from .financials import (
+    SecCompanyFinancialVintage,
+    SecFinancialsRequest,
+    SecStatementRow,
+    StatementType,
+)
+from .financials_dataset import (
+    write_financials_partition,
+)
 from .http import SecHttpClient, SecHttpResponse, SecTransportEvidence, validate_sec_url
 from .nport import (
     SecAvailabilityPolicy,
@@ -56,8 +71,11 @@ __all__ = [
     "SecArtifactRef",
     "SecArtifactStore",
     "SecAvailabilityPolicy",
+    "SecCompanyFinancialVintage",
     "SecEdgarSubmissionsRequest",
     "SecEmptyPolicy",
+    "SecFinancialsClient",
+    "SecFinancialsRequest",
     "SecFundHoldingVintage",
     "SecFundSelector",
     "SecHoldingVintageSet",
@@ -71,12 +89,15 @@ __all__ = [
     "SecPayloadReceipt",
     "SecReplaySession",
     "SecScheduledFundSelector",
+    "SecStatementRow",
     "SecTransportEvidence",
     "SecUnavailableResult",
+    "StatementType",
     "atomic_json",
     "canonical_hash",
     "canonical_json",
     "enrich_vintages",
+    "ensure_edgar_available",
     "enumerate_receipts",
     "extract_from_artifact",
     "historical_basenames",
@@ -85,6 +106,7 @@ __all__ = [
     "load_universe",
     "logical_table_hash",
     "parse_sec_date",
+    "parse_statement_rows",
     "parse_submissions",
     "partition_identity",
     "publish_directory",
@@ -95,6 +117,8 @@ __all__ = [
     "store_immutable_payload",
     "validate_sec_url",
     "validate_tables",
+    "validate_user_agent",
+    "write_financials_partition",
     "write_partition",
     "write_tables",
 ]

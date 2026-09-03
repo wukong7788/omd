@@ -78,20 +78,25 @@ def fetch_etf_pcf_history(
 
     def visit(lo: date, hi: date) -> None:
         nonlocal truncations
-        kwargs = {
-            "empty_policy": request.empty_policy,
-            "ts_code": request.ts_code,
-            "start_date": lo.strftime("%Y%m%d"),
-            "end_date": hi.strftime("%Y%m%d"),
-            "fields": request.fields,
-        }
-        child = endpoint_cls(**kwargs)
         try:
-            result = (
-                client.fetch_etf_sh_cons(child)
-                if request.exchange == "SH"
-                else client.fetch_etf_sz_cons(child)
-            )
+            if request.exchange == "SH":
+                child_sh = EtfShConsRequest(
+                    empty_policy=request.empty_policy,
+                    ts_code=request.ts_code,
+                    start_date=lo.strftime("%Y%m%d"),
+                    end_date=hi.strftime("%Y%m%d"),
+                    fields=request.fields,
+                )
+                result = client.fetch_etf_sh_cons(child_sh)
+            else:
+                child_sz = EtfSzConsRequest(
+                    empty_policy=request.empty_policy,
+                    ts_code=request.ts_code,
+                    start_date=lo.strftime("%Y%m%d"),
+                    end_date=hi.strftime("%Y%m%d"),
+                    fields=request.fields,
+                )
+                result = client.fetch_etf_sz_cons(child_sz)
         except PaginationError:
             truncations += 1
             if lo == hi:

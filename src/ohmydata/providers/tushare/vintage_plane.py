@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...core import SnapshotStore, SourceFactObservation, SourceFactRegistry, SourceResolutionStatus
 from .endpoints import EtfBasicRequest, IndexWeightRequest
@@ -272,6 +272,9 @@ def assemble_etf_benchmark_constituent_vintages(
             cutoff,
             incomplete=True,
         )
+        first_observed = (
+            rec.provider_first_observed_at if rec else obs.availability.provider_first_observed_at
+        )
         vintage_rows.append(
             {
                 "index_code": evidence.index_code,
@@ -280,10 +283,8 @@ def assemble_etf_benchmark_constituent_vintages(
                 "availability_basis": "PROVIDER_FIRST_OBSERVED",
                 "availability_precision": "UNKNOWN",
                 "provider_first_observed_at": (
-                    rec.provider_first_observed_at
-                    if rec
-                    else obs.availability.provider_first_observed_at
-                ).isoformat(),
+                    first_observed.isoformat() if first_observed else None
+                ),
                 "snapshot_fetched_at": obs.snapshot_fetched_at.isoformat(),
                 "snapshot_identity": obs.snapshot_identity,
                 "observation_identity": obs.observation_identity,
@@ -408,7 +409,7 @@ def assemble_etf_benchmark_constituent_vintages(
     gates = compute_machine_gates(
         registry,
         observations,
-        artifact_rows["source_resolution_manifest"],
+        cast(list[dict[str, Any]], artifact_rows["source_resolution_manifest"]),
         weights,
         cutoff,
         artifact_rows,

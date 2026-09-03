@@ -14,8 +14,9 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 ```
 
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
-Pandas-backed Tushare adapter, or `ohmydata[sec-cli]` for the SEC N-PORT batch CLI
-and Parquet dataset writer. Provider tests use fake clients and never call a network.
+Pandas-backed Tushare adapter, `ohmydata[sec-cli]` for the SEC N-PORT batch CLI,
+or `ohmydata[sec-financials]` for company 10-K/10-Q financial statements and Parquet
+dataset writer. Provider tests use fake clients and never call a network.
 
 ## Core Architecture (offline & immutable)
 
@@ -423,6 +424,59 @@ artifacts or output. Universe classification is caller-reviewed; the intended
 equity-ETF research universe excludes GLD, bond ETFs, and money-market/currency
 ETFs.
 
+### SEC Company Financials (10-K & 10-Q PIT via EdgarTools)
+
+The `sec-financials` extra wraps `edgartools` with strict credential injection,
+zero-runtime core isolation, and anti-lookahead Point-in-Time (PIT) lineage for
+the three core financial statements (**Balance Sheet**, **Income Statement**, and
+**Cash Flow Statement**):
+
+```bash
+uv sync --extra sec-financials
+
+# Sync company financials via an OMD configuration file:
+uv run omd sec financials sync --config artifacts/sec-financials.yaml
+
+# Or inspect local partitions:
+uv run omd sec financials inspect --root artifacts/sec-financials --symbol AAPL --rows
+
+# Or validate local Parquet partition checksums:
+uv run omd sec financials validate --root artifacts/sec-financials
+```
+
+Python SDK example with injected credentials:
+
+```python
+from ohmydata.providers.sec import (
+    SecFinancialsClient,
+    SecFinancialsRequest,
+    write_financials_partition,
+)
+
+# Injected client reading identity strictly from contact info (no .env):
+client = SecFinancialsClient("MyResearchApp/1.0 (contact@example.com)")
+
+request = SecFinancialsRequest(
+    symbols=("AAPL", "MSFT"),
+    forms=("10-K", "10-Q"),
+    availability_policy="accepted-at-plus-lag",
+    lag_days=0,
+)
+
+vintages = client.fetch_company_financials(request)
+
+# Partitioned Parquet data lake writing:
+for symbol in ("AAPL", "MSFT"):
+    sym_vintages = [v for v in vintages if v.symbol == symbol]
+    write_financials_partition("artifacts/sec-financials", symbol, sym_vintages)
+```
+
+Each vintage records EDGAR's official `accepted_at` timestamp and computes
+`availability_anchor = accepted_at + lag_days`. Financial statement rows
+preserve native line item labels and concepts (`concept`, `label`, `value_native`)
+beside standardized XBRL categories (`standard_concept`) for cross-company
+quantitative comparisons.
+
 ## Dataframe Adapters (Polars & Pandas)
 
 The optional `ohmydata[polars]` extra provides explicit, eager representation
@@ -454,7 +508,7 @@ uv lock
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-uv run pyright
+uv run ty check
 uv build
 git diff --check
 ```

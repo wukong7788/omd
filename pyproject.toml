@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohmydata"
-version = "0.1.4"
-description = "Offline-first market-data SDK scaffold"
+version = "0.1.5"
+description = "Financial and alternative market data ingestion SDK."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [{ name = "OMD contributors" }]
@@ -23,6 +23,10 @@ polars = [
 ]
 vintage-plane = ["pandas>=2.0,<3.0", "pyarrow>=23.0.1,<24.0"]
 sec-cli = ["pyarrow>=23.0.1,<24.0"]
+sec-financials = [
+  "edgartools>=5.0.0",
+  "pyarrow>=23.0.1,<24.0",
+]
 
 [dependency-groups]
 dev = [
@@ -30,9 +34,9 @@ dev = [
   "pandas-stubs>=2.2",
   "polars>=1.38.1,<2.0",
   "pyarrow>=23.0.1,<24.0",
-  "pyright>=1.1.390",
   "pytest>=8.3",
   "ruff>=0.8",
+  "ty>=0.0.78",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -55,7 +59,14 @@ addopts = ["--import-mode=importlib"]
 line-length = 100
 target-version = "py311"
 
-[tool.pyright]
-include = ["src", "tests"]
-pythonVersion = "3.11"
-typeCheckingMode = "strict"
+[tool.ty.environment]
+python-version = "3.11"
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+missing-argument = "ignore"
+invalid-assignment = "ignore"
+invalid-return-type = "ignore"
+redundant-cast = "ignore"

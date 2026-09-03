@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.5 — 2026-09-03
+
+- Added SEC EDGAR company financials ingestion and Point-in-Time (PIT) dataset
+  generator with isolated optional dependency `sec-financials` (`edgartools` + `pyarrow`).
+- Implemented `SecFinancialsClient`, `SecFinancialsRequest`, `SecStatementRow`,
+  and `SecCompanyFinancialVintage` for extracting three core financial statements
+  (Balance Sheet, Income Statement, Cash Flow Statement) with standardized and native
+  XBRL concepts, exact Decimal precision, and official EDGAR acceptance timestamps.
+- Added `omd sec financials {sync,inspect,validate}` CLI subcommands with `--config`
+  file support, `--latest` and `--limit` single/multi-filing filters, and SHA-256
+  signed Parquet lake partitions.
+- Migrated codebase static type checker from Pyright to Astral's `ty`.
+- Updated `us-data-update` skill to support company financial statements and latest
+  quarter reports.
+
 ## 0.1.4 — 2026-09-03
 
 - Added offline SEC N-PORT request, transport, artifact, parsing, and EDGAR

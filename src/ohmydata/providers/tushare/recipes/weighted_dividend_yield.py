@@ -155,9 +155,10 @@ def _calculate(
         weight = float(getattr(row, weight_field))
         value = lookup.get(getattr(row, key))
         if _finite_real(value):
+            assert value is not None
             supported_weight += weight
             supported_count += 1
-            weighted_sum += (weight / total) * float(value)  # type: ignore[arg-type]
+            weighted_sum += (weight / total) * float(value)
     coverage = supported_weight / total
     complete = math.isclose(coverage, 1.0, rel_tol=0.0, abs_tol=1e-12)
     if not complete and policy is DividendYieldCoveragePolicy.REQUIRE_COMPLETE:

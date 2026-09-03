@@ -47,7 +47,7 @@ def _lineage(rows: list[dict[str, Any]]) -> tuple[bool, bool]:
     by_observation: dict[str, tuple[str, str]] = {}
     consistent = True
     for row in rows:
-        obs = row.get("observation_identity")
+        obs = str(row.get("observation_identity") or "")
         key = (str(row.get("request_identity")), str(row.get("payload_sha256")))
         if obs in by_observation and by_observation[obs] != key:
             consistent = False
