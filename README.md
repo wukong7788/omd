@@ -1,7 +1,7 @@
 # Oh My Data (OMD)
 
-`ohmydata` is a provisional, offline-first market-data SDK. Tushare endpoint
-adapters accept an already initialized official-compatible client; credentials
+`ohmydata` is an offline-first market-data ingestion SDK and CLI. Provider endpoint
+adapters accept already initialized official-compatible clients; credentials
 are never loaded by this library.
 
 ## Supported Python and installation
@@ -14,62 +14,73 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 ```
 
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
-Pandas-backed adapter. Provider tests use fake clients and never call a network.
+Pandas-backed Tushare adapter, or `ohmydata[sec-cli]` for the SEC N-PORT batch CLI
+and Parquet dataset writer. Provider tests use fake clients and never call a network.
 
-The optional `ohmydata[vintage-plane]` extra provides the ETF benchmark and
-constituent vintage artifact assembler. It accepts only caller-constructed,
-bounded requests and synthetic captured observations; it never discovers
-credentials or universes. Current Tushare mappings are current-only evidence,
-not historical point-in-time availability, and `index_weight` retrieval and
-economic completeness remain explicitly unproven under the provider contract.
+## Core Architecture (offline & immutable)
+
+`ohmydata.core` provides canonical request identities, classified retry with
+total-attempt semantics, explicit instance-scoped rate limiters, dataframe-free
+provenance, and immutable APPEND/FROZEN snapshots. Request parameters reject
+secret-bearing keys before serialization. Snapshot callers provide exact bytes;
+the core never contacts providers or loads credentials.
+
+Availability evidence is represented by the dataframe-free
+`AvailabilityEvidence` value object. Source-declared timestamps are the only
+evidence marked `pit_proven`; inferred schedules, date-only declarations, and
+provider-first-observed fallbacks remain conservative. Snapshot construction
+uses validated observation receipts and normalizes datetimes to UTC.
 
 ```python
 from datetime import UTC, datetime
 from pathlib import Path
-from ohmydata.core import SnapshotStore, SourceFactRegistry
-from ohmydata.providers.tushare import (
-    EtfBenchmarkConstituentScope,
-    assemble_etf_benchmark_constituent_vintages,
+
+from ohmydata.core import (
+    RateLimiter,
+    RateLimitPolicy,
+    RequestSpec,
+    RetryPolicy,
+    SnapshotMode,
+    SnapshotStore,
+    execute_with_retry,
 )
 
-# Offline synthetic assembly; no credentials or network are used.
-bundle = assemble_etf_benchmark_constituent_vintages(
-    [],
-    store=SnapshotStore(Path("snapshots")),
-    registry=SourceFactRegistry(Path("registry")),
-    scope=EtfBenchmarkConstituentScope(),
-    cutoff=datetime(2026, 1, 1, tzinfo=UTC),
-    output_dir=Path("bundle"),
+try:
+    RequestSpec("demo", "bars", {"api_token": "never-serialize"})
+except ValueError:
+    pass
+limiter = RateLimiter(RateLimitPolicy(0.1))
+limiter.acquire()
+result = execute_with_retry(lambda: "ok", RetryPolicy(max_attempts=1))
+store = SnapshotStore(Path("snapshots"))
+store.write(
+    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.APPEND
+)
+store.write(
+    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.FROZEN
 )
 ```
 
-OMD owns source evidence and immutable lineage only. Consumers own canonical
-cutoffs, trading calendars, session alignment, normalized datasets, and all
-strategy or portfolio semantics.
+`RetryPolicy(max_attempts=3)` counts the first call. APPEND preserves distinct
+observations; FROZEN permits one response identity. `SnapshotStore.observe()`
+adds immutable, ordered fetch receipts without changing snapshot bytes;
+`SnapshotRef.fact_version` identifies the exact request, payload, and
+serialization. `provider_first_observed_at()` reports when OMD first persisted
+those exact bytes, not provider publication time or consumer usability.
+Limiter state is per instance.
 
-The optional `ohmydata[polars]` extra provides explicit, eager representation
-adapters:
+Raw provider rows can be wrapped in `RawFactEnvelope`, preserving the
+response-level `fact_version` separately from a canonical row hash. Revision
+status remains conservative until an explicit same-key prior row is supplied;
+point-in-time and date-only availability quality flags are serialized too.
+The offline characterization matrix in
+[`tests/characterization/test_pit_fail_closed.py`](tests/characterization/test_pit_fail_closed.py)
+also proves that late arrivals, date-only evidence, replay mismatches,
+pagination truncation, and historical-vintage claims remain fail-closed. OMD
+does not choose consumer cutoffs, calendars, dataset commits, or usable
+sessions.
 
-```python
-from ohmydata.adapters.polars import pandas_to_polars, polars_to_pandas
-
-polars_frame = pandas_to_polars(pandas_frame)
-# For validated empty/all-null Pandas object columns, opt into String:
-polars_frame = pandas_to_polars(pandas_frame, empty_object_policy="string")
-pandas_frame = polars_to_pandas(polars_frame)
-```
-
-Conversions preserve columns and row order, provider-native values, nulls,
-NaN/infinities, and supported temporal timezones. They do not parse dates,
-rename or sort columns, scale units, deduplicate, impute, or apply consumer
-schemas. Unsupported or potentially lossy dtypes fail with
-`SchemaMismatchError`; the adapter never contacts a provider or reads
-credentials. The default `empty_object_policy="error"` rejects ambiguous
-empty object columns; the explicit `"string"` policy casts only empty/all-null
-object columns to nullable Pandas strings before conversion and never changes
-populated object columns or imputes missing values.
-
-## Phase 2 Tushare adapter (offline and injected)
+## Tushare Provider (A-Share & China ETF Ingestion)
 
 Pass an already initialized official-client-compatible object. The adapter
 does not create clients or read credentials; this fake-client example is safe
@@ -136,6 +147,151 @@ exact duplicates) remain intact; a 2,000-row `fund_share` response is rejected
 as an ambiguous provider cap. Announcement and trade dates are date-only
 evidence and do not prove an intraday availability timestamp.
 
+### Stock daily and adjustment endpoints
+
+The Tushare adapter exposes typed, injected-client `daily` and `adj_factor` requests:
+
+```python
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    StockAdjustmentRequest,
+    StockDailyRequest,
+    TushareClient,
+)
+
+daily = TushareClient(client).fetch_stock_daily(
+    StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="000001.SZ")
+)
+adjustment = TushareClient(client).fetch_stock_adjustment(
+    StockAdjustmentRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240102")
+)
+```
+
+Both requests require exactly one symbol (optionally date-bounded) or one
+exact trade date, and return stable `ts_code`/`trade_date` ordering. Fields are
+explicit and ordered; custom lists must retain both identity fields. Values,
+units, and nulls remain provider-native: daily `pct_chg` is a percentage,
+`vol` is hands, `amount` is thousand yuan, and `adj_factor` is unmodified.
+Suspended rows are not synthesized, and no adjusted-price calculation or
+point-in-time availability claim is made.
+
+### ETF PCF constituent endpoints
+
+`EtfShConsRequest` and `EtfSzConsRequest` expose the exchange-native
+`etf_sh_cons` and `etf_sz_cons` schemas. Shanghai uses `sca` (CNY replacement
+amount); Shenzhen uses `sub_cc` and `red_cc` (CNY subscription/redemption
+replacement amounts). Quantities are shares and `cpr`/`rdr` are percentages.
+Provider values, nulls, sentinels, and duplicate observations remain unchanged.
+
+Each endpoint rejects an ambiguous exactly-3000-row response. Use
+`fetch_etf_pcf_history` with an explicit exchange, date range, and
+`EmptyPolicy` to recursively bisect calendar windows without offsets. The
+recipe reports successful leaf provenances, request and truncation counts, and
+returns a defensive provider-native Pandas frame. A `trade_date` is date-only
+provider evidence; availability timestamps, point-in-time lag, cross-exchange
+normalization, and published dataset policy remain consumer responsibilities.
+
+```python
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    EtfPcfHistoryRequest,
+    fetch_etf_pcf_history,
+)
+
+history = fetch_etf_pcf_history(
+    client,
+    EtfPcfHistoryRequest(
+        ts_code="510050.SH",
+        exchange="SH",
+        start_date="20240101",
+        end_date="20240131",
+        empty_policy=EmptyPolicy.ALLOW,
+    ),
+)
+frame = history.frame
+```
+
+### Look-through source facts and vintage plane
+
+`capture_tushare_result` serializes an already validated `TushareFetchResult`
+deterministically into an append-only `SnapshotStore` and returns an immutable
+`TushareObservedResult` binding provenance, snapshot/observation/fact
+identities, availability evidence, and a content hash:
+
+```python
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ohmydata.core import SnapshotStore
+from ohmydata.providers.tushare import (
+    EmptyPolicy,
+    EtfBasicRequest,
+    TushareClient,
+    capture_tushare_result,
+)
+
+request = EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, ts_code="510050.SH")
+result = TushareClient(client).fetch_etf_basic(request)
+observed = capture_tushare_result(
+    SnapshotStore(Path("snapshots")),
+    request,
+    result,
+    observed_at=datetime.now(UTC),
+)
+```
+
+`observed_at` is explicit and timezone-aware; the capture path never reads
+credentials or calls a provider. Typed `stock_basic` and `index_member_all`
+endpoints add current stock identity and dated Shenwan industry membership
+facts; broad all-market requests require an explicit opt-in, and responses at
+the documented row caps (6000 / 2000) fail closed.
+
+The pure recipes `build_etf_index_mapping_observations`,
+`audit_index_weight_vintage`, and `build_lookthrough_source_bundle` report
+observed ETF→index mapping versions, per-vintage weight/count/retrieval
+diagnostics, and a manifest-only source bundle. They never infer historical
+effective dates, `first_usable_session`, weight renormalization, industry
+backfill, style/cluster labels, or portfolio exposure. Every emitted fact
+remains `PIT_UNPROVEN` unless an auditable provider contract proves
+otherwise; `index_weight` retrieval completeness is unproven in this release
+by contract. Bundle manifests report mapped indices without a captured weight
+vintage and record industry-observation coverage for every captured component.
+
+Consumer gaps are documented field-by-field in
+[`docs/v0.1.2-lookthrough-migration.md`](docs/v0.1.2-lookthrough-migration.md).
+
+The optional `ohmydata[vintage-plane]` extra provides the ETF benchmark and
+constituent vintage artifact assembler. It accepts only caller-constructed,
+bounded requests and synthetic captured observations; it never discovers
+credentials or universes. Current Tushare mappings are current-only evidence,
+not historical point-in-time availability, and `index_weight` retrieval and
+economic completeness remain explicitly unproven under the provider contract.
+
+```python
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ohmydata.core import SnapshotStore, SourceFactRegistry
+from ohmydata.providers.tushare import (
+    EtfBenchmarkConstituentScope,
+    assemble_etf_benchmark_constituent_vintages,
+)
+
+# Offline synthetic assembly; no credentials or network are used.
+bundle = assemble_etf_benchmark_constituent_vintages(
+    [],
+    store=SnapshotStore(Path("snapshots")),
+    registry=SourceFactRegistry(Path("registry")),
+    scope=EtfBenchmarkConstituentScope(),
+    cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+    output_dir=Path("bundle"),
+)
+```
+
+OMD owns source evidence and immutable lineage only. Consumers own canonical
+cutoffs, trading calendars, session alignment, normalized datasets, and all
+strategy or portfolio semantics.
+
 ### Adjusted ETF bars recipe
 
 `fetch_adjusted_etf_bars` composes `fund_daily` with provider-native
@@ -150,8 +306,8 @@ a finite factor for every returned daily bar. Rows for foreign symbols fail.
 
 ```python
 from ohmydata.providers.tushare import (
-    AdjustmentCoveragePolicy,
     AdjustedEtfBarsRequest,
+    AdjustmentCoveragePolicy,
     EmptyPolicy,
 )
 
@@ -201,177 +357,7 @@ constituent. `weight` remains the provider-native percentage, including null
 or non-finite values; no effective period, availability timestamp, or weight
 renormalization is inferred.
 
-## Look-through source facts (v0.1.2)
-
-`capture_tushare_result` serializes an already validated `TushareFetchResult`
-deterministically into an append-only `SnapshotStore` and returns an immutable
-`TushareObservedResult` binding provenance, snapshot/observation/fact
-identities, availability evidence, and a content hash:
-
-```python
-from datetime import UTC, datetime
-from pathlib import Path
-
-from ohmydata.core import SnapshotStore
-from ohmydata.providers.tushare import (
-    EmptyPolicy,
-    EtfBasicRequest,
-    TushareClient,
-    capture_tushare_result,
-)
-
-request = EtfBasicRequest(empty_policy=EmptyPolicy.ERROR, ts_code="510050.SH")
-result = TushareClient(client).fetch_etf_basic(request)
-observed = capture_tushare_result(
-    SnapshotStore(Path("snapshots")),
-    request,
-    result,
-    observed_at=datetime.now(UTC),
-)
-```
-
-`observed_at` is explicit and timezone-aware; the capture path never reads
-credentials or calls a provider. Typed `stock_basic` and `index_member_all`
-endpoints add current stock identity and dated Shenwan industry membership
-facts; broad all-market requests require an explicit opt-in, and responses at
-the documented row caps (6000 / 2000) fail closed.
-
-The pure recipes `build_etf_index_mapping_observations`,
-`audit_index_weight_vintage`, and `build_lookthrough_source_bundle` report
-observed ETF→index mapping versions, per-vintage weight/count/retrieval
-diagnostics, and a manifest-only source bundle. They never infer historical
-effective dates, `first_usable_session`, weight renormalization, industry
-backfill, style/cluster labels, or portfolio exposure. Every emitted fact
-remains `PIT_UNPROVEN` unless an auditable provider contract proves
-otherwise; `index_weight` retrieval completeness is unproven in this release
-by contract. Bundle manifests report mapped indices without a captured weight
-vintage and record industry-observation coverage for every captured component.
-
-Consumer gaps are documented field-by-field in
-[`docs/v0.1.2-lookthrough-migration.md`](docs/v0.1.2-lookthrough-migration.md).
-
-## Local checks
-
-```bash
-uv lock
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv build
-git diff --check
-```
-
-Behavioral evidence for the initial consumers is in
-[`docs/behavioral-inventory.md`](docs/behavioral-inventory.md). The adjusted
-ETF characterization is test-only and uses synthetic JSON fixtures.
-The public-contract changes and consumer-owned migration boundaries in `v0.1.0`
-are summarized in
-[`docs/v0.1.0-migration.md`](docs/v0.1.0-migration.md).
-
-Phase 1 core is offline and explicit:
-
-Availability evidence is represented by the dataframe-free
-`AvailabilityEvidence` value object. Source-declared timestamps are the only
-evidence marked `pit_proven`; inferred schedules, date-only declarations, and
-provider-first-observed fallbacks remain conservative. Snapshot construction
-uses validated observation receipts and normalizes datetimes to UTC.
-
-```python
-from datetime import UTC, datetime
-from pathlib import Path
-from ohmydata.core import RequestSpec, RetryPolicy, RateLimitPolicy, RateLimiter, execute_with_retry
-from ohmydata.core import SnapshotMode, SnapshotStore
-
-try:
-    RequestSpec("demo", "bars", {"api_token": "never-serialize"})
-except ValueError:
-    pass
-limiter = RateLimiter(RateLimitPolicy(0.1))
-limiter.acquire()
-result = execute_with_retry(lambda: "ok", RetryPolicy(max_attempts=1))
-store = SnapshotStore(Path("snapshots"))
-store.write(
-    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.APPEND
-)
-store.write(
-    RequestSpec("demo", "bars", {}), b"[]", datetime.now(UTC), "json-v1", SnapshotMode.FROZEN
-)
-```
-
-`RetryPolicy(max_attempts=3)` counts the first call. APPEND preserves distinct
-observations; FROZEN permits one response identity. `SnapshotStore.observe()`
-adds immutable, ordered fetch receipts without changing snapshot bytes;
-`SnapshotRef.fact_version` identifies the exact request, payload, and
-serialization. `provider_first_observed_at()` reports when OMD first persisted
-those exact bytes, not provider publication time or consumer usability.
-Limiter state is per instance.
-
-Raw provider rows can be wrapped in `RawFactEnvelope`, preserving the
-response-level `fact_version` separately from a canonical row hash. Revision
-status remains conservative until an explicit same-key prior row is supplied;
-point-in-time and date-only availability quality flags are serialized too.
-The offline characterization matrix in
-[`tests/characterization/test_pit_fail_closed.py`](tests/characterization/test_pit_fail_closed.py)
-also proves that late arrivals, date-only evidence, replay mismatches,
-pagination truncation, and historical-vintage claims remain fail-closed. OMD
-does not choose consumer cutoffs, calendars, dataset commits, or usable
-sessions.
-
-## Phase 1 core (offline)
-
-`ohmydata.core` provides canonical request identities, classified retry with
-total-attempt semantics, explicit instance-scoped rate limiters, dataframe-free
-provenance, and immutable APPEND/FROZEN snapshots. Request parameters reject
-secret-bearing keys before serialization. Snapshot callers provide exact bytes;
-the core never contacts providers or loads credentials.
-
-## Phase 2b Tushare endpoints
-
-The Tushare adapter exposes typed requests for fund dividends, fund portfolios,
-daily basics, and index weights through injected clients. Requests always send
-an explicit ordered field list and preserve provider-native values and missing
-data. `fund_portfolio` requires a bounded report selector (`ann_date`, exact
-`period`, or a same-year `start_date`/`end_date` range); unbounded holdings are
-rejected. Native units remain unchanged: dividend cash is yuan per share,
-portfolio market value is yuan and amount is shares, daily-basic share and
-market-value fields use Tushare's ten-thousand units, and index weights remain
-provider percentages. `daily_basic` accepts either a symbol with optional
-inclusive calendar-date bounds or one exact trade date; responses are
-scope-checked, stably ordered by symbol/date, and exactly 6000 rows are
-rejected as an ambiguous provider cap. No availability timestamp or consumer
-normalization is inferred.
-
-## Stock daily and adjustment endpoints
-
-The Tushare adapter also exposes typed, injected-client `daily` and
-`adj_factor` requests:
-
-```python
-from ohmydata.providers.tushare import (
-    EmptyPolicy,
-    StockAdjustmentRequest,
-    StockDailyRequest,
-    TushareClient,
-)
-
-daily = TushareClient(client).fetch_stock_daily(
-    StockDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="000001.SZ")
-)
-adjustment = TushareClient(client).fetch_stock_adjustment(
-    StockAdjustmentRequest(empty_policy=EmptyPolicy.ALLOW, trade_date="20240102")
-)
-```
-
-Both requests require exactly one symbol (optionally date-bounded) or one
-exact trade date, and return stable `ts_code`/`trade_date` ordering. Fields are
-explicit and ordered; custom lists must retain both identity fields. Values,
-units, and nulls remain provider-native: daily `pct_chg` is a percentage,
-`vol` is hands, `amount` is thousand yuan, and `adj_factor` is unmodified.
-Suspended rows are not synthesized, and no adjusted-price calculation or
-point-in-time availability claim is made.
-
-## SEC N-PORT holdings CLI
+## SEC N-PORT Holdings Provider & CLI
 
 The `ohmydata.providers.sec` package provides offline-testable primitives for
 the official quarterly N-PORT data set: caller-selected series, immutable
@@ -437,41 +423,47 @@ artifacts or output. Universe classification is caller-reviewed; the intended
 equity-ETF research universe excludes GLD, bond ETFs, and money-market/currency
 ETFs.
 
-## ETF PCF constituent endpoints (v0.1.1)
+## Dataframe Adapters (Polars & Pandas)
 
-`EtfShConsRequest` and `EtfSzConsRequest` expose the exchange-native
-`etf_sh_cons` and `etf_sz_cons` schemas. Shanghai uses `sca` (CNY replacement
-amount); Shenzhen uses `sub_cc` and `red_cc` (CNY subscription/redemption
-replacement amounts). Quantities are shares and `cpr`/`rdr` are percentages.
-Provider values, nulls, sentinels, and duplicate observations remain unchanged.
-
-Each endpoint rejects an ambiguous exactly-3000-row response. Use
-`fetch_etf_pcf_history` with an explicit exchange, date range, and
-`EmptyPolicy` to recursively bisect calendar windows without offsets. The
-recipe reports successful leaf provenances, request and truncation counts, and
-returns a defensive provider-native Pandas frame. A `trade_date` is date-only
-provider evidence; availability timestamps, point-in-time lag, cross-exchange
-normalization, and published dataset policy remain consumer responsibilities.
-
-The recipe accepts an injected offline-capable client; the library performs no
-credential or environment lookup:
+The optional `ohmydata[polars]` extra provides explicit, eager representation
+adapters:
 
 ```python
-from ohmydata.providers.tushare import (
-    EmptyPolicy,
-    EtfPcfHistoryRequest,
-    fetch_etf_pcf_history,
-)
+from ohmydata.adapters.polars import pandas_to_polars, polars_to_pandas
 
-history = fetch_etf_pcf_history(
-    client,
-    EtfPcfHistoryRequest(
-        ts_code="510050.SH",
-        exchange="SH",
-        start_date="20240101",
-        end_date="20240131",
-        empty_policy=EmptyPolicy.ALLOW,
-    ),
-)
-frame = history.frame
+polars_frame = pandas_to_polars(pandas_frame)
+# For validated empty/all-null Pandas object columns, opt into String:
+polars_frame = pandas_to_polars(pandas_frame, empty_object_policy="string")
+pandas_frame = polars_to_pandas(polars_frame)
 ```
+
+Conversions preserve columns and row order, provider-native values, nulls,
+NaN/infinities, and supported temporal timezones. They do not parse dates,
+rename or sort columns, scale units, deduplicate, impute, or apply consumer
+schemas. Unsupported or potentially lossy dtypes fail with
+`SchemaMismatchError`; the adapter never contacts a provider or reads
+credentials. The default `empty_object_policy="error"` rejects ambiguous
+empty object columns; the explicit `"string"` policy casts only empty/all-null
+object columns to nullable Pandas strings before conversion and never changes
+populated object columns or imputes missing values.
+
+## Local Checks and Verification
+
+```bash
+uv lock
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv build
+git diff --check
+```
+
+Behavioral evidence for the initial consumers is in
+[`docs/behavioral-inventory.md`](docs/behavioral-inventory.md). The adjusted
+ETF characterization is test-only and uses synthetic JSON fixtures.
+The public-contract changes and consumer-owned migration boundaries are summarized in
+[`docs/v0.1.0-migration.md`](docs/v0.1.0-migration.md),
+[`docs/v0.1.1-migration.md`](docs/v0.1.1-migration.md),
+[`docs/v0.1.2-lookthrough-migration.md`](docs/v0.1.2-lookthrough-migration.md), and
+[`docs/v0.1.3-vintage-plane-migration.md`](docs/v0.1.3-vintage-plane-migration.md).
