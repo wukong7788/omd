@@ -53,6 +53,14 @@ class CoverageError(OhMyDataError):
     pass
 
 
+class AmbiguousPartitionError(OhMyDataError):
+    pass
+
+
+class ResourceLimitError(OhMyDataError):
+    pass
+
+
 @dataclass(frozen=True)
 class AttemptRecord:
     attempt: int

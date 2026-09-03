@@ -663,6 +663,22 @@ def load_universe(path: str | Path) -> tuple[tuple[SecScheduledFundSelector, ...
     return tuple(scheduled), digest
 
 
+@dataclass(frozen=True)
+class SecEquityEtfUniverse:
+    funds: tuple[SecScheduledFundSelector, ...]
+    universe_hash: str
+    raw_path: Path | None = None
+
+    @classmethod
+    def load(cls, path: str | Path) -> SecEquityEtfUniverse:
+        p = Path(path)
+        funds, uhash = load_universe(p)
+        return cls(funds=funds, universe_hash=uhash, raw_path=p)
+
+    def active_for(self, quarter: Quarter) -> tuple[SecScheduledFundSelector, ...]:
+        return tuple(f for f in self.funds if f.active(quarter))
+
+
 def resolve_single_series_cik(parent_rows: list[dict[str, Any]], cik: str) -> str | None:
     """Return the sole empty native series identity, or fail on ambiguity."""
     rows = [r for r in parent_rows if str(r.get("CIK", "")) == cik]
@@ -1494,6 +1510,24 @@ class SecNportBatch:
             "artifacts_checked": checked,
             "partitions_checked": partitions,
         }
+
+    def iter_validated_partitions(self, quarters: tuple[Quarter, ...]) -> list[dict[str, Any]]:
+        self.validate_local(quarters)
+        catalog_path = self.root / "core" / "sec-fund-holdings-pit-v1" / "catalog.json"
+        if not catalog_path.is_file():
+            return []
+        entries = AppendOnlyIndex(catalog_path, "sec-core-catalog-v1").read()["entries"]
+        requested_q = {str(q) for q in quarters}
+        matched: list[dict[str, Any]] = [
+            cast(dict[str, Any], e) for e in entries if str(e.get("source_quarter")) in requested_q
+        ]
+        matched.sort(
+            key=lambda x: (
+                str(x.get("source_quarter", "")),
+                str(x.get("partition_identity", "")),
+            )
+        )
+        return matched
 
     def inspect_local(
         self, quarter: Quarter, symbol: str | None = None, rows: bool = False

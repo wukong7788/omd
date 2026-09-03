@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from .batch import (
     Quarter,
+    SecEquityEtfUniverse,
     SecNportBatch,
     ensure_safe_output_root,
     latest_completed_quarter,
@@ -138,6 +139,18 @@ def add_nport_commands(subparsers: Any) -> None:
     p.add_argument("--rows", action="store_true")
     p.add_argument("--json", action="store_true")
 
+    p_qual = nport.add_parser("qualify")
+    p_qual.add_argument("--config")
+    p_qual.add_argument("--quarters")
+    p_qual.add_argument("--root")
+    p_qual.add_argument("--universe")
+    p_qual.add_argument("--availability-policy")
+    p_qual.add_argument("--lag-days", type=int)
+    p_qual.add_argument("--partition-set")
+    p_qual.add_argument("--output")
+    p_qual.add_argument("--json", action="store_true")
+    p_qual.add_argument("--quiet", action="store_true")
+
     fin = sec.add_parser("financials").add_subparsers(dest="financials_command", required=True)
     for command in ("sync", "validate"):
         p_fin = fin.add_parser(command)
@@ -178,6 +191,9 @@ def run(args: Any) -> int:
     if not getattr(args, "root", None):
         raise ValueError("--root is required")
     ensure_safe_output_root(args.root)
+
+    if args.nport_command == "qualify":
+        return run_qualify(args)
 
     if args.nport_command == "inspect":
         if not getattr(args, "quarter", None):
@@ -371,6 +387,83 @@ def _validate_limits(max_selected_rows: int, max_output_bytes: int) -> None:
         raise ValueError("max-selected-rows must be positive")
     if max_output_bytes <= 0:
         raise ValueError("max-output-bytes must be positive")
+
+
+def run_qualify(args: Any) -> int:
+    from .qualification import SecNportPartitionSet, qualify_sec_nport
+
+    if not getattr(args, "quarters", None):
+        raise ValueError("--quarters is required")
+    quarters_str = str(args.quarters).strip()
+    if quarters_str.lower() == "full":
+        start = "2019q4"
+        end = str(latest_completed_quarter())
+    elif ":" in quarters_str:
+        start, end = quarters_str.split(":", 1)
+    else:
+        start = end = quarters_str
+    quarters = quarter_range(start, end)
+
+    if not getattr(args, "universe", None):
+        raise ValueError("--universe is required")
+    if not Path(args.universe).is_file():
+        raise ValueError(f"universe file not found: {args.universe}")
+    universe = SecEquityEtfUniverse.load(args.universe)
+
+    if not getattr(args, "availability_policy", None):
+        raise ValueError("--availability-policy is required")
+    _validate_policy(args.availability_policy, args.lag_days)
+
+    if not getattr(args, "output", None):
+        raise ValueError("--output is required")
+    ensure_safe_output_root(args.output)
+    output_path = Path(args.output)
+
+    partition_set_obj = None
+    if getattr(args, "partition_set", None):
+        partition_set_obj = SecNportPartitionSet.load(args.partition_set)
+
+    quiet = getattr(args, "quiet", False)
+
+    class ConsoleProgress:
+        def report(
+            self,
+            phase: str,
+            quarter: str | None = None,
+            partition_index: int = 0,
+            partition_count: int = 0,
+            rows_read: int = 0,
+        ) -> None:
+            if not quiet:
+                msg = f"[{phase}]"
+                if quarter:
+                    msg += f" {quarter} ({partition_index}/{partition_count})"
+                _log_progress(msg, quiet)
+
+    ref = qualify_sec_nport(
+        root=Path(args.root),
+        quarters=quarters,
+        universe=universe,
+        availability_policy=args.availability_policy,
+        lag_days=args.lag_days,
+        output=output_path,
+        partition_set=partition_set_obj,
+        progress=ConsoleProgress() if not quiet else None,
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(ref.receipt, indent=2, sort_keys=True))
+    elif not quiet:
+        summary = ref.receipt.get("coverage_summary", {})
+        print(f"Qualification Status: {ref.status}")
+        print(f"Receipt Identity:     {ref.receipt_identity}")
+        print(f"Requested Quarters:   {summary.get('requested_quarters')}")
+        print(f"Expected Funds:       {summary.get('expected_funds')}")
+        print(f"Total Vintages:       {summary.get('total_vintages')}")
+        print(f"Elapsed Seconds:      {ref.receipt.get('elapsed_seconds', 0.0):.2f}s")
+        print(f"Artifacts Published:  {len(ref.receipt.get('output_artifacts', {}))}")
+
+    return 0 if ref.status == "STRUCTURALLY_COMPLETE" else 1
 
 
 def run_financials(args: Any) -> int:

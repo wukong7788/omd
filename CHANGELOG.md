@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.6 — 2026-09-03
+
+- Added SEC N-PORT Structural Qualification V1 subsystem (`omd sec nport qualify`
+  and public Python API `qualify_sec_nport`).
+- Implemented offline-only local artifact closure and catalog validation prerequisite
+  to ensure qualification never proceeds on partial or tampered local states.
+- Implemented exact partition resolution per quarter with strict ambiguity rejection
+  (`AmbiguousPartitionError`) and canonical partition set resolution.
+- Added comprehensive fact extractors:
+  - Quarter & fund coverage facts (`quarter_fund_coverage.parquet`)
+  - Vintage quality & exact decimal weight facts (`vintage_quality.parquet`)
+  - Amendment & revision family relations (`amendment_facts.parquet`)
+  - Identifier presence, multiplicity, duplicates, and conflict facts (`identifier_quality.parquet`)
+  - Tamper-evident qualification receipt (`qualification_receipt.json`)
+- Added post-persist independent replay validator ensuring byte, logical hash, schema,
+  and row count integrity without trusting receipt gates.
+- Added new core error types: `AmbiguousPartitionError` and `ResourceLimitError`.
+
 ## 0.1.5 — 2026-09-03
 
 - Added SEC EDGAR company financials ingestion and Point-in-Time (PIT) dataset
