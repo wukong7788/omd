@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -242,3 +243,78 @@ def validate_yfinance_daily_bar_coverage(
         )
 
     return report
+
+
+def check_ohlc_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Detect OHLC geometric violations (Low <= Open, Close <= High)."""
+    if df is None or df.empty:
+        return []
+    anomalies: list[dict[str, Any]] = []
+    for idx, row in df.iterrows():
+        o, h, l, c = row.get("open"), row.get("high"), row.get("low"), row.get("close")
+        if o is None or h is None or l is None or c is None:
+            continue
+        if any(pd.isna(x) for x in (o, h, l, c)):
+            continue
+        of, hf, lf, cf = float(o), float(h), float(l), float(c)
+        if hf < lf or hf < of or hf < cf or lf > of or lf > cf:
+            anomalies.append(
+                {
+                    "index": idx,
+                    "symbol": row.get("symbol"),
+                    "date": row.get("date"),
+                    "reason": "ohlc_geometry_violation",
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c,
+                }
+            )
+    return anomalies
+
+
+def check_price_jump_anomalies(df: pd.DataFrame, threshold: float = 0.4) -> list[dict[str, Any]]:
+    """Detect suspicious daily price return jumps (> threshold) that may indicate 100x or unadjusted splits."""
+    if df is None or df.empty or "close" not in df.columns or "date" not in df.columns:
+        return []
+    anomalies: list[dict[str, Any]] = []
+    sorted_df = df.sort_values("date").reset_index(drop=True)
+    closes = pd.to_numeric(sorted_df["close"], errors="coerce")
+    pct_changes = closes.pct_change()
+    for idx in range(1, len(sorted_df)):
+        ret = pct_changes.iloc[idx]
+        if pd.notna(ret) and abs(ret) >= threshold:
+            anomalies.append(
+                {
+                    "index": idx,
+                    "symbol": sorted_df.at[idx, "symbol"]
+                    if "symbol" in sorted_df.columns
+                    else None,
+                    "date": sorted_df.at[idx, "date"],
+                    "reason": "suspicious_price_jump",
+                    "return": float(ret),
+                    "prev_close": float(closes.iloc[idx - 1]),
+                    "curr_close": float(closes.iloc[idx]),
+                }
+            )
+    return anomalies
+
+
+def check_volume_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Detect zero or negative volume anomalies."""
+    if df is None or df.empty or "volume" not in df.columns:
+        return []
+    anomalies: list[dict[str, Any]] = []
+    for idx, row in df.iterrows():
+        vol = row.get("volume")
+        if pd.isna(vol) or vol <= 0:
+            anomalies.append(
+                {
+                    "index": idx,
+                    "symbol": row.get("symbol"),
+                    "date": row.get("date"),
+                    "reason": "zero_or_null_volume",
+                    "volume": vol,
+                }
+            )
+    return anomalies

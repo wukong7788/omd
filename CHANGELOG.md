@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1 — 2026-09-04
+
+- Upgraded official `yfinance` provider lock from `1.5.1` to `1.7.0` (`ohmydata[yfinance]`):
+  - Solved `curl_cffi >= 0.16` compatibility issues and improved session robustness.
+  - Runtime version assertion updated to `EXPECTED_YFINANCE_VERSION = "1.7.0"`.
+- Built permanent, reusable **Zero-Drift Audit Engine** (`ohmydata.tools.drift_audit` and CLI command `omd audit-drift`):
+  - Exact calendar date-set alignment, missing/extra session detection, and column-by-column numeric delta auditing (`open`, `high`, `low`, `close`, `adj_close`, `volume`).
+  - Automated Markdown summary and JSON machine-readable audit receipt generation.
+  - Supports `--raw-only` for bit-exact unadjusted bar verification and configurable tolerances (`--abs-tolerance`, `--rel-tolerance`).
+- Registered canonical **`r10a0` Multi-Asset ETF Benchmark Universe** (`ohmydata.tools.universes`):
+  - 13 unique US ETFs across `equity_risk`, `sector_cyclicals`, and `defensive` clusters (Cluster Variant v3) and macro regime states (`risk_on`, `risk_off`).
+  - Audited 10+ years of history (2015-01-01 to 2026-09-01, 38,116 daily bars): achieved **100% bit-exact zero-drift on raw OHLCV** (0 diffs across all columns).
+- Established provider governance policy in `AGENTS.md`:
+  - Strict `repair=False, auto_adjust=False, actions=True, keepna=True` invariant for canonical ingestion and backtesting pipelines.
+  - Bounded domain QC anomaly checks in `quality.py` (`check_ohlc_anomalies`, `check_price_jump_anomalies`, `check_volume_anomalies`).
+  - Mandated `omd audit-drift` gate for all future provider upgrades.
+
 ## 0.2.0 — 2026-09-04
 
 - Added official `yfinance` market data provider locked against `yfinance==1.5.1` baseline (`ohmydata[yfinance]`):

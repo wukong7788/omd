@@ -37,11 +37,11 @@ from .fundamentals import (
 )
 from .quality import evaluate_symbol_outcomes, validate_daily_bars_dataframe
 
-EXPECTED_YFINANCE_VERSION = "1.5.1"
+EXPECTED_YFINANCE_VERSION = "1.7.0"
 
 
 def assert_yfinance_version(module: Any = None) -> None:
-    """Assert that yfinance is installed and matches the reviewed 1.5.1 baseline."""
+    """Assert that yfinance is installed and matches the reviewed 1.7.0 baseline."""
     if module is None:
         try:
             module = importlib.import_module("yfinance")
@@ -54,7 +54,7 @@ def assert_yfinance_version(module: Any = None) -> None:
     if actual_version != EXPECTED_YFINANCE_VERSION:
         raise YFinanceVersionMismatchError(
             f"yfinance version mismatch: expected {EXPECTED_YFINANCE_VERSION!r}, got {actual_version!r}. "
-            "v0.2.0 is locked against yfinance==1.5.1."
+            f"OMD is locked against yfinance=={EXPECTED_YFINANCE_VERSION}."
         )
 
 

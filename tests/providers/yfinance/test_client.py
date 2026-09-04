@@ -26,13 +26,18 @@ from ohmydata.providers.yfinance.fundamentals import YFinanceFundamentalsRequest
 
 class TestVersionAssertion:
     def test_version_match(self):
-        fake_module = SimpleNamespace(__version__="1.5.1")
+        fake_module = SimpleNamespace(__version__="1.7.0")
         assert_yfinance_version(fake_module)
 
     def test_version_mismatch(self):
-        fake_module = SimpleNamespace(__version__="1.6.0")
+        fake_module = SimpleNamespace(__version__="1.5.1")
         with pytest.raises(YFinanceVersionMismatchError, match="yfinance version mismatch"):
             assert_yfinance_version(fake_module)
+
+    def test_real_installed_yfinance_version(self):
+        import yfinance
+
+        assert_yfinance_version(yfinance)
 
 
 class TestClientDailyBars:
@@ -58,7 +63,7 @@ class TestClientDailyBars:
             return fake_batch_df
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.5.1"),
+            yf_module=SimpleNamespace(__version__="1.7.0"),
             download_fn=mock_download,
         )
 
@@ -124,7 +129,7 @@ class TestClientDailyBars:
             return pd.DataFrame()
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.5.1"),
+            yf_module=SimpleNamespace(__version__="1.7.0"),
             download_fn=mock_download,
         )
 
@@ -167,7 +172,7 @@ class TestClientDailyBars:
             return aapl_df
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.5.1"),
+            yf_module=SimpleNamespace(__version__="1.7.0"),
             download_fn=mock_download,
         )
 
@@ -220,7 +225,7 @@ class TestClientFundamentals:
                 return pd.DataFrame({"avg": [2.0, 2.2, 8.5, 9.5]}, index=["0q", "+1q", "0y", "+1y"])
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.5.1"),
+            yf_module=SimpleNamespace(__version__="1.7.0"),
             ticker_factory=lambda sym: FakeTicker(),
         )
 
