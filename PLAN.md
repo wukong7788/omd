@@ -498,7 +498,10 @@ Target milestones:
   [`docs/plans/sec-nport-fund-holdings-pit-v1.md`](docs/plans/sec-nport-fund-holdings-pit-v1.md);
   it is a provider-native, availability-aware holdings domain and does not
   generalize Tushare contracts or move consumer session/feature policy into OMD;
-- `v0.2.0`: yfinance provider after separate inventory and plan update;
+- `v0.2.0`: yfinance provider (daily bars, FX rates, and fundamentals/valuation)
+  under the explicit request, partial-batch, repair, and primary integration
+  contract for `stock_notify` and `funmoney_backtest` in
+  [`docs/plans/v0.2.0-yfinance-provider.md`](docs/plans/v0.2.0-yfinance-provider.md);
 - FMP version is intentionally unscheduled.
 
 ## 11. Global Acceptance Gates for v0.1.0

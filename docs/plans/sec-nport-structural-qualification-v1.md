@@ -1,6 +1,6 @@
 # SEC N-PORT Structural Qualification V1
 
-Status: **0.1.7 IMPLEMENTED AND VERIFIED; PENDING RERUN ACCEPTANCE**
+Status: **0.1.7 IMPLEMENTED AND ACCEPTED**
 
 Target releases:
 
@@ -707,3 +707,30 @@ evidence; they are not overwritten, relabeled, or silently promoted.
 Only after independent review confirms the implementation and the rerun receipt
 may this plan return to **IMPLEMENTED AND ACCEPTED** and may a consumer begin
 session alignment, consumer-defined quality thresholds, or economic research.
+
+### 14.6 Accepted rerun evidence
+
+The corrected `0.1.7` implementation and ignored local rerun were independently
+reviewed on 2026-09-04. Acceptance evidence is:
+
+- focused qualification suite: `21 passed`;
+- one-quarter 2026Q2 probe: `STRUCTURALLY_COMPLETE`, 9/9 expected funds,
+  `replay_table_scans=7`, and `replay_rows_read=8,157` persisted in the receipt;
+- full 2019Q4--2026Q2 run: `STRUCTURALLY_COMPLETE`, 27 exact partitions,
+  243/243 expected fund-quarters, and 244 retained vintages;
+- full-run production counters: 244 fund-vintage rows, 82,494 holding rows,
+  113,305 identifier rows, and 81 bounded source table scans;
+- full-run independent replay counters: 85 scans and 197,018 rows, equal to one
+  replay pass over the 81 source tables plus four candidate fact tables;
+- all 11 intrinsic gates passed only after source-based reconstruction;
+- the four provider-native Parquet fact files are byte-identical to the `0.1.6`
+  characterization, proving the corrective slice did not change fact semantics;
+- elapsed time was 19.74 seconds and peak RSS was 190,283,776 bytes; and
+- accepted receipt identity:
+  `8d39c6fb193e05497c8910a7401394ef401607e505d3c6109acbc5b4196c1aea`.
+
+The immutable accepted bundle is stored under the ignored local data root at
+`artifacts/sec-nport-full/qualification/full-2019q4-2026q2-9etf-lag0-v0.1.7/`.
+This acceptance authorizes consumer-side session alignment and
+consumer-defined structural thresholds. It does not itself authorize economic
+outcome access, strategy changes, promotion, production, live, or broker work.

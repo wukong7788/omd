@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 — 2026-09-04
+
+- Added official `yfinance` market data provider locked against `yfinance==1.5.1` baseline (`ohmydata[yfinance]`):
+  - Daily bars ingestion (`YFinanceDailyBarsRequest`, `YFinanceDailyBarsResult`) supporting US equities (`AAPL`), share classes (`BRK-B`), index tickers (`^VIX`, `^GSPC`), HK stocks (`0700.HK`), and FX pairs (`GBPUSD=X`).
+  - Shape normalization supporting MultiIndex column ordering variations and flat column single-symbol downloads into standard lowercase columns (`symbol`, `date`, `open`, `high`, `low`, `close`, `adj_close`, `volume`).
+  - Bounded per-symbol repair policy (`YFinanceRepairPolicy.PER_SYMBOL`) with auditable `YFinanceRepairReceipt` tracking to rescue dropped symbols from batch downloads.
+  - Quality and coverage validation (`validate_yfinance_daily_bar_coverage`) checking calendar sessions, missing symbols, and non-positive prices.
+  - Valuation snapshot and fundamentals ingestion (`YFinanceFundamentalsRequest`, `YFinanceFundamentalsResult`):
+    - Valuation metrics: trailing PE, forward PE, PEG, price-to-sales, market capitalization, shares outstanding.
+    - Quarterly financials: latest quarter vs prior-year same-quarter comparisons for revenue, operating income, net income, operating cash flow, capex, and free cash flow.
+    - Analyst consensus estimates across 4 horizons (`0q`, `+1q`, `0y`, `+1y`).
+    - Safety invariants: epoch-0 (`1970-01-01`) invalid report date rejection, `quoteType` equity qualification (flags non-equities such as ETFs/indexes/mutual funds), and strict null preservation (never synthesizing `0.0` for missing fields).
+  - High-level offline-testable `YFinanceClient` with dependency injection for unit tests without external network dependencies.
+
 ## 0.1.7 — 2026-09-03
 
 - Corrected SEC N-PORT Structural Qualification pipeline with source-based independent replay
