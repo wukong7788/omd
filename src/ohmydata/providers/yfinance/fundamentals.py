@@ -12,6 +12,16 @@ import pandas as pd
 from ohmydata.core.policy import RetryPolicy
 from ohmydata.core.provenance import FetchProvenance
 
+from ._fundamentals_parsers import (
+    _safe_float,
+    calibrate_forward_pe,
+    derive_implied_price,
+    detect_gaap_distortion,
+    extract_estimates_horizons,
+    extract_metric_pair,
+    extract_quarterly_pair,
+    extract_report_date,
+)
 from .endpoints import validate_yfinance_symbol
 
 NON_EQUITY_QUOTE_TYPES = frozenset(
@@ -19,90 +29,18 @@ NON_EQUITY_QUOTE_TYPES = frozenset(
 )
 
 
-def _safe_float(val: Any) -> float | None:
-    """Convert arbitrary numeric value to float or None."""
-    try:
-        if val is None or pd.isna(val):
-            return None
-        f = float(val)
-        return f if pd.notna(f) else None
-    except (ValueError, TypeError):
-        return None
-
-
-def extract_quarterly_pair(series: pd.Series | None) -> tuple[float | None, float | None]:
-    """Return (latest_quarter, same_quarter_last_year) from a quarterly series."""
-    if series is None or series.empty:
-        return (None, None)
-    cleaned = pd.to_numeric(series, errors="coerce").dropna()
-    if len(cleaned) < 5:
-        # If at least 1 quarter exists, return latest, but prev_year is None
-        latest = _safe_float(cleaned.iloc[0]) if len(cleaned) >= 1 else None
-        return (latest, None)
-    return (_safe_float(cleaned.iloc[0]), _safe_float(cleaned.iloc[4]))
-
-
-def extract_metric_pair(
-    stmt: pd.DataFrame | None, candidate_keys: list[str]
-) -> tuple[float | None, float | None]:
-    """Search for metric rows across aliases and extract (latest, prev_year)."""
-    if stmt is None or stmt.empty:
-        return (None, None)
-    # Search index names ignoring case and whitespace
-    norm_index = {str(idx).strip().lower(): idx for idx in stmt.index}
-    for candidate in candidate_keys:
-        cand_key = candidate.strip().lower()
-        if cand_key in norm_index:
-            row_key = norm_index[cand_key]
-            return extract_quarterly_pair(stmt.loc[row_key])
-    return (None, None)
-
-
-def extract_report_date(
-    info: dict[str, Any] | None, income_stmt: pd.DataFrame | None
-) -> datetime.date | None:
-    """Extract report date from mostRecentQuarter or statement columns, rejecting epoch 0."""
-    info = info or {}
-    candidates: list[datetime.date] = []
-
-    mrq = info.get("mostRecentQuarter")
-    if mrq is not None:
-        try:
-            if isinstance(mrq, (int, float)) and mrq > 0:
-                dt = datetime.datetime.fromtimestamp(mrq, tz=datetime.UTC).date()
-                candidates.append(dt)
-            elif isinstance(mrq, str):
-                dt = pd.to_datetime(mrq).date()
-                candidates.append(dt)
-        except (ValueError, TypeError, OSError):
-            pass
-
-    if income_stmt is not None and not income_stmt.empty:
-        for col in income_stmt.columns:
-            try:
-                dt = pd.to_datetime(col).date()
-                candidates.append(dt)
-                break
-            except (ValueError, TypeError, OSError):
-                pass
-
-    for dt in candidates:
-        # Must be after 1990-01-01 and not epoch 1970-01-01
-        if dt.year >= 1990:
-            return dt
-
-    return None
-
-
 @dataclass(frozen=True)
 class YFinanceValuationSnapshot:
     """Snapshot of valuation ratios and market size."""
 
     trailing_pe: float | None = None
-    forward_pe: float | None = None
+    forward_pe: float | None = None  # Calibrated FY1 institutional Forward P/E
+    raw_forward_pe: float | None = None  # Provider-native raw value from info.get("forwardPE")
+    forward_pe_source: str | None = None  # "FY1_CONSENSUS" | "RAW_FALLBACK" | None
     peg_ratio: float | None = None
     price_to_sales: float | None = None
-    forward_eps: float | None = None
+    forward_eps: float | None = None  # Calibrated FY1 forward EPS (or raw if uncalibrated)
+    raw_forward_eps: float | None = None  # Provider-native raw value from info.get("forwardEps")
     market_cap: float | None = None
     enterprise_value: float | None = None
     shares_outstanding: float | None = None
@@ -147,7 +85,7 @@ class YFinanceQuarterlyFinancials:
 
 @dataclass(frozen=True)
 class YFinanceAnalystEstimates:
-    """Analyst consensus estimates across 4 horizons."""
+    """Analyst consensus estimates across horizons and Non-GAAP cross-validation."""
 
     revenue_est_current_q: float | None = None
     revenue_est_next_q: float | None = None
@@ -155,8 +93,13 @@ class YFinanceAnalystEstimates:
     revenue_est_next_y: float | None = None
     eps_est_current_q: float | None = None
     eps_est_next_q: float | None = None
-    eps_est_current_y: float | None = None
-    eps_est_next_y: float | None = None
+    eps_est_current_y: float | None = None  # Sell-side consensus 0y.avg (often GAAP in Yahoo)
+    eps_est_next_y: float | None = None  # Sell-side consensus +1y.avg
+    eps_current_year: float | None = (
+        None  # Core operating consensus from info.get("epsCurrentYear") (Non-GAAP)
+    )
+    gaap_diff_pct: float | None = None  # Relative deviation: |eps_0y - eps_current_y| / min
+    has_gaap_distortion: bool = False  # True when gaap_diff_pct > 0.25
 
 
 @dataclass(frozen=True)
@@ -236,46 +179,6 @@ class YFinanceFundamentalsResult:
         return pd.DataFrame(self.to_records())
 
 
-def extract_estimates_horizons(
-    df_est: pd.DataFrame | None,
-) -> tuple[float | None, float | None, float | None, float | None]:
-    """Extract (current_q, next_q, current_y, next_y) from estimate DataFrame."""
-    if df_est is None or df_est.empty:
-        return (None, None, None, None)
-
-    # Clean index
-    df_clean = df_est.copy()
-    df_clean.index = [str(idx).strip().lower() for idx in df_clean.index]
-
-    # Find avg / mean column
-    target_col = None
-    for col in df_clean.columns:
-        c_low = str(col).lower()
-        if "avg" in c_low or "mean" in c_low:
-            target_col = col
-            break
-    if target_col is None and len(df_clean.columns) > 0:
-        target_col = df_clean.columns[0]
-
-    if target_col is None:
-        return (None, None, None, None)
-
-    series = pd.to_numeric(df_clean[target_col], errors="coerce")
-
-    def _get_val(keys: list[str]) -> float | None:
-        for k in keys:
-            if k in series.index:
-                val = series.loc[k]
-                return _safe_float(val)
-        return None
-
-    cq = _get_val(["0q", "current quarter", "currentq"])
-    nq = _get_val(["+1q", "next quarter", "nextq", "1q"])
-    cy = _get_val(["0y", "current year", "currenty"])
-    ny = _get_val(["+1y", "next year", "nexty", "1y"])
-    return (cq, nq, cy, ny)
-
-
 def parse_symbol_fundamentals(
     symbol: str,
     info: dict[str, Any] | None,
@@ -312,17 +215,10 @@ def parse_symbol_fundamentals(
         str(info.get("currency") or info.get("financialCurrency") or "").strip().upper() or None
     )
 
-    valuation = YFinanceValuationSnapshot(
-        trailing_pe=_safe_float(info.get("trailingPE")),
-        forward_pe=_safe_float(info.get("forwardPE")),
-        peg_ratio=_safe_float(info.get("pegRatio")),
-        price_to_sales=_safe_float(info.get("priceToSalesTrailing12Months")),
-        forward_eps=_safe_float(info.get("forwardEps")),
-        market_cap=market_cap,
-        enterprise_value=_safe_float(info.get("enterpriseValue")),
-        shares_outstanding=shares_outstanding,
-        currency=currency,
-    )
+    trailing_pe = _safe_float(info.get("trailingPE"))
+    raw_forward_pe = _safe_float(info.get("forwardPE"))
+    raw_forward_eps = _safe_float(info.get("forwardEps"))
+    eps_current_year = _safe_float(info.get("epsCurrentYear"))
 
     # Extract statements YoY pairs
     rev_latest, rev_prev = extract_metric_pair(
@@ -349,19 +245,16 @@ def parse_symbol_fundamentals(
         ],
     )
     fcf_latest, fcf_prev = extract_metric_pair(cashflow_stmt, ["Free Cash Flow"])
-    capex_latest, capex_prev = extract_metric_pair(
-        cashflow_stmt, ["Capital Expenditure", "Capital Expenditures"]
-    )
+    capex_latest, capex_prev = extract_metric_pair(cashflow_stmt, ["Capital Expenditure"])
 
     debt_latest, debt_prev = extract_metric_pair(balance_stmt, ["Total Debt"])
     cash_latest, cash_prev = extract_metric_pair(
         balance_stmt,
-        ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", "Cash"],
+        ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
     )
     net_debt_latest, net_debt_prev = extract_metric_pair(balance_stmt, ["Net Debt"])
     equity_latest, equity_prev = extract_metric_pair(
-        balance_stmt,
-        ["Stockholders Equity", "Total Stockholder Equity", "Common Stock Equity"],
+        balance_stmt, ["Stockholders Equity", "Total Equity Gross Minority Interest"]
     )
 
     financials = YFinanceQuarterlyFinancials(
@@ -400,6 +293,46 @@ def parse_symbol_fundamentals(
     # Extract estimates
     rcq, rnq, rcy, rny = extract_estimates_horizons(rev_estimate_df)
     ecq, enq, ecy, eny = extract_estimates_horizons(eps_estimate_df)
+    eps_0y = ecy
+
+    # Derive implied price defensively
+    implied_price = derive_implied_price(
+        raw_forward_pe=raw_forward_pe,
+        raw_forward_eps=raw_forward_eps,
+        trailing_pe=trailing_pe,
+        deps_latest=deps_latest,
+        market_cap=market_cap,
+        shares_outstanding=shares_outstanding,
+    )
+
+    # Calibrate FY1 Forward P/E
+    calibrated_fpe, calibrated_feps, fpe_source = calibrate_forward_pe(
+        implied_price=implied_price,
+        raw_forward_pe=raw_forward_pe,
+        raw_forward_eps=raw_forward_eps,
+        eps_0y=eps_0y,
+    )
+
+    # GAAP vs. Non-GAAP Distortion Detection
+    gaap_diff_pct, has_gaap_distortion = detect_gaap_distortion(
+        eps_0y=eps_0y,
+        eps_current_year=eps_current_year,
+    )
+
+    valuation = YFinanceValuationSnapshot(
+        trailing_pe=trailing_pe,
+        forward_pe=calibrated_fpe,
+        raw_forward_pe=raw_forward_pe,
+        forward_pe_source=fpe_source,
+        peg_ratio=_safe_float(info.get("pegRatio")),
+        price_to_sales=_safe_float(info.get("priceToSalesTrailing12Months")),
+        forward_eps=calibrated_feps,
+        raw_forward_eps=raw_forward_eps,
+        market_cap=market_cap,
+        enterprise_value=_safe_float(info.get("enterpriseValue")),
+        shares_outstanding=shares_outstanding,
+        currency=currency,
+    )
 
     estimates = YFinanceAnalystEstimates(
         revenue_est_current_q=rcq,
@@ -410,6 +343,9 @@ def parse_symbol_fundamentals(
         eps_est_next_q=enq,
         eps_est_current_y=ecy,
         eps_est_next_y=eny,
+        eps_current_year=eps_current_year,
+        gaap_diff_pct=gaap_diff_pct,
+        has_gaap_distortion=has_gaap_distortion,
     )
 
     report_dt = extract_report_date(info, income_stmt)
@@ -420,9 +356,27 @@ def parse_symbol_fundamentals(
         quote_type=quote_type,
         is_excluded=is_excluded,
         exclusion_reason=exclusion_reason,
-        revenue_growth_hint=_safe_float(info.get("revenueGrowth")),
-        eps_growth_hint=_safe_float(info.get("earningsGrowth")),
         valuation=valuation,
         financials=financials,
         estimates=estimates,
     )
+
+
+__all__ = [
+    "NON_EQUITY_QUOTE_TYPES",
+    "YFinanceAnalystEstimates",
+    "YFinanceFundamentalsRequest",
+    "YFinanceFundamentalsResult",
+    "YFinanceQuarterlyFinancials",
+    "YFinanceSymbolFundamentals",
+    "YFinanceValuationSnapshot",
+    "_safe_float",
+    "calibrate_forward_pe",
+    "derive_implied_price",
+    "detect_gaap_distortion",
+    "extract_estimates_horizons",
+    "extract_metric_pair",
+    "extract_quarterly_pair",
+    "extract_report_date",
+    "parse_symbol_fundamentals",
+]

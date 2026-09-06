@@ -1,5 +1,7 @@
 # Oh My Data (OMD)
 
+[English](README.md) | [中文说明](README_zh.md)
+
 `ohmydata` is an offline-first market-data ingestion SDK and CLI. Provider endpoint
 adapters accept already initialized official-compatible clients; credentials
 are never loaded by this library.
@@ -14,8 +16,9 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 ```
 
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
-Pandas-backed Tushare adapter, `ohmydata[sec-cli]` for the SEC N-PORT batch CLI,
-or `ohmydata[sec-financials]` for company 10-K/10-Q financial statements and Parquet
+Pandas-backed Tushare adapter, `ohmydata[yfinance]` for US/global market data and
+fundamentals, `ohmydata[sec-cli]` for the SEC N-PORT batch CLI, or
+`ohmydata[sec-financials]` for company 10-K/10-Q financial statements and Parquet
 dataset writer. Provider tests use fake clients and never call a network.
 
 ## Core Architecture (offline & immutable)
@@ -476,6 +479,65 @@ Each vintage records EDGAR's official `accepted_at` timestamp and computes
 preserve native line item labels and concepts (`concept`, `label`, `value_native`)
 beside standardized XBRL categories (`standard_concept`) for cross-company
 quantitative comparisons.
+
+### yfinance (US & Global Market Data, Fundamentals, and Zero-Drift Audit)
+
+Install `ohmydata[yfinance]` to access normalized market data, valuation ratios,
+and financial statements with strict version pinning (`yfinance==1.7.0`):
+
+```python
+from ohmydata.providers.yfinance import (
+    YFinanceAdjustmentMode,
+    YFinanceBatchPolicy,
+    YFinanceClient,
+    YFinanceDailyBarsRequest,
+    YFinanceFundamentalsRequest,
+    YFinanceRepairPolicy,
+)
+
+client = YFinanceClient()
+
+# 1. Fetch normalized daily bars (OHLCV) with repair isolation
+bars_req = YFinanceDailyBarsRequest(
+    symbols=("SPY", "QQQ", "^VIX"),
+    start_date="2024-01-01",
+    end_date_exclusive="2024-02-01",
+    adjustment_mode=YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE,
+    batch_policy=YFinanceBatchPolicy.STRICT,
+    repair_policy=YFinanceRepairPolicy.PER_SYMBOL,
+)
+bars_result = client.fetch_daily_bars(bars_req)
+df = bars_result.dataframe
+
+# 2. Fetch fundamentals with institutional FY1 Forward P/E calibration
+fund_req = YFinanceFundamentalsRequest(
+    symbols=("NVDA", "GEV"),
+    include_financials=True,
+    include_valuation=True,
+    include_estimates=True,
+)
+fund_result = client.fetch_fundamentals(fund_req)
+
+nvda = fund_result.records["NVDA"]
+# Forward P/E is calibrated to current year consensus (FY1 0y.avg) rather than out-year (+1y)
+print("NVDA Calibrated FPE:", nvda.valuation.forward_pe, nvda.valuation.forward_pe_source)
+print("NVDA Raw Yahoo FPE:", nvda.valuation.raw_forward_pe)
+
+gev = fund_result.records["GEV"]
+# GAAP vs Non-GAAP accounting distortion detection (flags one-off windfalls > 25%)
+if gev.estimates.has_gaap_distortion:
+    print(f"GEV GAAP distortion flagged! Gap: {gev.estimates.gaap_diff_pct * 100:.1f}%")
+```
+
+#### Zero-Drift Audit CLI (`omd audit-drift`)
+
+Audit 10+ years of historical data against the 13-ETF `r10a0` benchmark universe before
+any provider upgrade:
+
+```bash
+# Strict unadjusted market bar zero-drift gate (must be bit-exact 0.0 error)
+uv run omd audit-drift --universe r10a0 --baseline-dir <old_version_dir> --target-dir <new_version_dir> --raw-only
+```
 
 ## Dataframe Adapters (Polars & Pandas)
 

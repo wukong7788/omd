@@ -139,6 +139,73 @@ class TestSymbolFundamentalsParsing:
         assert res.is_excluded is True
         assert res.exclusion_reason is not None and "non-equity" in res.exclusion_reason
 
+    def test_forward_pe_calibrated_to_fy1_consensus(self):
+        info = {
+            "quoteType": "EQUITY",
+            "forwardPE": 14.9,
+            "forwardEps": 15.46,
+        }
+        eps_estimate_df = pd.DataFrame(
+            {"avg": [9.2812]},
+            index=["0y"],
+        )
+        rec = parse_symbol_fundamentals("NVDA", info, eps_estimate_df=eps_estimate_df)
+
+        assert rec.valuation.forward_pe == 24.8194
+        assert rec.valuation.raw_forward_pe == 14.9
+        assert rec.valuation.forward_pe_source == "FY1_CONSENSUS"
+        assert rec.valuation.forward_eps == 9.2812
+        assert rec.valuation.raw_forward_eps == 15.46
+
+    def test_forward_pe_adr_currency_mismatch_fallback(self):
+        info = {
+            "quoteType": "EQUITY",
+            "forwardPE": 11.98,
+            "forwardEps": 9.33,
+        }
+        eps_estimate_df = pd.DataFrame(
+            {"avg": [44.50]},
+            index=["0y"],
+        )
+        rec = parse_symbol_fundamentals("BABA", info, eps_estimate_df=eps_estimate_df)
+
+        assert rec.valuation.forward_pe == 11.98
+        assert rec.valuation.raw_forward_pe == 11.98
+        assert rec.valuation.forward_pe_source == "RAW_FALLBACK"
+        assert rec.valuation.forward_eps == 9.33
+        assert rec.valuation.raw_forward_eps == 9.33
+
+    def test_gaap_vs_non_gaap_distortion_flagging(self):
+        info = {
+            "quoteType": "EQUITY",
+            "epsCurrentYear": 15.15,
+        }
+        eps_estimate_df = pd.DataFrame(
+            {"avg": [30.74]},
+            index=["0y"],
+        )
+        rec = parse_symbol_fundamentals("GEV", info, eps_estimate_df=eps_estimate_df)
+
+        assert rec.estimates.gaap_diff_pct == 1.029
+        assert rec.estimates.has_gaap_distortion is True
+        assert rec.estimates.eps_current_year == 15.15
+        assert rec.estimates.eps_est_current_y == 30.74
+
+    def test_clean_stock_no_distortion(self):
+        info = {
+            "quoteType": "EQUITY",
+            "epsCurrentYear": 20.597,
+        }
+        eps_estimate_df = pd.DataFrame(
+            {"avg": [20.60]},
+            index=["0y"],
+        )
+        rec = parse_symbol_fundamentals("GOOGL", info, eps_estimate_df=eps_estimate_df)
+
+        assert rec.estimates.gaap_diff_pct is not None
+        assert rec.estimates.gaap_diff_pct < 0.01
+        assert rec.estimates.has_gaap_distortion is False
+
 
 class TestFundamentalsRequest:
     def test_request_validation(self):

@@ -502,6 +502,9 @@ Target milestones:
   under the explicit request, partial-batch, repair, and primary integration
   contract for `stock_notify` and `funmoney_backtest` in
   [`docs/plans/v0.2.0-yfinance-provider.md`](docs/plans/v0.2.0-yfinance-provider.md);
+- `v0.2.2`: yfinance fundamentals institutional FY1 Forward P/E calibration
+  and algorithmic GAAP vs. Non-GAAP distortion detection under
+  [`docs/plans/v0.2.2-yfinance-fundamentals-consensus-and-fpe.md`](docs/plans/v0.2.2-yfinance-fundamentals-consensus-and-fpe.md);
 - FMP version is intentionally unscheduled.
 
 ## 11. Global Acceptance Gates for v0.1.0

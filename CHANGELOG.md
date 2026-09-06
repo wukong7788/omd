@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2 — 2026-09-06
+
+- Enhanced `yfinance` fundamentals pipeline with institutional Forward P/E calibration and GAAP distortion detection:
+  - **Institutional FY1 Forward P/E Calibration**:
+    - Calibrated `forward_pe` anchored to current fiscal year (`0y`) sell-side consensus instead of out-year (+1y).
+    - Preserved raw provider-native values as `raw_forward_pe` and `raw_forward_eps` alongside `forward_pe_source` (`"FY1_CONSENSUS"` or `"RAW_FALLBACK"`).
+    - Implemented defensive price derivation and currency/share-class unit mismatch protection for ADRs (ratio guard between 0.25 and 3.0) to safely fall back to raw values.
+  - **GAAP vs. Non-GAAP Distortion Detection**:
+    - Integrated Non-GAAP core operating consensus from `info.get("epsCurrentYear")` (`eps_current_year`).
+    - Added algorithmic relative deviation calculation (`gaap_diff_pct = |eps_0y - eps_current_year| / min`) and distortion flagging (`has_gaap_distortion` when `gaap_diff_pct > 0.25`).
+    - Protects algorithmic screeners and downstream valuation pipelines from spin-off, M&A, and accounting windfall false-value traps (e.g. `GEV`).
+
 ## 0.2.1 — 2026-09-04
 
 - Upgraded official `yfinance` provider lock from `1.5.1` to `1.7.0` (`ohmydata[yfinance]`):
