@@ -12,8 +12,16 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from ohmydata.providers.sec.edgartools_adapter import SecStatementParseError, parse_statement_rows
-from ohmydata.providers.sec.financials import SecCompanyFinancialVintage, SecStatementRow
+from ohmydata.providers.sec.edgartools_adapter import (
+    SecFinancialsClient,
+    SecStatementParseError,
+    parse_statement_rows,
+)
+from ohmydata.providers.sec.financials import (
+    SecCompanyFinancialVintage,
+    SecFinancialsRequest,
+    SecStatementRow,
+)
 from ohmydata.providers.sec.financials_dataset import (
     validate_financials_partition,
     write_financials_partition,
@@ -23,6 +31,8 @@ Context = pytest.importorskip("edgar.xbrl.models").Context
 Fact = pytest.importorskip("edgar.xbrl.models").Fact
 PresentationNode = pytest.importorskip("edgar.xbrl.models").PresentationNode
 Statement = pytest.importorskip("edgar.xbrl.statements").Statement
+XBRL = pytest.importorskip("edgar.xbrl.xbrl").XBRL
+FactsView = pytest.importorskip("edgar.xbrl.facts").FactsView
 
 
 def native_statement():
@@ -70,38 +80,23 @@ def native_statement():
             decimals=4,
         ),
     }
-    items = [
-        {
-            "concept": concept,
-            "label": "GAAP operating income",
-            "values": {quarter: facts["q"].numeric_value, ytd: facts["y"].numeric_value},
-            "units": {quarter: "u1", ytd: "u2"},
-        },
-        {
-            "concept": concept,
-            "label": "Segment",
-            "is_dimension": np.bool_(True),
-            "dimension_metadata": [{"dimension": "fake:Axis", "member": "fake:Member"}],
-            "values": {quarter: 7},
-        },
-    ]
-    xbrl = SimpleNamespace(
-        facts=facts,
-        contexts=contexts,
-        context_period_map={"q": quarter, "y": ytd, "d": quarter},
-        units={"u1": {"measure": "iso4217:USD"}, "u2": {"measure": "iso4217:EUR"}},
-        get_statement=lambda *args: items,
-        find_statement=lambda *args: ([], "fake:IncomeRole", "IncomeStatement"),
-        presentation_trees={
-            "fake:IncomeRole": SimpleNamespace(
-                all_nodes={
-                    concept: PresentationNode(
-                        element_id=concept, standard_label="GAAP operating income"
-                    )
-                }
-            )
-        },
-    )
+    xbrl = XBRL()
+    xbrl.parser.facts = facts
+    xbrl.parser.contexts = contexts
+    xbrl.parser.context_period_map = {"q": quarter, "y": ytd, "d": quarter}
+    xbrl.parser.units = {"u1": {"measure": "iso4217:USD"}, "u2": {"measure": "iso4217:EUR"}}
+    xbrl.parser.presentation_trees = {
+        "fake:IncomeRole": SimpleNamespace(
+            all_nodes={
+                concept: PresentationNode(
+                    element_id=concept, standard_label="GAAP operating income"
+                )
+            }
+        )
+    }
+    xbrl.find_statement = lambda *args: ([], "fake:IncomeRole", "IncomeStatement")
+    assert isinstance(xbrl.facts, FactsView)
+    assert not hasattr(xbrl.facts, "values")
     return Statement(xbrl, "IncomeStatement"), xbrl
 
 
@@ -124,6 +119,82 @@ def test_actual_statement_shape_preserves_native_precision_and_periods():
     assert quarter.period_source == "xbrl-context"
 
 
+def test_factsview_enriched_api_is_not_used_for_native_facts(monkeypatch):
+    statement, xbrl = native_statement()
+    assert isinstance(xbrl, XBRL)
+    assert isinstance(xbrl.facts, FactsView)
+    assert xbrl._facts is xbrl.parser.facts  # Upstream raw alias, not the query view.
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("enriched facts would lose the native boundary")
+
+    monkeypatch.setattr(FactsView, "get_facts", forbidden)
+    rows = parse_statement_rows(statement, "income_statement", include_dimensions=True)
+    assert {r.context_ref for r in rows} == {"q", "y", "d"}
+    assert {r.concept for r in rows} == {"us-gaap_OperatingIncomeLoss"}
+
+
+@pytest.mark.parametrize("bad_mapping", [None, [], "invalid"])
+def test_unavailable_native_fact_mapping_fails_without_display_fallback(bad_mapping):
+    statement, xbrl = native_statement()
+    xbrl.parser.facts = bad_mapping
+    with pytest.raises(SecStatementParseError, match="native parser facts must be a mapping"):
+        parse_statement_rows(statement, "income_statement")
+
+
+def test_client_returns_all_three_statements_from_real_xbrl_factsview(monkeypatch):
+    income, xbrl = native_statement()
+    xbrl.parser.contexts["instant"] = Context(
+        context_id="instant", period={"type": "instant", "instant": "2024-06-30"}
+    )
+    xbrl.parser.context_period_map["instant"] = "instant_2024-06-30"
+    for kind, concept, context in (
+        ("BalanceSheet", "us-gaap_Assets", "instant"),
+        ("CashFlowStatement", "us-gaap_NetCashProvidedByUsedInOperatingActivities", "y"),
+    ):
+        xbrl.parser.facts[concept] = Fact(
+            element_id=concept, context_ref=context, value="42.123456", unit_ref="u1"
+        )
+        xbrl.parser.presentation_trees[kind] = SimpleNamespace(
+            all_nodes={concept: PresentationNode(element_id=concept, standard_label=concept)}
+        )
+    xbrl.find_statement = lambda kind: (
+        [],
+        "fake:IncomeRole" if kind == "IncomeStatement" else kind,
+        kind,
+    )
+    financials = SimpleNamespace(
+        balance_sheet=lambda: Statement(xbrl, "BalanceSheet"),
+        income_statement=lambda: income,
+        cash_flow_statement=lambda: Statement(xbrl, "CashFlowStatement"),
+    )
+    filing = SimpleNamespace(
+        form="10-Q",
+        filing_date="2024-08-01",
+        cik=1,
+        company="Synthetic",
+        accession_number="fake-fixed",
+        period_of_report="2024-06-30",
+        header=SimpleNamespace(acceptance_datetime=datetime(2024, 8, 1, tzinfo=UTC)),
+        obj=lambda: SimpleNamespace(financials=financials),
+    )
+    monkeypatch.setattr(
+        "edgar.Company", lambda symbol: SimpleNamespace(get_filings=lambda **kw: [filing])
+    )
+    monkeypatch.setattr("edgar.set_identity", lambda value: None)
+    result = SecFinancialsClient("Synthetic test@example.invalid").fetch_company_financials(
+        SecFinancialsRequest(("FAKE",), limit=1, include_amendments=False, include_dimensions=False)
+    )[0]
+    assert {row.statement_type for row in result.rows} == {
+        "balance_sheet",
+        "income_statement",
+        "cash_flow",
+    }
+    assert not any("PARSE_FAILED" in flag for flag in result.quality_flags)
+    assert len(result.filter_statement("income_statement")) == 2
+    assert result.filter_statement("cash_flow")[0].value == Decimal("42.123456")
+
+
 def test_native_dimensions_preserved_and_unknown_units_stay_unknown():
     statement, xbrl = native_statement()
     del xbrl.units["u1"]
@@ -137,7 +208,7 @@ def test_native_dimensions_preserved_and_unknown_units_stay_unknown():
 
 def test_conflicting_native_context_values_rejected():
     statement, xbrl = native_statement()
-    xbrl.facts["conflict"] = Fact(
+    xbrl.parser.facts["conflict"] = Fact(
         element_id="us-gaap_OperatingIncomeLoss", context_ref="q", value="8", unit_ref="u1"
     )
     with pytest.raises(SecStatementParseError, match="conflicting native"):
@@ -262,7 +333,7 @@ def test_equal_revenue_concepts_survive_provider_presentation_deduplication():
         "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
     ):
         tree.all_nodes[concept] = PresentationNode(element_id=concept, standard_label="Revenue")
-        xbrl.facts[concept] = Fact(
+        xbrl.parser.facts[concept] = Fact(
             element_id=concept, context_ref="q", value="12.12345", unit_ref="u1"
         )
 
@@ -388,12 +459,12 @@ def test_native_fact_index_scans_source_once_for_many_unrelated_facts():
                 self.visited += 1
                 yield value
 
-    facts = CountingFacts(xbrl.facts)
+    facts = CountingFacts(xbrl.parser.facts)
     for i in range(2000):
         facts[f"irrelevant-{i}"] = Fact(
             element_id="fake:Unrelated", context_ref="unused", value="1"
         )
-    xbrl.facts = facts
+    xbrl.parser.facts = facts
     rows = parse_statement_rows(statement, "income_statement")
     assert facts.calls == 1
     assert facts.visited == 2003
@@ -404,7 +475,7 @@ def test_identical_facts_with_distinct_context_ids_are_both_retained():
     statement, xbrl = native_statement()
     xbrl.contexts["q2"] = xbrl.contexts["q"].model_copy(update={"context_id": "q2"})
     xbrl.context_period_map["q2"] = xbrl.context_period_map["q"]
-    xbrl.facts["q2"] = xbrl.facts["q"].model_copy(update={"context_ref": "q2"})
+    xbrl.parser.facts["q2"] = xbrl.parser.facts["q"].model_copy(update={"context_ref": "q2"})
     rows = parse_statement_rows(statement, "income_statement")
     assert {r.context_ref for r in rows} == {"q", "q2", "y"}
     assert len(rows) == 3

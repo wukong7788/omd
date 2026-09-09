@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 _EASTERN_TZ = ZoneInfo("America/New_York")
 
 
+class SecFinancialsParseError(SecStatementParseError):
+    """A selected filing produced no financial rows because parsing failed.
+
+    ``vintage`` retains accession and coverage flags; ``__cause__`` retains
+    the first parser failure. Neither is replaced by a different filing.
+    """
+
+    def __init__(self, vintage: SecCompanyFinancialVintage) -> None:
+        super().__init__("selected SEC filing produced no financial rows because parsing failed")
+        self.vintage = vintage
+
+
 def ensure_edgar_available() -> None:
     """Require the optional Edgar financials dependency."""
     try:
@@ -179,14 +191,16 @@ class SecFinancialsClient:
 
                 # Parse the report object (TenK, TenQ, etc.)
                 quality_flags: list[str] = []
+                parse_failures: list[Exception] = []
                 if accepted_at is None:
                     quality_flags.append("ACCEPTED_AT_MISSING")
                 try:
                     report: Any = filing.obj()
                 except (AttributeError, KeyError, ValueError, TypeError, OSError) as err:
-                    logger.debug("Could not parse filing obj: %s", err)
+                    logger.debug("Could not parse filing obj: %s", type(err).__name__)
                     report = None
                     quality_flags.append("FILING_PARSE_FAILED")
+                    parse_failures.append(err)
 
                 try:
                     fin: Any = getattr(report, "financials", None) if report is not None else None
@@ -201,6 +215,7 @@ class SecFinancialsClient:
                     logger.debug("Could not access filing financials: %s", type(err).__name__)
                     fin = None
                     quality_flags.append("FINANCIALS_PARSE_FAILED")
+                    parse_failures.append(err)
                 if fin is None:
                     quality_flags.append("NO_FINANCIALS_OBJECT")
 
@@ -229,6 +244,7 @@ class SecFinancialsClient:
                                 "Could not extract %s: %s", statement_type, type(err).__name__
                             )
                             quality_flags.append(f"{flag}_PARSE_FAILED")
+                            parse_failures.append(err)
 
                 if not rows:
                     quality_flags.append("NO_FINANCIAL_STATEMENTS")
@@ -260,6 +276,8 @@ class SecFinancialsClient:
                     quality_flags=tuple(quality_flags),
                     rows=tuple(rows),
                 )
+                if not rows and parse_failures:
+                    raise SecFinancialsParseError(vintage) from parse_failures[0]
                 vintages.append(vintage)
 
         return vintages
@@ -267,6 +285,7 @@ class SecFinancialsClient:
 
 __all__ = [
     "SecFinancialsClient",
+    "SecFinancialsParseError",
     "SecStatementParseError",
     "ensure_edgar_available",
     "parse_statement_rows",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.4 — 2026-09-09
+
+- Fix the SEC native-fact adapter for edgartools 5.56.0: `XBRL.facts` is a
+  `FactsView`, while original `Fact` objects belong to `XBRL.parser.facts`.
+  Regression fixtures now use actual XBRL/FactsView/Statement objects.
+- A selected filing with zero rows and parsing failures now raises
+  `SecFinancialsParseError`; its `vintage` retains coverage/accession and its
+  cause retains the first failure. Missing/empty filings without parser failures
+  and explicitly flagged partial coverage retain their existing behavior.
+  See [the financials contract](docs/financial-period-integrity.md).
+- Native SEC duplicate facts now use exact Decimal precision intervals and retain
+  the highest precision original fact per context, while rejecting true value or
+  unit conflicts, mixed known/unknown precision, and arithmetic inputs beyond
+  the bounded 10,000-digit guard.
+
 ## 0.2.3 — 2026-09-09
 
 - Repair SEC financial-period extraction and filing eligibility in the OMD adapter

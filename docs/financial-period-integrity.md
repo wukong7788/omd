@@ -92,6 +92,35 @@ and missing acceptance time. `SecStatementParseError` is the stable standalone
 parser error. The client keeps failure flags with the selected filing rather than
 silently dropping it or claiming complete coverage.
 
+With the unreleased FactsView fix, **zero rows plus any parsing failure raises
+`SecFinancialsParseError`**. Inspect `error.vintage` for the selected accession
+and coverage flags, and `error.__cause__` for the original failure chain. A
+nonempty vintage with `*_PARSE_FAILED` is partial coverage, not complete success.
+Missing or empty financials without parsing failure still return explicit flags.
+Consumers that previously accepted a nonempty vintage list must handle this
+exception and check flags; do not treat parsing failures as valid N/A values.
+
+For edgartools 5.56.0 the native access boundary is `XBRL.parser.facts`, a mapping
+of original `Fact` models. `XBRL.facts` is a `FactsView`; its public `get_facts()`
+creates enriched query dictionaries and can rewrite concept identifiers. OMD
+therefore checks the native mapping shape and scans it once per statement, with
+no enriched-view or display fallback. This lower-level dependency is intentional
+and covered using the installed upstream XBRL, FactsView and Statement classes
+with synthetic data; the edgartools version remains pinned.
+
+Repeated native facts sharing a concept, context period, dimensions and unit are
+validated before selection. Equal finite `decimals` values must have exactly equal
+`Decimal` values; different precisions must have one common closed rounding
+interval. `INF` is a singleton interval. Once the whole group is consistent, OMD
+keeps the highest precision original fact independently for each context (with a
+stable lexical tie break), preserving its native value, precision, unit and
+context. Missing precision is accepted only when all repeated values are exactly
+equal; mixing known and unknown precision is rejected because consistency cannot
+be established. Unit conflicts, malformed precision, non-finite values,
+arithmetic inputs beyond the bounded 10,000-digit guard, and non-intersecting
+intervals remain parse errors. Affected filings must be rerun from the same
+source after this repair; no automatic migration of existing data is performed.
+
 Both tables and manifest are staged before one directory rename. A matching
 existing v2 partition is reusable only after schema/hash verification; changed
 contents require a new root. CLI inspection and validation check actual table

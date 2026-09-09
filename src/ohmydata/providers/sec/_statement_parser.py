@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Any
 
 from .financials import SecStatementRow, StatementType
@@ -16,6 +16,7 @@ _DISPLAY_PERIOD = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\((FY|Q[1-4]|YTD)\))?$"
 _STRUCTURED_PERIOD = re.compile(
     r"^(?:(instant)_(\d{4}-\d{2}-\d{2})|(duration)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2}))$"
 )
+_MAX_FACT_ARITHMETIC_DIGITS = 10_000
 
 
 class SecStatementParseError(ValueError):
@@ -92,11 +93,122 @@ def _dim_key(dimensions: Mapping[str, Any]) -> str:
     return json.dumps(dict(dimensions), sort_keys=True, separators=(",", ":"))
 
 
+def _fact_precision(fact: Any) -> int | str | None:
+    """Return finite precision, None for missing, and ``INF`` for infinity."""
+    decimals = fact.decimals
+    if decimals is None or type(decimals).__name__ in {"NAType", "NaTType"}:
+        return None
+    if isinstance(decimals, str) and decimals.strip() == "INF":
+        return "INF"
+    if isinstance(decimals, bool):
+        raise SecStatementParseError("invalid fact precision")
+    if isinstance(decimals, int):
+        return decimals
+    if isinstance(decimals, str) and re.fullmatch(r"[+-]?\d+", decimals.strip()):
+        return int(decimals.strip())
+    raise SecStatementParseError("invalid fact precision")
+
+
+def _fact_interval(value: Decimal, precision: int | str | None) -> tuple[Fraction, Fraction]:
+    value_tuple = value.as_tuple()
+    if not isinstance(value_tuple.exponent, int):
+        raise SecStatementParseError("non-finite statement fact")
+    if (
+        abs(value_tuple.exponent) > _MAX_FACT_ARITHMETIC_DIGITS
+        or len(value_tuple.digits) > _MAX_FACT_ARITHMETIC_DIGITS
+    ):
+        raise SecStatementParseError("statement fact exceeds arithmetic bounds")
+    if isinstance(precision, int) and abs(precision) > _MAX_FACT_ARITHMETIC_DIGITS:
+        raise SecStatementParseError("statement fact exceeds arithmetic bounds")
+    exact = Fraction(value)
+    if precision is None or precision == "INF":
+        return exact, exact
+    if not isinstance(precision, int):
+        raise SecStatementParseError("invalid fact precision")
+    half_unit = Fraction(10 ** (-precision), 2) if precision < 0 else Fraction(1, 2 * 10**precision)
+    return exact - half_unit, exact + half_unit
+
+
+def _select_native_facts(facts: list[Any]) -> list[Any]:
+    """Validate one duplicate group and select its best fact per context."""
+    parsed: list[tuple[Any, Decimal, int | str | None]] = []
+    unit_refs = set()
+    intervals = []
+    missing_precision = False
+    values_by_precision: dict[int | str, set[Decimal]] = {}
+    best_by_context: dict[str, tuple[tuple[int, int], tuple[str, str], Any]] = {}
+
+    def rank(precision: int | str | None) -> tuple[int, int]:
+        if precision is None:
+            return (0, 0)
+        if precision == "INF":
+            return (2, 0)
+        if not isinstance(precision, int):
+            raise SecStatementParseError("invalid fact precision")
+        return (1, precision)
+
+    for fact in facts:
+        value = _number(fact.value)
+        precision = _fact_precision(fact)
+        missing_precision |= precision is None
+        unit_refs.add(fact.unit_ref)
+        if value is None:
+            continue
+        parsed.append((fact, value, precision))
+        intervals.append(_fact_interval(value, precision))
+        if precision is not None:
+            values_by_precision.setdefault(precision, set()).add(value)
+        context = fact.context_ref
+        tie_break = (str(fact.value), str(fact.decimals))
+        candidate = (rank(precision), tie_break, fact)
+        current = best_by_context.get(context)
+        if (
+            current is None
+            or candidate[0] > current[0]
+            or (candidate[0] == current[0] and candidate[1] < current[1])
+        ):
+            best_by_context[context] = candidate
+    if len(unit_refs) != 1:
+        raise SecStatementParseError("conflicting native facts for period and dimensions")
+    if not parsed:
+        return []
+    if len(parsed) != len(facts):
+        raise SecStatementParseError("non-numeric statement fact")
+    # Every interval must share one common point; pairwise or adjacent checks
+    # can incorrectly accept a chain of individually overlapping intervals.
+    lower = max(interval[0] for interval in intervals)
+    upper = min(interval[1] for interval in intervals)
+    if missing_precision and any(precision is not None for _, _, precision in parsed):
+        raise SecStatementParseError("conflicting native facts for period and dimensions")
+    if missing_precision and len({value for _, value, _ in parsed}) != 1:
+        raise SecStatementParseError("conflicting native facts for period and dimensions")
+    for values in values_by_precision.values():
+        if len(values) != 1:
+            raise SecStatementParseError("conflicting native facts for period and dimensions")
+    if lower > upper:
+        raise SecStatementParseError("conflicting native facts for period and dimensions")
+    selected: list[Any] = []
+    for context_ref in sorted(best_by_context):
+        selected.append(best_by_context[context_ref][2])
+    return selected
+
+
 def _native_index(xbrl: Any, concepts: set[str]) -> dict[tuple[str, str, str], list[Any]]:
     """One pass over facts, avoiding a full source scan for each row or period."""
+    # Edgar 5.56 XBRL.facts is FactsView, an enriched query interface whose
+    # get_facts() may rewrite concept identifiers. The raw Fact objects are
+    # owned by XBRLParser.facts (also exposed upstream as XBRL._facts).
+    # Keep this version-specific boundary explicit: never use display values
+    # or the enriched view as a fallback for unavailable native facts.
+    try:
+        native_facts = xbrl.parser.facts
+    except AttributeError as exc:
+        raise SecStatementParseError("native parser fact mapping unavailable") from exc
+    if not isinstance(native_facts, Mapping):
+        raise SecStatementParseError("native parser facts must be a mapping")
     result: dict[tuple[str, str, str], list[Any]] = {}
     seen: set[int] = set()
-    for fact in xbrl.facts.values():
+    for fact in native_facts.values():
         if id(fact) in seen:
             continue
         seen.add(id(fact))
@@ -156,70 +268,70 @@ def _structured_rows(
             unit_ref = (item.get("units") or {}).get(key)
             native_decimals = (item.get("decimals") or {}).get(key)
             context_ref = None
-            context_refs: list[str | None] = [None]
             if index is not None:
                 facts = index.get((concept.replace(":", "_"), key, _dim_key(dims)), [])
                 if not facts:
                     raise SecStatementParseError("statement value has no native fact context")
-                identities = {(f.value, f.unit_ref, str(f.decimals)) for f in facts}
-                if len(identities) != 1:
-                    raise SecStatementParseError(
-                        "conflicting native facts for period and dimensions"
-                    )
-                fact = min(facts, key=lambda f: f.context_ref)
-                raw, unit_ref, native_decimals = fact.value, fact.unit_ref, fact.decimals
-                context_ref = fact.context_ref
-                context_refs = sorted({f.context_ref for f in facts})
-            value = _number(raw)
-            if value is None:
-                continue
-            unit = _text(unit_ref) or _text(item.get("unit"))
-            if xbrl is not None and unit_ref:
-                definition = xbrl.units.get(unit_ref)
-                if definition is None:
-                    unit = None
-                elif isinstance(definition, dict):
-                    unit = _text(definition.get("measure")) or json.dumps(
-                        definition, sort_keys=True
-                    )
-                else:
-                    raise SecStatementParseError("invalid native unit definition")
-            decimals = None
-            if native_decimals is not None and str(native_decimals) != "INF":
-                try:
-                    decimals = int(native_decimals)
-                except (TypeError, ValueError) as exc:
-                    raise SecStatementParseError("invalid fact precision") from exc
-            row = SecStatementRow(
-                statement_type=kind,
-                standard_concept=_text(item.get("standard_concept")) or concept,
-                concept=concept,
-                label=_text(item.get("label")) or "",
-                value=value,
-                value_native=str(raw),
-                unit=unit,
-                unit_ref=_text(unit_ref),
-                decimals=decimals,
-                decimals_native=_text(native_decimals),
-                period_start=start,
-                period_end=end,
-                period_type=period_type,
-                period_key=str(key),
-                context_ref=context_ref,
-                dimension=_dim_key(dims) if dims else None,
-                is_point_in_time=period_type == "instant",
-                period_source="xbrl-context" if index is not None else "structured-period-key",
-            )
-            for reference in context_refs:
-                contextual_row = replace(row, context_ref=reference)
-                identity = concept, str(key), _dim_key(dims), reference
+                selected_facts = _select_native_facts(facts)
+            else:
+                selected_facts = [None]
+            for selected_fact in selected_facts:
+                selected_raw = raw
+                selected_unit_ref = unit_ref
+                selected_decimals = native_decimals
+                if selected_fact is not None:
+                    selected_raw = selected_fact.value
+                    selected_unit_ref = selected_fact.unit_ref
+                    selected_decimals = selected_fact.decimals
+                    context_ref = selected_fact.context_ref
+                value = _number(selected_raw)
+                if value is None:
+                    continue
+                unit = _text(selected_unit_ref) or _text(item.get("unit"))
+                if xbrl is not None and selected_unit_ref:
+                    definition = xbrl.units.get(selected_unit_ref)
+                    if definition is None:
+                        unit = None
+                    elif isinstance(definition, dict):
+                        unit = _text(definition.get("measure")) or json.dumps(
+                            definition, sort_keys=True
+                        )
+                    else:
+                        raise SecStatementParseError("invalid native unit definition")
+                decimals = None
+                if selected_decimals is not None and str(selected_decimals).strip() != "INF":
+                    try:
+                        decimals = int(str(selected_decimals).strip())
+                    except (TypeError, ValueError) as exc:
+                        raise SecStatementParseError("invalid fact precision") from exc
+                row = SecStatementRow(
+                    statement_type=kind,
+                    standard_concept=_text(item.get("standard_concept")) or concept,
+                    concept=concept,
+                    label=_text(item.get("label")) or "",
+                    value=value,
+                    value_native=str(selected_raw),
+                    unit=unit,
+                    unit_ref=_text(selected_unit_ref),
+                    decimals=decimals,
+                    decimals_native=_text(selected_decimals),
+                    period_start=start,
+                    period_end=end,
+                    period_type=period_type,
+                    period_key=str(key),
+                    context_ref=context_ref,
+                    dimension=_dim_key(dims) if dims else None,
+                    is_point_in_time=period_type == "instant",
+                    period_source="xbrl-context" if index is not None else "structured-period-key",
+                )
+                identity = concept, str(key), _dim_key(dims), context_ref
                 if identity in seen:
                     previous = seen[identity]
                     if (previous.value, previous.unit) != (row.value, row.unit):
                         raise SecStatementParseError("conflicting duplicate statement facts")
                     continue
-                seen[identity] = contextual_row
-                rows.append(contextual_row)
+                seen[identity] = row
+                rows.append(row)
     return rows
 
 

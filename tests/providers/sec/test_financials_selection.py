@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 
-from ohmydata.providers.sec.edgartools_adapter import SecFinancialsClient
+from ohmydata.providers.sec.edgartools_adapter import SecFinancialsClient, SecFinancialsParseError
 from ohmydata.providers.sec.financials import SecFinancialsRequest
 
 Filings = pytest.importorskip("edgar._filings").Filings
@@ -139,7 +139,11 @@ def test_missing_empty_and_parse_failed_statements_are_distinguishable(monkeypat
         [("10-Q", "2024-08-01", "quarter")],
         {"quarter": SimpleNamespace(financials=fin)},
     )
-    result = client.fetch_company_financials(SecFinancialsRequest(("FAKE",)))[0]
+    with pytest.raises(SecFinancialsParseError) as caught:
+        client.fetch_company_financials(SecFinancialsRequest(("FAKE",)))
+    result = caught.value.vintage
+    assert caught.value.__cause__ is not None
+    assert "unrecognized structured period key" in str(caught.value.__cause__)
     assert set(result.quality_flags) == {
         "BALANCE_SHEET_MISSING",
         "INCOME_STATEMENT_EMPTY",
@@ -183,3 +187,50 @@ def test_lowercase_client_symbol_returns_canonical_vintage(monkeypatch):
     client, _ = install_company(monkeypatch, [("10-Q", "2024-08-01", "quarter")])
     result = client.fetch_company_financials(SecFinancialsRequest(("fake",)))[0]
     assert result.symbol == "FAKE"
+
+
+def test_partial_rows_keep_explicit_failure_coverage(monkeypatch):
+    good = SimpleNamespace(
+        get_raw_data=lambda: [{"concept": "fake:Assets", "values": {"instant_2024-06-30": 42}}]
+    )
+
+    def broken():
+        raise ValueError("synthetic parser failure")
+
+    fin = SimpleNamespace(
+        balance_sheet=lambda: good, income_statement=broken, cash_flow_statement=lambda: None
+    )
+    client, _ = install_company(
+        monkeypatch,
+        [("10-Q", "2024-08-01", "quarter")],
+        {"quarter": SimpleNamespace(financials=fin)},
+    )
+    result = client.fetch_company_financials(SecFinancialsRequest(("FAKE",)))[0]
+    assert len(result.rows) == 1
+    assert "INCOME_STATEMENT_PARSE_FAILED" in result.quality_flags
+
+
+def test_all_statement_failures_raise_with_original_cause_and_selected_vintage(monkeypatch):
+    original = AttributeError("synthetic FactsView has no values")
+
+    def broken():
+        raise original
+
+    fin = SimpleNamespace(balance_sheet=broken, income_statement=broken, cash_flow_statement=broken)
+    client, _ = install_company(
+        monkeypatch,
+        [("10-Q", "2024-08-01", "selected")],
+        {"selected": SimpleNamespace(financials=fin)},
+    )
+    with pytest.raises(SecFinancialsParseError) as caught:
+        client.fetch_company_financials(SecFinancialsRequest(("FAKE",), limit=1))
+    assert caught.value.__cause__ is original
+    assert caught.value.vintage.accession_number == "selected"
+    assert not caught.value.vintage.rows
+    assert set(caught.value.vintage.quality_flags) == {
+        "BALANCE_SHEET_PARSE_FAILED",
+        "INCOME_STATEMENT_PARSE_FAILED",
+        "CASH_FLOW_PARSE_FAILED",
+        "NO_FINANCIAL_STATEMENTS",
+    }
+    assert "synthetic" not in str(caught.value)

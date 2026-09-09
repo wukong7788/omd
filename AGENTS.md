@@ -41,8 +41,11 @@ reconcile incompatible requirements.
    and traceable.
 10. Required symbol, field, page, or coverage failures fail explicitly; never
     skip them silently.
-11. Tests are offline by default. Live provider calls require an explicit
-    integration marker and user authorization.
+11. Automated test suites are offline by default for CI stability. Read-only
+    live provider queries, debug scripts, and integration tests (`-m live`)
+    are permitted during interactive development and data validation without
+    per-action prompts; write, destructive, and publication operations remain
+    strictly gated.
 12. Consumer repositories must pin immutable SDK versions, not a moving
     branch.
 13. This repository is public. Treat every tracked file, commit, branch, tag,

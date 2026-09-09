@@ -36,6 +36,7 @@ from .edgar import (
 )
 from .edgartools_adapter import (
     SecFinancialsClient,
+    SecFinancialsParseError,
     SecStatementParseError,
     ensure_edgar_available,
     parse_statement_rows,
@@ -90,6 +91,7 @@ __all__ = [
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
     "SecFinancialsClient",
+    "SecFinancialsParseError",
     "SecFinancialsRequest",
     "SecFundHoldingVintage",
     "SecFundSelector",
