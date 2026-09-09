@@ -491,7 +491,7 @@ wheels = [
 
 [[package]]
 name = "ohmydata"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -533,7 +533,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "edgartools", marker = "extra == 'sec-financials'", specifier = ">=5.0.0" },
+    { name = "edgartools", marker = "extra == 'sec-financials'", specifier = "==5.56.0" },
     { name = "pandas", marker = "extra == 'polars'", specifier = ">=2.0,<3.0" },
     { name = "pandas", marker = "extra == 'tushare'", specifier = ">=2.0,<3.0" },
     { name = "pandas", marker = "extra == 'vintage-plane'", specifier = ">=2.0,<3.0" },

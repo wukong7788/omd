@@ -468,7 +468,6 @@ def run_qualify(args: Any) -> int:
 
 
 def run_financials(args: Any) -> int:
-    import hashlib
     import importlib
 
     if getattr(args, "config", None):
@@ -502,7 +501,9 @@ def run_financials(args: Any) -> int:
         m_file = p_dir / "manifest.json"
         if not m_file.is_file():
             raise ValueError(f"manifest.json missing for symbol: {sym_str}")
-        m_data: dict[str, Any] = json.loads(m_file.read_text(encoding="utf-8"))
+        from .financials_dataset import validate_financials_partition
+
+        m_data = validate_financials_partition(p_dir)
         payload.update(m_data)
 
         if getattr(args, "rows", False):
@@ -513,24 +514,13 @@ def run_financials(args: Any) -> int:
                 payload["rows"] = tbl.to_pylist()[:100]
 
     elif cmd == "validate":
+        from .financials_dataset import validate_financials_partition
+
         root_path = Path(args.root)
         partitions = list(root_path.glob("symbol=*"))
         verified_count = 0
         for p in partitions:
-            m_file = p / "manifest.json"
-            if not m_file.is_file():
-                raise ValueError(f"manifest missing in {p}")
-            m: dict[str, Any] = json.loads(m_file.read_text(encoding="utf-8"))
-            files = m.get("files", {})
-            for fname, meta in files.items():
-                fpath = p / fname
-                if not fpath.is_file():
-                    raise ValueError(f"file missing: {fpath}")
-                h = hashlib.sha256(fpath.read_bytes()).hexdigest()
-                if h != meta.get("sha256"):
-                    raise ValueError(
-                        f"hash mismatch for {fpath}: expected {meta.get('sha256')}, got {h}"
-                    )
+            validate_financials_partition(p)
             verified_count += 1
         payload["status"] = "completed"
         payload["partitions_verified"] = verified_count

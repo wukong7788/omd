@@ -36,6 +36,7 @@ from .edgar import (
 )
 from .edgartools_adapter import (
     SecFinancialsClient,
+    SecStatementParseError,
     ensure_edgar_available,
     parse_statement_rows,
     validate_user_agent,
@@ -107,6 +108,7 @@ __all__ = [
     "SecPayloadReceipt",
     "SecReplaySession",
     "SecScheduledFundSelector",
+    "SecStatementParseError",
     "SecStatementRow",
     "SecTransportEvidence",
     "SecUnavailableResult",

@@ -3,8 +3,8 @@
 ## Purpose
 
 This repository provides reusable market-data ingestion infrastructure for
-multiple applications. Tushare is the first provider. yfinance and FMP are
-future integrations, not current implementation scope.
+multiple applications, with Tushare, yfinance, and SEC providers. FMP remains
+out of scope unless explicitly requested.
 
 `PLAN.md` is the canonical architecture and migration plan until `v0.1.0`.
 
@@ -54,9 +54,8 @@ reconcile incompatible requirements.
 Before implementing a shared abstraction, identify at least two concrete
 callers or one provider requirement plus a near-term migration need.
 
-Do not build speculative yfinance/FMP modules while the active phase is
-Tushare. Preserve future extensibility through narrow interfaces, not empty
-providers or premature generalized schemas.
+Extend providers only within the requested scope. Use narrow interfaces; do
+not add speculative providers or premature generalized schemas.
 
 The SDK may own:
 
@@ -128,8 +127,7 @@ Target Python versions:
 - Python 3.11
 - Python 3.12
 
-Use `uv` for environments and dependency locking. Once the project scaffold
-exists, canonical checks are:
+Use `uv` for environments and dependency locking. Canonical checks are:
 
 ```bash
 uv run pytest
@@ -148,6 +146,12 @@ belong in optional extras where practical. Dependency changes must update both
 
 ## Testing Requirements
 
+Choose checks for the changed behavior. Documentation and local harness edits
+need syntax, link, and instruction-consistency checks, not the full SDK suite.
+Code changes retain the canonical gates; releases require every release gate.
+After checks pass, repeat or broaden them only for new changes, failures, or
+unresolved risks. Do not add tests that merely assert instruction wording.
+
 - Non-trivial behavior requires tests; bug fixes require regression tests.
 - Mock at the provider-client boundary, not inside the behavior being tested.
 - Cover success, empty, transient failure, permanent failure, malformed schema,
@@ -161,60 +165,12 @@ belong in optional extras where practical. Dependency changes must update both
 - A successful command exit alone is not acceptance evidence; inspect the
   resulting contract or artifact.
 
-## yfinance Provider Governance and Zero-Drift Auditing
+## yfinance Governance
 
-### Baseline Governance and Invariants
-
-1. **Immutable Pinning**:
-   `yfinance` must always be pinned to an exact version (`yfinance==<version>`)
-   in `pyproject.toml` and asserted at runtime via `EXPECTED_YFINANCE_VERSION`
-   in `src/ohmydata/providers/yfinance/client.py`. Never use a loose range
-   (e.g. `>=...`), as yfinance frequently alters parsing, column structures,
-   and heuristic price repair algorithms across minor releases.
-
-2. **Default `repair=False` Invariant**:
-   Production ingestion and historical backtest pipelines must strictly default
-   to `auto_adjust=False, repair=False, actions=True, keepna=True`.
-   - Global `repair=True` is prohibited in canonical ingestion: it is an
-     active heuristic mutator with known 100x unit scaling bugs and
-     unflagged dividend modifications, and introduces an undeclared dependency
-     on `scipy`.
-   - OMD owns Quality Control (QC) anomaly detection (`check_ohlc_anomalies`,
-     `check_price_jump_anomalies`, `check_volume_anomalies`). `repair=True` may
-     only be evaluated as an isolated candidate repair engine for targeted
-     anomalies, recording explicit `raw_value`, `canonical_value`,
-     `repair_status`, and `repair_reason`.
-
-3. **Predefined Benchmark Universe (`r10a0`)**:
-   The `r10a0` multi-asset ETF universe serves as the canonical regression
-   benchmark for US market data stability:
-   - **Clusters (Cluster Variant v3, max 1 each)**:
-     - `equity_risk`: `[SPY, QQQ, XLK, IWM, SMH]`
-     - `sector_cyclicals`: `[XLF, XLE, XLV]`
-     - `defensive`: `[TLT, GLD, USMV]`
-   - **Regime Pools**:
-     - `risk_on`: 11 symbols
-     - `risk_off` (SPY < MA200): `[SHY, IEF, GLD]` (Top 2 selected)
-   - **Unique Set (13 ETFs)**: `SPY`, `QQQ`, `XLK`, `IWM`, `SMH`, `XLF`, `XLE`,
-     `XLV`, `TLT`, `GLD`, `USMV`, `SHY`, `IEF`.
-
-4. **Zero-Drift Audit Tool (`omd audit-drift`)**:
-   Before approving any future `yfinance` version upgrade, run the automated
-   zero-drift audit tool across the full 10+ year history of the `r10a0`
-   universe:
-   ```bash
-   # Strict unadjusted market bar zero-drift gate (must be bit-exact 0.0 error)
-   omd audit-drift --universe r10a0 --baseline-dir <old_version_dir> --target-dir <new_version_dir> --raw-only
-
-   # Full audit including adj_close with sub-cent rounding tolerance
-   omd audit-drift --universe r10a0 --baseline-dir <old_version_dir> --target-dir <new_version_dir> --abs-tolerance 0.001
-   ```
-   **Acceptance Criteria for Upgrade**:
-   - `raw-only` (Open, High, Low, Close, Volume) must achieve **0 row difference
-     and 0 numeric difference** across all 13 ETFs over the full historical
-     window.
-   - Any divergence in `adj_close` must be bounded by sub-cent floating point
-     rounding (<= 0.001) or accompanied by an explicit, auditable rationale.
+Before changing yfinance ingestion, repair/QC, or its version, read
+[the mandatory governance and zero-drift gates](docs/harness/yfinance-governance.md).
+Exact version pinning and canonical defaults remain required:
+`auto_adjust=False, repair=False, actions=True, keepna=True`.
 
 ## Repository and Git Hygiene
 
@@ -268,26 +224,21 @@ version after `v1.0.0`.
   documentation in the same task or report the unresolved drift explicitly.
 - Mark only verified plan checklist items complete.
 
-## Workflow Triggers
+## Harness and Workflow
 
-Use the project skill `.agents/skills/sol-luna-workflow/SKILL.md` only when the
-user explicitly asks for a Sol–Luna execution workflow. Do not trigger it
-automatically based on task size, whether the task is multi-file, or whether it
-comes from a plan/spec/ADR.
+Keep final responses concise: lead with the result, then relevant validation
+and unresolved risks. Omit empty sections, repeated summaries, and checklist
+matrices unless requested. Brevity must not hide failures or missing evidence.
 
-In that workflow:
+Resolve routine choices within the user's authorized scope and continue work.
+Ask only when missing information materially affects correctness or scope, or
+an action requires authorization not already provided in the conversation.
 
-- Sol owns requirement interpretation, contract-document review and freeze,
-  architecture decisions, execution briefing, independent diff/evidence
-  review, and final acceptance.
-- Luna owns only the implementation, focused tests, authorized documentation
-  updates, validation, and rework within Sol's frozen brief.
-- Luna's results are provisional until Sol inspects the actual diff and
-  evidence.
-
-Do not invoke the workflow for explanation-only work, document-only review,
-trivial isolated edits, external publishing, secret handling, or live provider
-operations.
+Use `.agents/skills/sol-luna-workflow/SKILL.md` only for an explicit Sol–Luna
+execution request. Task size or a plan/spec does not activate it. The skill
+owns role, contract-freeze, delegation, and acceptance details. Explanation,
+document-only work, trivial edits, publishing, secrets, and live provider
+operations do not activate this workflow.
 
 ## Review Priorities
 

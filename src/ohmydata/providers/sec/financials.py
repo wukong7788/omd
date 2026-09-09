@@ -49,7 +49,22 @@ class SecStatementRow:
     decimals: int | None = None
     period_start: date | None = None
     period_end: date | None = None
+    period_type: str | None = field(default=None, kw_only=True)
+    dimension: str | None = field(default=None, kw_only=True)
+    period_key: str | None = field(default=None, kw_only=True)
+    context_ref: str | None = field(default=None, kw_only=True)
+    unit_ref: str | None = field(default=None, kw_only=True)
+    decimals_native: str | None = field(default=None, kw_only=True)
+    period_source: str | None = field(default=None, kw_only=True)
     is_point_in_time: bool = False
+
+    def __post_init__(self) -> None:
+        if self.value is not None and not self.value.is_finite():
+            raise ValueError("non-finite financial statement value")
+        if self.period_start and self.period_end and self.period_start > self.period_end:
+            raise ValueError("reversed financial period")
+        if self.period_type == "instant" and self.period_start is not None:
+            raise ValueError("instant financial fact cannot have duration start")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +78,13 @@ class SecStatementRow:
             "decimals": self.decimals,
             "period_start": self.period_start,
             "period_end": self.period_end,
+            "period_type": self.period_type,
+            "dimension": self.dimension,
+            "period_key": self.period_key,
+            "context_ref": self.context_ref,
+            "unit_ref": self.unit_ref,
+            "decimals_native": self.decimals_native,
+            "period_source": self.period_source,
             "is_point_in_time": self.is_point_in_time,
         }
 
@@ -89,7 +111,9 @@ class SecCompanyFinancialVintage:
     is_amendment: bool = False
     quality_flags: tuple[str, ...] = ()
     rows: tuple[SecStatementRow, ...] = ()
-    _cached_vintage_identity: str | None = field(default=None, repr=False, compare=False)
+    _cached_vintage_identity: str | None = field(
+        default=None, repr=False, compare=False, init=False
+    )
 
     def __post_init__(self) -> None:
         if self.accepted_at is not None:
@@ -127,7 +151,11 @@ class SecCompanyFinancialVintage:
             "period_end": self.period_end.isoformat() if self.period_end else None,
             "rows_count": len(self.rows),
             "rows": [r.to_dict() for r in self.rows],
-            "schema_version": "sec-company-financials-v1",
+            "quality_flags": self.quality_flags,
+            "availability_policy": self.availability_policy,
+            "availability_lag_days": self.availability_lag_days,
+            "availability_anchor": self.availability_anchor,
+            "schema_version": "sec-company-financials-v2",
         }
         h = hashlib.sha256(
             json.dumps(_canonical_val(payload), sort_keys=True, separators=(",", ":")).encode()
@@ -151,6 +179,7 @@ class SecFinancialsRequest:
     lag_days: int = 0
     include_amendments: bool = True
     limit: int | None = None
+    include_dimensions: bool = field(default=True, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.symbols:
@@ -166,3 +195,7 @@ class SecFinancialsRequest:
             raise ValueError(f"lag_days must be between 0 and 30, got {self.lag_days}")
         if self.limit is not None and self.limit <= 0:
             raise ValueError("limit must be positive")
+        if not self.forms or any(f not in {"10-K", "10-Q", "10-K/A", "10-Q/A"} for f in self.forms):
+            raise ValueError("forms must contain supported SEC financial forms")
+        if self.start_year and self.end_year and self.start_year > self.end_year:
+            raise ValueError("start_year must not exceed end_year")

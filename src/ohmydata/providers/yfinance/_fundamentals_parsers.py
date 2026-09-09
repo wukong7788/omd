@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import datetime
+import math
 from typing import Any
 
 import pandas as pd
+
+from ._fundamentals_periods import dated_values, latest_statement_date, prior_period
 
 
 def _safe_float(val: Any) -> float | None:
@@ -14,73 +17,52 @@ def _safe_float(val: Any) -> float | None:
         if val is None or pd.isna(val):
             return None
         f = float(val)
-        return f if pd.notna(f) else None
+        return f if math.isfinite(f) else None
     except (ValueError, TypeError):
         return None
 
 
-def extract_quarterly_pair(series: pd.Series | None) -> tuple[float | None, float | None]:
-    """Return (latest_quarter, same_quarter_last_year) from a quarterly series."""
+def extract_quarterly_pair(
+    series: pd.Series | None, *, target_date: datetime.date | None = None
+) -> tuple[float | None, float | None]:
+    """Select actual columns, retaining nulls and a unique anniversary match within seven days."""
     if series is None or series.empty:
         return (None, None)
-    cleaned = pd.to_numeric(series, errors="coerce").dropna()
-    if len(cleaned) < 5:
-        # If at least 1 quarter exists, return latest, but prev_year is None
-        latest = _safe_float(cleaned.iloc[0]) if len(cleaned) >= 1 else None
-        return (latest, None)
-    return (_safe_float(cleaned.iloc[0]), _safe_float(cleaned.iloc[4]))
+    values = dated_values(series)
+    target = target_date or max(values)
+    previous = prior_period(values, target)
+    return (_safe_float(values.get(target)), _safe_float(values.get(previous)))
 
 
 def extract_metric_pair(
-    stmt: pd.DataFrame | None, candidate_keys: list[str]
+    stmt: pd.DataFrame | None,
+    candidate_keys: list[str],
+    *,
+    target_date: datetime.date | None = None,
 ) -> tuple[float | None, float | None]:
     """Search for metric rows across aliases and extract (latest, prev_year)."""
     if stmt is None or stmt.empty:
         return (None, None)
     # Search index names ignoring case and whitespace
-    norm_index = {str(idx).strip().lower(): idx for idx in stmt.index}
     for candidate in candidate_keys:
         cand_key = candidate.strip().lower()
-        if cand_key in norm_index:
-            row_key = norm_index[cand_key]
-            return extract_quarterly_pair(stmt.loc[row_key])
+        matches = [idx for idx in stmt.index if str(idx).strip().lower() == cand_key]
+        if len(matches) > 1:
+            raise ValueError("duplicate financial statement metric row")
+        if matches:
+            row_key = matches[0]
+            row = stmt.loc[row_key]
+            if not isinstance(row, pd.Series):
+                raise ValueError("duplicate financial statement metric row")
+            return extract_quarterly_pair(row, target_date=target_date)
     return (None, None)
 
 
 def extract_report_date(
     info: dict[str, Any] | None, income_stmt: pd.DataFrame | None
 ) -> datetime.date | None:
-    """Extract report date from mostRecentQuarter or statement columns, rejecting epoch 0."""
-    info = info or {}
-    candidates: list[datetime.date] = []
-
-    mrq = info.get("mostRecentQuarter")
-    if mrq is not None:
-        try:
-            if isinstance(mrq, (int, float)) and mrq > 0:
-                dt = datetime.datetime.fromtimestamp(mrq, tz=datetime.UTC).date()
-                candidates.append(dt)
-            elif isinstance(mrq, str):
-                dt = pd.to_datetime(mrq).date()
-                candidates.append(dt)
-        except (ValueError, TypeError, OSError):
-            pass
-
-    if income_stmt is not None and not income_stmt.empty:
-        for col in income_stmt.columns:
-            try:
-                dt = pd.to_datetime(col).date()
-                candidates.append(dt)
-                break
-            except (ValueError, TypeError, OSError):
-                pass
-
-    for dt in candidates:
-        # Must be after 1990-01-01 and not epoch 1970-01-01
-        if dt.year >= 1990:
-            return dt
-
-    return None
+    """Return latest actual column date; metadata alone cannot date reported values."""
+    return latest_statement_date(income_stmt)
 
 
 def extract_estimates_horizons(

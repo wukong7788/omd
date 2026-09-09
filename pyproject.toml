@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohmydata"
-version = "0.2.2"
+version = "0.2.3"
 description = "Financial and alternative market data ingestion SDK."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -25,7 +25,7 @@ polars = [
 vintage-plane = ["pandas>=2.0,<3.0", "pyarrow>=23.0.1,<24.0"]
 sec-cli = ["pyarrow>=23.0.1,<24.0"]
 sec-financials = [
-  "edgartools>=5.0.0",
+  "edgartools==5.56.0",
   "pyarrow>=23.0.1,<24.0",
 ]
 

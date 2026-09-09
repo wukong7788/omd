@@ -15,6 +15,7 @@ import pytest
 
 from ohmydata.providers.sec.edgartools_adapter import (
     SecFinancialsClient,
+    SecStatementParseError,
     ensure_edgar_available,
     parse_statement_rows,
     validate_user_agent,
@@ -160,6 +161,100 @@ def test_parse_statement_rows_from_mock_statement() -> None:
 
 
 @pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
+def test_parse_structured_duration_period_and_missing_unit() -> None:
+    statement = MagicMock()
+    statement.get_raw_data.return_value = [
+        {
+            "concept": "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
+            "label": "Revenue",
+            "standard_concept": "Revenues",
+            "values": {
+                "duration_2024-01-01_2024-06-30": 100,
+                "instant_2024-06-30": 42,
+            },
+            "unit": None,
+            "is_dimension": False,
+            "abstract": False,
+            "is_point_in_time": False,
+        }
+    ]
+    rows = parse_statement_rows(statement, "income_statement")
+    duration = next(r for r in rows if r.period_end == date(2024, 6, 30) and not r.is_point_in_time)
+    assert duration.period_start == date(2024, 1, 1)
+    assert duration.period_type == "duration"
+    assert duration.unit is None
+
+
+def test_parse_rejects_unknown_period_and_nonfinite_values() -> None:
+    statement = MagicMock()
+    statement.get_raw_data.return_value = [
+        {
+            "concept": "us-gaap_Revenues",
+            "label": "Revenue",
+            "values": {"weird": 1},
+        }
+    ]
+    with pytest.raises(SecStatementParseError):
+        parse_statement_rows(statement, "income_statement")
+    statement.get_raw_data.return_value[0]["values"] = {
+        "duration_2024-01-01_2024-06-30": float("inf")
+    }
+    with pytest.raises(SecStatementParseError):
+        parse_statement_rows(statement, "income_statement")
+
+
+def test_client_filters_before_limit_and_keeps_financialless_amendment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Filing:
+        def __init__(
+            self, form: str, filing_date: str, accession: str, report: Any | None = None
+        ) -> None:
+            self.form, self.filing_date, self.accession_number = form, filing_date, accession
+            self.cik, self.company, self.period_of_report = "1", "Synthetic", "2024-06-30"
+            self.header = MagicMock(acceptance_datetime=datetime(2024, 7, 1, tzinfo=UTC))
+            self._report = object() if report is None else report
+
+        def obj(self) -> Any:
+            return self._report
+
+    class Financials:
+        def balance_sheet(self) -> Any:
+            return None
+
+        def income_statement(self) -> Any:
+            return None
+
+        def cash_flow_statement(self) -> Any:
+            return None
+
+    class Report:
+        financials = Financials()
+
+    filings = [
+        Filing("10-K/A", "2024-08-01", "amend", None),
+        Filing("10-K", "2024-07-01", "orig", Report()),
+        Filing("8-K", "2024-09-01", "other"),
+    ]
+
+    class Company:
+        def __init__(self, symbol: str) -> None:
+            pass
+
+        def get_filings(self, **kwargs: Any) -> list[Filing]:
+            return filings
+
+    import edgar
+
+    monkeypatch.setattr(edgar, "Company", Company)
+    result = SecFinancialsClient("Synthetic synthetic@example.invalid").fetch_company_financials(
+        SecFinancialsRequest(symbols=("SYN",), forms=("10-K",), include_amendments=False, limit=1)
+    )
+    assert [v.accession_number for v in result] == ["orig"]
+    assert "NO_FINANCIAL_STATEMENTS" in result[0].quality_flags
+
+
+@pytest.mark.skipif(not HAS_EDGAR, reason="edgartools is required")
 def test_client_from_config_and_runner_offline() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
@@ -270,6 +365,8 @@ def test_parse_statement_rows_dimensional_filtering() -> None:
         "point_in_time": [False, False, False],
         "abstract": [False, False, False],
         "dimension": [True, True, False],
+        "dimension_axis": ["fake:ProductAxis", "fake:ProductAxis", None],
+        "dimension_member": ["fake:PhoneMember", "fake:ComputerMember", None],
         "2023-09-30": [200610000000, 29357000000, 383285000000],
     }
     mock_statement.to_dataframe.return_value = pd.DataFrame(df_data)

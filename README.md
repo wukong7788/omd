@@ -480,6 +480,10 @@ preserve native line item labels and concepts (`concept`, `label`, `value_native
 beside standardized XBRL categories (`standard_concept`) for cross-company
 quantitative comparisons.
 
+The SEC extra supports `edgartools==5.56.0`. See the
+[financial period contract and v2 migration](docs/financial-period-integrity.md)
+before rebuilding existing financial datasets.
+
 ### yfinance (US & Global Market Data, Fundamentals, and Zero-Drift Audit)
 
 Install `ohmydata[yfinance]` to access normalized market data, valuation ratios,
@@ -509,7 +513,7 @@ bars_req = YFinanceDailyBarsRequest(
 bars_result = client.fetch_daily_bars(bars_req)
 df = bars_result.dataframe
 
-# 2. Fetch fundamentals with institutional FY1 Forward P/E calibration
+# 2. Fetch fundamentals with FY1 Forward P/E and source metadata
 fund_req = YFinanceFundamentalsRequest(
     symbols=("NVDA", "GEV"),
     include_financials=True,
@@ -524,10 +528,15 @@ print("NVDA Calibrated FPE:", nvda.valuation.forward_pe, nvda.valuation.forward_
 print("NVDA Raw Yahoo FPE:", nvda.valuation.raw_forward_pe)
 
 gev = fund_result.records["GEV"]
-# GAAP vs Non-GAAP accounting distortion detection (flags one-off windfalls > 25%)
+# Legacy flag measures EPS-source divergence; accounting basis remains unknown.
 if gev.estimates.has_gaap_distortion:
-    print(f"GEV GAAP distortion flagged! Gap: {gev.estimates.gaap_diff_pct * 100:.1f}%")
+    print(f"GEV EPS-source gap: {gev.estimates.gaap_diff_pct * 100:.1f}%")
 ```
+
+Financial values bind to actual statement columns, with per-metric dates and
+coverage. FY1 calibration requires an actual quote and compatible currencies;
+otherwise raw values remain available. See the
+[period selection, valuation provenance and migration guide](docs/financial-period-integrity.md).
 
 #### Zero-Drift Audit CLI (`omd audit-drift`)
 

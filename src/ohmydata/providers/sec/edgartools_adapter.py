@@ -1,143 +1,43 @@
-"""Adapter bridging edgartools with OMD's Point-in-Time and credential-injected architecture."""
+"""Injected-identity SEC client and financial statement parser exports."""
 
 from __future__ import annotations
 
+import importlib
 import logging
-import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from .financials import (
-    SecCompanyFinancialVintage,
-    SecFinancialsRequest,
-    SecStatementRow,
-    StatementType,
-)
+from ._statement_parser import SecStatementParseError, parse_statement_rows
+from .financials import SecCompanyFinancialVintage, SecFinancialsRequest, SecStatementRow
 
 logger = logging.getLogger(__name__)
-
 _EASTERN_TZ = ZoneInfo("America/New_York")
-_DATE_COL_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-import importlib
 
 
 def ensure_edgar_available() -> None:
-    """Ensure that edgartools is installed, or raise a friendly error."""
+    """Require the optional Edgar financials dependency."""
     try:
         importlib.import_module("edgar")
     except ImportError as exc:
         raise ImportError(
             "edgartools is required for SEC company financials. "
-            "Install it with: uv sync --extra sec-financials (or pip install 'ohmydata[sec-financials]')"
+            "Install it with: uv sync --extra sec-financials"
         ) from exc
 
 
 def validate_user_agent(user_agent: str) -> str:
-    """Validate that user_agent is compliant with SEC requirements."""
+    """Validate injected SEC identity without echoing caller contact details."""
     if not user_agent:
         raise ValueError("User-Agent cannot be empty")
     cleaned = user_agent.strip()
     if not cleaned:
         raise ValueError("User-Agent cannot be whitespace only")
     if "@" not in cleaned and "." not in cleaned:
-        raise ValueError(
-            f"User-Agent should include an email or domain per SEC rules, got: {cleaned!r}"
-        )
+        raise ValueError("User-Agent should include an email or domain per SEC rules")
     return cleaned
-
-
-def _to_decimal(val: Any) -> Decimal | None:
-    if val is None or val == "" or str(val).lower() in ("nan", "none", "null"):
-        return None
-    if isinstance(val, Decimal):
-        return val
-    try:
-        return Decimal(str(val).strip())
-    except (InvalidOperation, TypeError, ValueError):
-        return None
-
-
-def _parse_period_date(col_name: str) -> date | None:
-    if _DATE_COL_PATTERN.match(col_name):
-        try:
-            return date.fromisoformat(col_name)
-        except ValueError:
-            return None
-    return None
-
-
-def parse_statement_rows(
-    statement: Any,
-    statement_type: StatementType,
-    *,
-    include_dimensions: bool = False,
-) -> list[SecStatementRow]:
-    """Parse an edgartools Statement object into structured SecStatementRow records."""
-    if statement is None:
-        return []
-
-    ensure_edgar_available()
-    try:
-        df = statement.to_dataframe(
-            standard=True,
-            include_unit=True,
-            include_point_in_time=True,
-            include_standardization=True,
-        )
-    except (AttributeError, TypeError, ValueError, KeyError) as err:
-        logger.debug("Failed to extract dataframe from statement: %s", err)
-        return []
-
-    if df is None or getattr(df, "empty", True):
-        return []
-
-    # Identify date/period columns (e.g. "2023-09-30")
-    period_cols: list[str] = [c for c in df.columns if _parse_period_date(str(c)) is not None]
-
-    rows: list[SecStatementRow] = []
-    for _, item in df.iterrows():
-        # Skip purely abstract header labels (e.g. "Operating expenses:")
-        if item.get("abstract") is True:
-            continue
-        # Skip dimensional breakdown segments unless requested
-        if not include_dimensions and item.get("dimension") is True:
-            continue
-
-        label = str(item.get("label") or "").strip()
-        concept = str(item.get("concept") or "").strip()
-        standard_concept = str(item.get("standard_concept") or concept).strip()
-        unit = str(item.get("unit") or "USD").strip() if item.get("unit") else "USD"
-        is_pit = bool(item.get("point_in_time", False))
-
-        for col in period_cols:
-            raw_val = item.get(col)
-            if raw_val is None or str(raw_val).lower() in ("nan", "none", ""):
-                continue
-
-            dec_val = _to_decimal(raw_val)
-            p_end = _parse_period_date(col)
-
-            rows.append(
-                SecStatementRow(
-                    statement_type=statement_type,
-                    standard_concept=standard_concept,
-                    concept=concept,
-                    label=label,
-                    value=dec_val,
-                    value_native=str(raw_val) if raw_val is not None else None,
-                    unit=unit,
-                    period_end=p_end,
-                    is_point_in_time=is_pit,
-                )
-            )
-
-    return rows
 
 
 class SecFinancialsClient:
@@ -213,37 +113,56 @@ class SecFinancialsClient:
 
         vintages: list[SecCompanyFinancialVintage] = []
         for symbol in request.symbols:
+            symbol = symbol.strip().upper()
             company: Any = Company(symbol)
-            filings: Any = company.get_filings(form=list(request.forms))
+            start = f"{request.start_year}-01-01" if request.start_year else ""
+            end = f"{request.end_year}-12-31" if request.end_year else ""
+            filings: Any = company.get_filings(
+                form=list(request.forms),
+                amendments=request.include_amendments,
+                filing_date=f"{start}:{end}" if start or end else None,
+            )
             if not filings:
                 continue
 
-            filings_to_process: list[Any]
-            if request.limit is not None and hasattr(filings, "latest"):
-                latest_res: Any = filings.latest(request.limit)
-                if isinstance(latest_res, (list, tuple)):
-                    filings_to_process = list(cast(list[Any], latest_res))
-                else:
-                    filings_to_process = [latest_res] if latest_res else []
-            else:
-                filings_to_process = list(filings)
+            # Filter the complete collection before applying limit.  latest(1)
+            # returns a Filing while latest(n>1) returns a Filings collection.
+            candidates = list(filings)
+            eligible: list[Any] = []
+            requested_forms = {str(x).upper() for x in request.forms}
+            for candidate in candidates:
+                form = str(getattr(candidate, "form", "")).upper()
+                base_form = form.removesuffix("/A")
+                if form not in requested_forms and not (
+                    request.include_amendments and base_form in requested_forms
+                ):
+                    continue
+                if form.endswith("/A") and not request.include_amendments:
+                    continue
+                try:
+                    candidate_date = date.fromisoformat(str(candidate.filing_date))
+                except (TypeError, ValueError) as err:
+                    raise ValueError(
+                        f"invalid filing date for {symbol}: {getattr(candidate, 'filing_date', None)!r}"
+                    ) from err
+                if request.start_year and candidate_date.year < request.start_year:
+                    continue
+                if request.end_year and candidate_date.year > request.end_year:
+                    continue
+                eligible.append(candidate)
+            eligible.sort(key=lambda f: (str(f.filing_date), str(f.accession_number)), reverse=True)
+            filings_to_process = (
+                eligible[: request.limit] if request.limit is not None else eligible
+            )
 
             for filing in filings_to_process:
                 form = str(filing.form).upper()
                 is_amend = form.endswith("/A")
-                if is_amend and not request.include_amendments:
-                    continue
-
                 f_date_str = str(filing.filing_date)
                 try:
                     f_date = date.fromisoformat(f_date_str)
-                except ValueError:
-                    continue
-
-                if request.start_year and f_date.year < request.start_year:
-                    continue
-                if request.end_year and f_date.year > request.end_year:
-                    continue
+                except ValueError as err:
+                    raise ValueError(f"invalid filing date for {symbol}: {f_date_str!r}") from err
 
                 # Obtain acceptance timestamp
                 accepted_at: datetime | None = None
@@ -259,43 +178,62 @@ class SecFinancialsClient:
                     logger.debug("Could not parse acceptance_datetime from filing header: %s", err)
 
                 # Parse the report object (TenK, TenQ, etc.)
+                quality_flags: list[str] = []
+                if accepted_at is None:
+                    quality_flags.append("ACCEPTED_AT_MISSING")
                 try:
                     report: Any = filing.obj()
                 except (AttributeError, KeyError, ValueError, TypeError, OSError) as err:
                     logger.debug("Could not parse filing obj: %s", err)
-                    continue
+                    report = None
+                    quality_flags.append("FILING_PARSE_FAILED")
 
-                if report is None or not hasattr(report, "financials"):
-                    continue
-
-                fin: Any = getattr(report, "financials", None)
+                try:
+                    fin: Any = getattr(report, "financials", None) if report is not None else None
+                except (
+                    AttributeError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                    RuntimeError,
+                    OSError,
+                ) as err:
+                    logger.debug("Could not access filing financials: %s", type(err).__name__)
+                    fin = None
+                    quality_flags.append("FINANCIALS_PARSE_FAILED")
                 if fin is None:
-                    continue
+                    quality_flags.append("NO_FINANCIALS_OBJECT")
 
                 rows: list[SecStatementRow] = []
-                # 1. Balance sheet
-                try:
-                    bs: Any = fin.balance_sheet()
-                    rows.extend(parse_statement_rows(bs, "balance_sheet"))
-                except (AttributeError, KeyError, ValueError, TypeError) as err:
-                    logger.debug("Could not extract balance_sheet: %s", err)
-
-                # 2. Income statement
-                try:
-                    inc: Any = fin.income_statement()
-                    rows.extend(parse_statement_rows(inc, "income_statement"))
-                except (AttributeError, KeyError, ValueError, TypeError) as err:
-                    logger.debug("Could not extract income_statement: %s", err)
-
-                # 3. Cash flow statement
-                try:
-                    cf: Any = fin.cash_flow_statement()
-                    rows.extend(parse_statement_rows(cf, "cash_flow"))
-                except (AttributeError, KeyError, ValueError, TypeError) as err:
-                    logger.debug("Could not extract cash_flow: %s", err)
+                if fin is not None:
+                    for method_name, statement_type, flag in (
+                        ("balance_sheet", "balance_sheet", "BALANCE_SHEET"),
+                        ("income_statement", "income_statement", "INCOME_STATEMENT"),
+                        ("cash_flow_statement", "cash_flow", "CASH_FLOW"),
+                    ):
+                        try:
+                            statement = getattr(fin, method_name)()
+                            if statement is None:
+                                quality_flags.append(f"{flag}_MISSING")
+                            else:
+                                statement_rows = parse_statement_rows(
+                                    statement,
+                                    statement_type,
+                                    include_dimensions=request.include_dimensions,
+                                )
+                                rows.extend(statement_rows)
+                                if not statement_rows:
+                                    quality_flags.append(f"{flag}_EMPTY")
+                        except (AttributeError, KeyError, ValueError, TypeError) as err:
+                            logger.debug(
+                                "Could not extract %s: %s", statement_type, type(err).__name__
+                            )
+                            quality_flags.append(f"{flag}_PARSE_FAILED")
 
                 if not rows:
-                    continue
+                    quality_flags.append("NO_FINANCIAL_STATEMENTS")
+                if not request.include_dimensions:
+                    quality_flags.append("DIMENSIONS_EXCLUDED_BY_REQUEST")
 
                 # Period of report date
                 p_end: date | None = None
@@ -303,7 +241,9 @@ class SecFinancialsClient:
                     if hasattr(filing, "period_of_report") and filing.period_of_report:
                         p_end = date.fromisoformat(str(filing.period_of_report))
                 except (ValueError, TypeError) as err:
-                    logger.debug("Could not parse period_of_report: %s", err)
+                    raise ValueError(
+                        f"invalid period_of_report for {symbol}: {filing.period_of_report!r}"
+                    ) from err
 
                 vintage = SecCompanyFinancialVintage(
                     symbol=symbol,
@@ -317,8 +257,18 @@ class SecFinancialsClient:
                     availability_policy=request.availability_policy,
                     availability_lag_days=request.lag_days,
                     is_amendment=is_amend,
+                    quality_flags=tuple(quality_flags),
                     rows=tuple(rows),
                 )
                 vintages.append(vintage)
 
         return vintages
+
+
+__all__ = [
+    "SecFinancialsClient",
+    "SecStatementParseError",
+    "ensure_edgar_available",
+    "parse_statement_rows",
+    "validate_user_agent",
+]

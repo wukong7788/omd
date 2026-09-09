@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3 — 2026-09-09
+
+- Repair SEC financial-period extraction and filing eligibility in the OMD adapter
+  against the existing edgartools 5.56.0 baseline; pin that tested optional dependency.
+- Introduce financial dataset/identity v2 for period and dimension metadata and
+  explicit coverage, with lossless decimal strings in Parquet and atomic immutable
+  partition publication. Existing v1 datasets require rebuilding in a new root.
+- Bind Yahoo financial values to actual report columns, retain nulls and per-metric
+  source periods, and match prior-year columns by a documented calendar policy.
+  Remove the silent EBIT fallback for operating income.
+- Use actual quotes for FY1 calibration, preserve quote and forecast provenance,
+  and expose unknown accounting comparability. Raw fallback remains available.
+- See [migration and changed semantics](docs/financial-period-integrity.md).
+
 ## 0.2.2 — 2026-09-06
 
 - Enhanced `yfinance` fundamentals pipeline with institutional Forward P/E calibration and GAAP distortion detection:

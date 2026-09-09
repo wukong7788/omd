@@ -20,14 +20,17 @@ from ohmydata.providers.yfinance.fundamentals import (
 class TestFundamentalsExtractionHelpers:
     def test_extract_quarterly_pair_full(self):
         # 5 quarters: Q0, Q1, Q2, Q3, Q4 (YoY is Q4)
-        series = pd.Series([100.0, 90.0, 80.0, 70.0, 85.0])
+        series = pd.Series(
+            [100.0, 90.0, 80.0, 70.0, 85.0],
+            index=["2025-12-31", "2025-09-30", "2025-06-30", "2025-03-31", "2024-12-31"],
+        )
         latest, prev_year = extract_quarterly_pair(series)
         assert latest == 100.0
         assert prev_year == 85.0
 
     def test_extract_quarterly_pair_short(self):
         # Fewer than 5 quarters
-        series = pd.Series([100.0, 90.0])
+        series = pd.Series([100.0, 90.0], index=["2025-12-31", "2025-09-30"])
         latest, prev_year = extract_quarterly_pair(series)
         assert latest == 100.0
         assert prev_year is None
@@ -55,7 +58,7 @@ class TestFundamentalsExtractionHelpers:
         info = {"mostRecentQuarter": ts}
         income_stmt = pd.DataFrame()
         res = extract_report_date(info, income_stmt)
-        assert res == datetime.date(2025, 9, 30)
+        assert res is None  # Metadata is preserved separately, never a value's column identity.
 
     def test_extract_estimates_horizons(self):
         est_df = pd.DataFrame(
@@ -144,6 +147,10 @@ class TestSymbolFundamentalsParsing:
             "quoteType": "EQUITY",
             "forwardPE": 14.9,
             "forwardEps": 15.46,
+            "currentPrice": 230.354,
+            "regularMarketTime": 1788278400,
+            "currency": "USD",
+            "financialCurrency": "USD",
         }
         eps_estimate_df = pd.DataFrame(
             {"avg": [9.2812]},

@@ -22,6 +22,11 @@ from ._fundamentals_parsers import (
     extract_quarterly_pair,
     extract_report_date,
 )
+from ._fundamentals_periods import (
+    YFinanceMetricPeriod,
+    latest_statement_date,
+    select_metric,
+)
 from .endpoints import validate_yfinance_symbol
 
 NON_EQUITY_QUOTE_TYPES = frozenset(
@@ -45,11 +50,20 @@ class YFinanceValuationSnapshot:
     enterprise_value: float | None = None
     shares_outstanding: float | None = None
     currency: str | None = None
+    quote_price: float | None = None
+    quote_time: datetime.datetime | None = None
+    quote_source: str | None = None
+    forward_eps_period: str | None = None
+    forward_eps_source: str | None = None
+    eps_accounting_basis: str = "unknown"
+    currency_comparability: str = "unknown"
 
 
 @dataclass(frozen=True)
 class YFinanceQuarterlyFinancials:
     """Quarterly financial metrics (latest quarter and prior year same quarter YoY)."""
+
+    metric_periods: tuple[YFinanceMetricPeriod, ...] = field(default=(), kw_only=True)
 
     total_revenue_latest: float | None = None
     total_revenue_prev_year: float | None = None
@@ -93,13 +107,14 @@ class YFinanceAnalystEstimates:
     revenue_est_next_y: float | None = None
     eps_est_current_q: float | None = None
     eps_est_next_q: float | None = None
-    eps_est_current_y: float | None = None  # Sell-side consensus 0y.avg (often GAAP in Yahoo)
+    eps_est_current_y: float | None = None  # Provider earnings_estimate 0y.avg
     eps_est_next_y: float | None = None  # Sell-side consensus +1y.avg
-    eps_current_year: float | None = (
-        None  # Core operating consensus from info.get("epsCurrentYear") (Non-GAAP)
-    )
-    gaap_diff_pct: float | None = None  # Relative deviation: |eps_0y - eps_current_y| / min
-    has_gaap_distortion: bool = False  # True when gaap_diff_pct > 0.25
+    eps_current_year: float | None = None  # Provider info.epsCurrentYear; basis unspecified
+    gaap_diff_pct: float | None = None  # Legacy numeric divergence, not proof of GAAP basis
+    accounting_basis_comparability: str = field(default="unknown", kw_only=True)
+    eps_est_current_y_source: str = field(default="earnings_estimate.0y.avg", kw_only=True)
+    eps_current_year_source: str = field(default="info.epsCurrentYear", kw_only=True)
+    has_gaap_distortion: bool = False  # Legacy name: numeric divergence > 0.25, basis unknown
 
 
 @dataclass(frozen=True)
@@ -108,6 +123,8 @@ class YFinanceSymbolFundamentals:
 
     symbol: str
     report_date: datetime.date | None = None
+    provider_report_date: datetime.date | None = field(default=None, kw_only=True)
+    coverage_flags: tuple[str, ...] = field(default=(), kw_only=True)
     quote_type: str | None = None
     is_excluded: bool = False
     exclusion_reason: str | None = None
@@ -122,6 +139,8 @@ class YFinanceSymbolFundamentals:
         out: dict[str, Any] = {
             "symbol": self.symbol,
             "report_date": self.report_date,
+            "provider_report_date": self.provider_report_date,
+            "coverage_flags": self.coverage_flags,
             "quote_type": self.quote_type,
             "is_excluded": self.is_excluded,
             "exclusion_reason": self.exclusion_reason,
@@ -220,23 +239,71 @@ def parse_symbol_fundamentals(
     raw_forward_eps = _safe_float(info.get("forwardEps"))
     eps_current_year = _safe_float(info.get("epsCurrentYear"))
 
-    # Extract statements YoY pairs
-    rev_latest, rev_prev = extract_metric_pair(
-        income_stmt, ["Total Revenue", "Operating Revenue", "Revenue"]
+    dates = [
+        d
+        for stmt in (income_stmt, balance_stmt, cashflow_stmt)
+        if (d := latest_statement_date(stmt)) is not None
+    ]
+    report_dt = max(dates) if dates else None
+    metric_periods: list[YFinanceMetricPeriod] = []
+    coverage_flags: list[str] = []
+    provider_report_date = None
+    mrq = info.get("mostRecentQuarter")
+    try:
+        if isinstance(mrq, (int, float)) and mrq > 0:
+            provider_report_date = datetime.datetime.fromtimestamp(mrq, datetime.UTC).date()
+        elif isinstance(mrq, str):
+            provider_report_date = pd.Timestamp(mrq).date()
+    except (ValueError, TypeError, OSError, OverflowError):
+        pass
+    if provider_report_date and provider_report_date != report_dt:
+        coverage_flags.append("provider_report_date_differs")
+
+    def metric_pair(
+        metric: str, statement: str, stmt: pd.DataFrame | None, keys: list[str]
+    ) -> tuple[float | None, float | None]:
+        metadata, latest, previous = select_metric(metric, statement, stmt, keys, report_dt)
+        metric_periods.append(metadata)
+        if metadata.coverage != "present":
+            coverage_flags.append(f"{metric}:{metadata.coverage}")
+        return _safe_float(latest), _safe_float(previous)
+
+    # All metrics share the actual report column; older values remain missing.
+    rev_latest, rev_prev = metric_pair(
+        "total_revenue",
+        "income_statement",
+        income_stmt,
+        ["Total Revenue", "Operating Revenue", "Revenue"],
     )
-    gp_latest, gp_prev = extract_metric_pair(income_stmt, ["Gross Profit"])
-    op_latest, op_prev = extract_metric_pair(income_stmt, ["Operating Income", "EBIT"])
-    ebitda_latest, ebitda_prev = extract_metric_pair(income_stmt, ["EBITDA"])
-    deps_latest, deps_prev = extract_metric_pair(income_stmt, ["Diluted EPS"])
-    beps_latest, beps_prev = extract_metric_pair(income_stmt, ["Basic EPS"])
-    neps_latest, neps_prev = extract_metric_pair(
-        income_stmt, ["Normalized EPS", "Normalized Basic EPS"]
+    gp_latest, gp_prev = metric_pair(
+        "gross_profit", "income_statement", income_stmt, ["Gross Profit"]
     )
-    ni_latest, ni_prev = extract_metric_pair(
-        income_stmt, ["Net Income", "Net Income Common Stockholders"]
+    op_latest, op_prev = metric_pair(
+        "operating_income", "income_statement", income_stmt, ["Operating Income"]
+    )
+    ebitda_latest, ebitda_prev = metric_pair("ebitda", "income_statement", income_stmt, ["EBITDA"])
+    deps_latest, deps_prev = metric_pair(
+        "diluted_eps", "income_statement", income_stmt, ["Diluted EPS"]
+    )
+    beps_latest, beps_prev = metric_pair(
+        "basic_eps", "income_statement", income_stmt, ["Basic EPS"]
+    )
+    neps_latest, neps_prev = metric_pair(
+        "normalized_eps",
+        "income_statement",
+        income_stmt,
+        ["Normalized EPS", "Normalized Basic EPS"],
+    )
+    ni_latest, ni_prev = metric_pair(
+        "net_income",
+        "income_statement",
+        income_stmt,
+        ["Net Income", "Net Income Common Stockholders"],
     )
 
-    cf_latest, cf_prev = extract_metric_pair(
+    cf_latest, cf_prev = metric_pair(
+        "operating_cash_flow",
+        "cash_flow",
         cashflow_stmt,
         [
             "Operating Cash Flow",
@@ -244,20 +311,34 @@ def parse_symbol_fundamentals(
             "Net Cash Flow From Operating Activities",
         ],
     )
-    fcf_latest, fcf_prev = extract_metric_pair(cashflow_stmt, ["Free Cash Flow"])
-    capex_latest, capex_prev = extract_metric_pair(cashflow_stmt, ["Capital Expenditure"])
+    fcf_latest, fcf_prev = metric_pair(
+        "free_cash_flow", "cash_flow", cashflow_stmt, ["Free Cash Flow"]
+    )
+    capex_latest, capex_prev = metric_pair(
+        "capital_expenditure", "cash_flow", cashflow_stmt, ["Capital Expenditure"]
+    )
 
-    debt_latest, debt_prev = extract_metric_pair(balance_stmt, ["Total Debt"])
-    cash_latest, cash_prev = extract_metric_pair(
+    debt_latest, debt_prev = metric_pair(
+        "total_debt", "balance_sheet", balance_stmt, ["Total Debt"]
+    )
+    cash_latest, cash_prev = metric_pair(
+        "cash",
+        "balance_sheet",
         balance_stmt,
         ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
     )
-    net_debt_latest, net_debt_prev = extract_metric_pair(balance_stmt, ["Net Debt"])
-    equity_latest, equity_prev = extract_metric_pair(
-        balance_stmt, ["Stockholders Equity", "Total Equity Gross Minority Interest"]
+    net_debt_latest, net_debt_prev = metric_pair(
+        "net_debt", "balance_sheet", balance_stmt, ["Net Debt"]
+    )
+    equity_latest, equity_prev = metric_pair(
+        "shareholders_equity",
+        "balance_sheet",
+        balance_stmt,
+        ["Stockholders Equity", "Total Equity Gross Minority Interest"],
     )
 
     financials = YFinanceQuarterlyFinancials(
+        metric_periods=tuple(metric_periods),
         total_revenue_latest=rev_latest,
         total_revenue_prev_year=rev_prev,
         gross_profit_latest=gp_latest,
@@ -295,15 +376,31 @@ def parse_symbol_fundamentals(
     ecq, enq, ecy, eny = extract_estimates_horizons(eps_estimate_df)
     eps_0y = ecy
 
-    # Derive implied price defensively
-    implied_price = derive_implied_price(
-        raw_forward_pe=raw_forward_pe,
-        raw_forward_eps=raw_forward_eps,
-        trailing_pe=trailing_pe,
-        deps_latest=deps_latest,
-        market_cap=market_cap,
-        shares_outstanding=shares_outstanding,
+    quote_price = None
+    quote_source = None
+    for key in ("currentPrice", "regularMarketPrice"):
+        value = _safe_float(info.get(key))
+        if value is not None and value > 0:
+            quote_price, quote_source = value, f"info.{key}"
+            break
+    quote_time = None
+    timestamp = _safe_float(info.get("regularMarketTime"))
+    if quote_source == "info.regularMarketPrice" and timestamp is not None and timestamp > 0:
+        try:
+            quote_time = datetime.datetime.fromtimestamp(timestamp, datetime.UTC)
+        except (ValueError, OverflowError, OSError):
+            pass
+    financial_currency = str(info.get("financialCurrency") or "").strip().upper()
+    quote_currency = str(info.get("currency") or "").strip().upper()
+    comparability = (
+        "same_currency"
+        if financial_currency and financial_currency == quote_currency
+        else "currency_mismatch"
+        if financial_currency and quote_currency
+        else "unknown"
     )
+    # Currency compatibility is necessary; accounting basis remains provider-unspecified.
+    implied_price = quote_price if comparability == "same_currency" else None
 
     # Calibrate FY1 Forward P/E
     calibrated_fpe, calibrated_feps, fpe_source = calibrate_forward_pe(
@@ -332,6 +429,18 @@ def parse_symbol_fundamentals(
         enterprise_value=_safe_float(info.get("enterpriseValue")),
         shares_outstanding=shares_outstanding,
         currency=currency,
+        quote_price=quote_price,
+        quote_time=quote_time,
+        quote_source=quote_source,
+        forward_eps_period="FY1" if fpe_source == "FY1_CONSENSUS" else None,
+        forward_eps_source=(
+            "earnings_estimate.0y.avg"
+            if fpe_source == "FY1_CONSENSUS"
+            else "info.forwardEps"
+            if raw_forward_eps is not None
+            else None
+        ),
+        currency_comparability=comparability,
     )
 
     estimates = YFinanceAnalystEstimates(
@@ -348,11 +457,11 @@ def parse_symbol_fundamentals(
         has_gaap_distortion=has_gaap_distortion,
     )
 
-    report_dt = extract_report_date(info, income_stmt)
-
     return YFinanceSymbolFundamentals(
         symbol=symbol,
         report_date=report_dt,
+        provider_report_date=provider_report_date,
+        coverage_flags=tuple(coverage_flags),
         quote_type=quote_type,
         is_excluded=is_excluded,
         exclusion_reason=exclusion_reason,
@@ -367,6 +476,7 @@ __all__ = [
     "YFinanceAnalystEstimates",
     "YFinanceFundamentalsRequest",
     "YFinanceFundamentalsResult",
+    "YFinanceMetricPeriod",
     "YFinanceQuarterlyFinancials",
     "YFinanceSymbolFundamentals",
     "YFinanceValuationSnapshot",
