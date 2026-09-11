@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a bounded document-financial known-by selector using exact caller quality
+  and consumer-commit records. Reuse existing temporal selection rules while
+  preserving legacy production type admission and identities; no implicit PASS
+  or market-first-publication claim.
+
 - Add distinct document-source financial production and full read-only
   source/parser restoration, preserving raw units and native row semantics.
   Seal checks reject nested identity mutation without modifying caller objects.

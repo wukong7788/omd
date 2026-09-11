@@ -74,3 +74,25 @@ source identity and retention guarantees, representative resource evidence, and
 independent review before expansion. Increasing timeouts does not resolve it.
 The missing failure-stage telemetry in the original local harness must also be
 corrected in any subsequent acquisition implementation.
+
+## Separate document-source pilot
+
+The separately frozen single-MSFT document-source protocol
+`0c9108c24cac62e97213a0513d721c0aacccf45061f7d7aa567ce0c1e7a36bb2`
+was run once on 2026-09-11 UTC after source/financial offline acceptance.
+It reused the retained submissions observation and allowed at most eight new GETs,
+60 seconds per filing, 512MiB sampled RSS and 16MiB aggregate source bytes.
+It made two GETs: the directory index returned 200 and retained 10,003 bytes;
+the primary HTML returned 200 but exceeded its 4MiB read cap at
+`primary:body_limit`. The partial primary was not retained.
+
+The run is **FAILED_STOPPED**, with 4.014 seconds elapsed and peak RSS
+49,332,224 bytes. This is a primary admission-size failure, not a time or memory
+budget failure; the complete primary size was not measured. No source package,
+financial product, quality PASS or consumer commit was created. No retry or
+universe expansion followed. This does not supersede the original pilot failure.
+
+Local evidence: `artifacts/sec-document-live-pilot/20260911T182852043611Z/report.json`,
+SHA-256 `490eb3fe92cc0c36e756bcdef63276ae49c0a40059d45dd2e56117446487b5a6`.
+Independent review confirmed the bounded failure and supported continuing the
+offline document lifecycle work without relaxing the acquisition budget.

@@ -28,6 +28,10 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .document_financial_replay import (
+    SecDocumentFinancialReplayResult,
+    select_sec_document_financial_productions,
+)
 from .document_financials import (
     SecDocumentFinancialProduction,
     produce_sec_financials_from_document_source,
@@ -259,6 +263,7 @@ __all__ = [
     "SecDiscoveryPolicy",
     "SecDiscoverySource",
     "SecDocumentFinancialProduction",
+    "SecDocumentFinancialReplayResult",
     "SecDocumentSource",
     "SecDocumentSourcePackage",
     "SecEdgarSubmissionsRequest",
@@ -403,6 +408,7 @@ __all__ = [
     "retain_sec_execution_validation",
     "rows_from_result",
     "select_exact_partitions",
+    "select_sec_document_financial_productions",
     "select_sec_financial_versions",
     "select_sec_observed_financial_productions",
     "select_sec_quality_findings",

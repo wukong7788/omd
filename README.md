@@ -1420,5 +1420,36 @@ compares exact retained output bytes and performs no writes. Output is bounded
 by 8 MiB and 10,000 rows. `known_by_at` is the package observation timestamp;
 `produced_at` equals the output observation timestamp and cannot precede the package.
 The request class is reused as a selection value; no SGML is synthesized.
-Financial-bundle/lifecycle integration, real filing qualification and consumer
+Financial-bundle integration, real filing qualification and consumer
 publication are separate gates. See the [financial production contract](docs/plans/sec-document-financial-production.md).
+
+Document productions have a separate in-memory system selector:
+
+```python
+from ohmydata.providers.sec import select_sec_document_financial_productions
+
+eligible = select_sec_document_financial_productions(
+    productions=(restored_financial,),
+    quality_records=caller_quality_records,
+    consumer_commits=caller_consumer_commits,
+    policy=explicit_replay_policy,
+)
+```
+
+Use `SecObservedFinancialReplayPolicy`, `SecObservedFinancialQualityRecord` and
+`SecObservedFinancialConsumerCommit` with the exact **document** production ID.
+The policy must explicitly match its schema/parser/configuration, quality policy,
+consumer dataset and cutoff. A complete production is eligible only after
+known-by, production, latest visible PASS and its exact consumer commit; missing
+records yield no eligible result. Future revocation does not change old cutoffs.
+These are caller attestations, not automatic quality approval or market-first
+publication evidence. The old observed selector continues to reject document types.
+
+Inputs are bounded before copying/hashing: at most 100 productions, 100,000 rows,
+10,000 quality records and 10,000 commits, including duplicate occurrences.
+A conservative 32MiB serialization budget, 500,000 nodes and depth 16 can reject
+inputs below those count caps. Text costs twelve bytes per character plus overhead;
+Decimal admission also limits its in-memory coefficient storage to 8KiB and
+adjusted exponent to ±10,000, and integers to 64 bits. Limits can be tightened,
+not expanded. Queries perform no I/O. Persistent bundles remain separate work.
+See the [known-by replay contract](docs/plans/sec-document-financial-replay.md).

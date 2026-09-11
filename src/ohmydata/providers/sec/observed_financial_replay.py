@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import copy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Protocol, TypeVar
 
 from .observed_xbrl_financials import SecObservedFinancialProduction
 from .pit import SecQualityStatus
@@ -249,8 +250,26 @@ def _deduplicate_commits(
     return tuple(result.values())
 
 
+class _ReplayProduction(Protocol):
+    @property
+    def production_identity(self) -> str: ...
+    @property
+    def produced_at(self) -> datetime: ...
+    @property
+    def output_schema_version(self) -> str: ...
+    @property
+    def parser_version(self) -> str: ...
+    @property
+    def configuration_version(self) -> str: ...
+    @property
+    def configuration_identity(self) -> str: ...
+
+
+_P = TypeVar("_P", bound=_ReplayProduction)
+
+
 def _validate_history(
-    production: SecObservedFinancialProduction,
+    production: _ReplayProduction,
     records: tuple[SecObservedFinancialQualityRecord, ...],
 ) -> SecObservedFinancialQualityRecord | None:
     if not records:
@@ -304,6 +323,29 @@ def select_sec_observed_financial_productions(
     productions_ = _deduplicate_productions(raw_productions)
     qualities = _deduplicate_quality(_bounded(quality_records, "quality record", quality_limit))
     commits = _deduplicate_commits(_bounded(consumer_commits, "commit", commit_limit))
+    return tuple(
+        SecObservedFinancialReplayResult(*item)
+        for item in _select_validated(
+            productions_,
+            qualities,
+            commits,
+            policy,
+            known_by=lambda item: item.evidence.known_by_at,
+            accession=lambda item: item.vintage.accession_number,
+        )
+    )
+
+
+def _select_validated(
+    productions_: tuple[_P, ...],
+    qualities: tuple[SecObservedFinancialQualityRecord, ...],
+    commits: tuple[SecObservedFinancialConsumerCommit, ...],
+    policy: SecObservedFinancialReplayPolicy,
+    *,
+    known_by: Callable[[_P], datetime],
+    accession: Callable[[_P], str],
+) -> tuple[tuple[_P, SecObservedFinancialQualityRecord, SecObservedFinancialConsumerCommit], ...]:
+    """Shared temporal algorithm; public adapters own admission and seal validation."""
     by_production = {item.production_identity: item for item in productions_}
     selected = [
         item
@@ -312,7 +354,7 @@ def select_sec_observed_financial_productions(
         and item.parser_version == policy.parser_version
         and item.configuration_version == policy.configuration_version
         and item.configuration_identity == policy.configuration_identity
-        and item.evidence.known_by_at <= item.produced_at <= policy.knowledge_cutoff
+        and known_by(item) <= item.produced_at <= policy.knowledge_cutoff
     ]
     visible_quality = [
         item
@@ -365,7 +407,9 @@ def select_sec_observed_financial_productions(
     for records in commits_by_quality.values():
         if len({item.committed_at for item in records}) != len(records):
             raise ValueError("SEC observed commits have distinct same-time records")
-    results: list[SecObservedFinancialReplayResult] = []
+    results: list[
+        tuple[_P, SecObservedFinancialQualityRecord, SecObservedFinancialConsumerCommit]
+    ] = []
     for production in selected:
         quality = latest_quality.get(production.production_identity)
         if quality is None or quality.status is not SecQualityStatus.PASS:
@@ -375,7 +419,7 @@ def select_sec_observed_financial_productions(
         )
         if matches:
             results.append(
-                SecObservedFinancialReplayResult(
+                (
                     production,
                     quality,
                     max(matches, key=lambda item: (item.committed_at, item.commit_id)),
@@ -385,9 +429,9 @@ def select_sec_observed_financial_productions(
         sorted(
             results,
             key=lambda item: (
-                item.production.evidence.known_by_at,
-                item.production.vintage.accession_number,
-                item.production.production_identity,
+                known_by(item[0]),
+                accession(item[0]),
+                item[0].production_identity,
             ),
         )
     )
