@@ -544,6 +544,36 @@ ttm = compute_sec_four_quarter_ttm(
 )
 ```
 
+`discover_sec_filing_events` replays a retained SEC submissions root and every
+historical file declared by that root. The caller supplies a CIK, selected forms,
+UTC acceptance window, overlap duration and incremental/reconciliation mode.
+It preserves acceptance metadata, emits filing events and exact 8-K item 2.02
+events, and fails on missing pages or conflicting facts. Acceptance is not proof
+of the website's first publication time.
+
+`SecEventDiscoveryLedger` atomically stores discovered events and their cursor in
+immutable generations. On POSIX filesystems, appenders cooperate through a writer
+lock; `load()` replays the retained source observations and reconstructs the
+entire committed chain. An exact retry returns its original receipt, even after
+later appends. The ledger records discovery; execution, retry scheduling and
+consumer publication remain separate. Resource caps and snapshot request
+bindings are specified in the [event discovery contract](docs/plans/sec-event-discovery-ledger.md).
+
+```python
+from ohmydata.providers.sec import SecEventDiscoveryLedger, discover_sec_filing_events
+
+ledger = SecEventDiscoveryLedger(ledger_path, store=snapshot_store)
+head, discovered = ledger.load()
+batch = discover_sec_filing_events(
+    snapshot_store,
+    retained_root_source,
+    retained_history_sources,
+    policy=discovery_policy,
+    prior_cursor=None if head is None else head.cursor,
+)
+receipt = ledger.append(batch, expected_receipt_id=None if head is None else head.receipt_id)
+```
+
 `write_sec_pit_bundle` can freeze a caller-selected receipt closure through
 `SnapshotStore`; `load_sec_pit_bundle` rebuilds it only from an injected
 observation-ID resolver and source store, without persisting source bytes or paths.

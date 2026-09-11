@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add bounded offline SEC submissions event discovery and a replay-validated,
+  immutable POSIX ledger that commits events and acceptance cursors together.
+  Exact retries are idempotent; missing source pages, conflicting metadata and
+  corrupted generations fail explicitly. This records discovery only and does
+  not establish first publication or run a background refresh service.
+
 - Add offline four-quarter revenue/net-income TTM sums with explicit quarter and
   scope declarations, existing PIT selection, bounded exact Decimal arithmetic,
   and input lineage. The availability bound describes eligible inputs; caller

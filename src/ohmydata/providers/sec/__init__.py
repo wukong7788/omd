@@ -44,6 +44,21 @@ from .edgartools_adapter import (
     validate_user_agent,
 )
 from .endpoints import SecEdgarSubmissionsRequest, SecEmptyPolicy, SecNportQuarterRequest
+from .event_discovery import (
+    SecDiscoveryBatch,
+    SecDiscoveryCursor,
+    SecDiscoveryMode,
+    SecDiscoveryPolicy,
+    SecDiscoverySource,
+    SecFilingDiscoveryEvent,
+    SecFilingEventKind,
+    discover_sec_filing_events,
+)
+from .event_ledger import (
+    SecEventDiscoveryLedger,
+    SecEventLedgerConflictError,
+    SecEventLedgerReceipt,
+)
 from .financials import (
     SecCompanyFinancialVintage,
     SecFinancialsRequest,
@@ -158,9 +173,19 @@ __all__ = [
     "SecAvailabilityPolicy",
     "SecCompanyFinancialVintage",
     "SecConsumerCommit",
+    "SecDiscoveryBatch",
+    "SecDiscoveryCursor",
+    "SecDiscoveryMode",
+    "SecDiscoveryPolicy",
+    "SecDiscoverySource",
     "SecEdgarSubmissionsRequest",
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
+    "SecEventDiscoveryLedger",
+    "SecEventLedgerConflictError",
+    "SecEventLedgerReceipt",
+    "SecFilingDiscoveryEvent",
+    "SecFilingEventKind",
     "SecFinancialUnitEvidence",
     "SecFinancialsClient",
     "SecFinancialsParseError",
@@ -227,6 +252,7 @@ __all__ = [
     "compute_sec_four_quarter_ttm",
     "decode_sec_observed_xbrl_package",
     "decode_sec_xbrl_package",
+    "discover_sec_filing_events",
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
