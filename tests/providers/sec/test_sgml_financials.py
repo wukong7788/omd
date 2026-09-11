@@ -7,12 +7,18 @@ import pytest
 
 from ohmydata.core import RequestSpec, SnapshotStore
 from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
+from ohmydata.providers.sec.sgml_financials import _documents, _header
 
 pytest.importorskip("edgar")
 
 
 def _raw(
-    *, acceptance: str = "20240501170000", components: bool = True, dimension: bool = False
+    *,
+    acceptance: str = "20240501170000",
+    components: bool = True,
+    dimension: bool = False,
+    wrapped_components: bool = False,
+    xml_declaration: bool = False,
 ) -> bytes:
     documents = (
         ""
@@ -50,6 +56,11 @@ def _raw(
             'dimension="us-gaap:ProductOrServiceAxis">us-gaap:ProductMember'
             "</xbrldi:explicitMember></segment></entity>",
         )
+    if wrapped_components:
+        declaration = '<?xml version="1.0"?>\n' if xml_declaration else ""
+        documents = documents.replace("<TEXT>", f"<TEXT><XBRL>\n{declaration}").replace(
+            "</TEXT>", "\n</XBRL></TEXT>"
+        )
     return f"""<SEC-DOCUMENT>0000000001-24-000001.txt\n<SEC-HEADER>\nACCESSION NUMBER: 0000000001-24-000001\nCONFORMED SUBMISSION TYPE: 10-Q\nFILED AS OF DATE: 20240501\nDATE AS OF CHANGE: 20240501\n<ACCEPTANCE-DATETIME>{acceptance}\nFILER:\n\tCOMPANY DATA:\n\t\tCONFORMED NAME: Synthetic Filing Co.\n\t\tCENTRAL INDEX KEY: 0000000001\nCONFORMED PERIOD OF REPORT: 20240331\n</SEC-HEADER>\n{documents}\n""".encode()
 
 
@@ -57,6 +68,142 @@ def _request() -> SecSgmlFinancialsRequest:
     return SecSgmlFinancialsRequest(
         "FAKE", "0000000001", "0000000001-24-000001", "10-Q", ("income_statement",), False
     )
+
+
+def test_modern_company_conformed_name_ignores_former_name_history():
+    raw = _raw().replace(
+        b"CONFORMED NAME: Synthetic Filing Co.",
+        b"COMPANY CONFORMED NAME: Synthetic Filing Co.\n"
+        b"FORMER COMPANY: Example Former Issuer\n"
+        b"FORMER CONFORMED NAME: Former Filing Co.",
+    )
+
+    _, _, _, company_name = _header(raw.decode("utf-8"), _request())
+
+    assert company_name == "Synthetic Filing Co."
+
+
+def test_modern_company_conformed_name_preserves_legacy_vintage_rows(tmp_path, monkeypatch):
+    legacy_source, legacy_observation = _observation(tmp_path / "legacy", _raw())
+    modern_raw = _raw().replace(
+        b"CONFORMED NAME: Synthetic Filing Co.", b"COMPANY CONFORMED NAME: Synthetic Filing Co."
+    )
+    modern_source, modern_observation = _observation(tmp_path / "modern", modern_raw)
+    monkeypatch.setattr(socket.socket, "connect", lambda *_: pytest.fail("network access"))
+
+    legacy = produce_sec_financials_from_sgml(
+        source_store=legacy_source,
+        source_observation=legacy_observation,
+        projection_store=SnapshotStore(tmp_path / "legacy-projection"),
+        request=_request(),
+        produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+    )
+    modern = produce_sec_financials_from_sgml(
+        source_store=modern_source,
+        source_observation=modern_observation,
+        projection_store=SnapshotStore(tmp_path / "modern-projection"),
+        request=_request(),
+        produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+    )
+
+    assert modern.vintage.vintage_identity == legacy.vintage.vintage_identity
+    assert modern.vintage.rows == legacy.vintage.rows
+
+
+@pytest.mark.parametrize("xml_declaration", [False, True])
+def test_wrapped_modern_components_preserve_rows_and_raw_bytes(
+    tmp_path, monkeypatch, xml_declaration
+):
+    bare_raw = _raw().replace(
+        b"CONFORMED NAME: Synthetic Filing Co.", b"COMPANY CONFORMED NAME: Synthetic Filing Co."
+    )
+    wrapped_raw = _raw(wrapped_components=True, xml_declaration=xml_declaration).replace(
+        b"CONFORMED NAME: Synthetic Filing Co.", b"COMPANY CONFORMED NAME: Synthetic Filing Co."
+    )
+    bare_source, bare_observation = _observation(tmp_path / "bare", bare_raw)
+    wrapped_source, wrapped_observation = _observation(tmp_path / "wrapped", wrapped_raw)
+    monkeypatch.setattr(socket.socket, "connect", lambda *_: pytest.fail("network access"))
+
+    bare = produce_sec_financials_from_sgml(
+        source_store=bare_source,
+        source_observation=bare_observation,
+        projection_store=SnapshotStore(tmp_path / "bare-projection"),
+        request=_request(),
+        produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+    )
+    wrapped = produce_sec_financials_from_sgml(
+        source_store=wrapped_source,
+        source_observation=wrapped_observation,
+        projection_store=SnapshotStore(tmp_path / "wrapped-projection"),
+        request=_request(),
+        produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+    )
+
+    assert wrapped.vintage.vintage_identity == bare.vintage.vintage_identity
+    assert wrapped.vintage.rows == bare.vintage.rows
+    assert wrapped_source.replay_observation(wrapped_observation).payload == wrapped_raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        _raw(wrapped_components=True).replace(b"</XBRL>", b"", 1),
+        _raw(wrapped_components=True).replace(b"<XBRL>", b"<XBRL><XBRL>", 1),
+        _raw(wrapped_components=True).replace(b"</XBRL>", b"</XBRL><XBRL>duplicate</XBRL>", 1),
+        _raw(wrapped_components=True).replace(b"<XBRL>", b"outside<XBRL>", 1),
+        _raw(wrapped_components=True).replace(b"</XBRL>", b"</XBRL>outside", 1),
+    ],
+    ids=["missing-close", "nested-wrapper", "duplicate-paired", "nonempty-prefix", "suffix"],
+)
+def test_malformed_component_wrapper_fails_closed(raw):
+    with pytest.raises(ValueError, match="XBRL wrapper"):
+        _documents(raw.decode("utf-8"))
+
+
+def test_wrapped_component_doctype_fails_before_projection_write(tmp_path):
+    raw = _raw(wrapped_components=True).replace(
+        b"<XBRL>\n", b"<XBRL>\n<!DOCTYPE x [<!ENTITY e 'x'>]>\n", 1
+    )
+    source, observation = _observation(tmp_path, raw)
+    projection = SnapshotStore(tmp_path / "projection")
+
+    with pytest.raises(ValueError, match="unsafe XML"):
+        produce_sec_financials_from_sgml(
+            source_store=source,
+            source_observation=observation,
+            projection_store=projection,
+            request=_request(),
+            produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+        )
+
+    assert not list(projection.root.rglob("response.bin"))
+
+
+@pytest.mark.parametrize(
+    ("replacement", "case"),
+    [
+        (
+            b"COMPANY CONFORMED NAME: Current Filing Co.\nCONFORMED NAME: Legacy Filing Co.",
+            "modern-and-legacy",
+        ),
+        (
+            b"COMPANY CONFORMED NAME: Current Filing Co.\nCOMPANY CONFORMED NAME: Duplicate Filing Co.",
+            "duplicate-modern",
+        ),
+        (
+            b"COMPANY CONFORMED NAME: Current Filing Co.\nCONFORMED NAME missing-colon",
+            "malformed-duplicate",
+        ),
+        (b"COMPANY CONFORMED NAME: \t", "empty-modern"),
+        (b"COMPANY CONFORMED NAME:\nCurrent Filing Co.", "cross-line-modern"),
+        (b"FORMER COMPANY CONFORMED NAME: Former Filing Co.", "former-only"),
+    ],
+)
+def test_company_conformed_name_variants_fail_closed(replacement, case):
+    raw = _raw().replace(b"CONFORMED NAME: Synthetic Filing Co.", replacement)
+
+    with pytest.raises(ValueError, match="COMPANY/CONFORMED NAME"):
+        _header(raw.decode("utf-8"), _request())
 
 
 def _observation(

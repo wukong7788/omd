@@ -41,6 +41,13 @@ header layout only; tagged SUBMISSION alternatives fail explicitly. Identity
 fields must match the requested CIK/accession/form. Never scan document bodies
 for substitute header metadata.
 
+The filer name accepts exactly one one-line company-name header: the current
+`COMPANY CONFORMED NAME` label or the legacy `CONFORMED NAME` label. Empty,
+duplicate, simultaneous current-and-legacy values, or a name value starting on
+a following line fail. Historical `FORMER COMPANY` and `FORMER CONFORMED NAME`
+entries are not substitutes for the filer name and do not alter the selected
+company name.
+
 Acceptance wall time is interpreted in America/New_York, as in the existing
 financial adapter, and converted to UTC. Reject nonexistent and ambiguous DST
 times. The N-PORT compact timestamp parser has a different UTC contract and must
@@ -58,6 +65,12 @@ from_source, filing.obj(), entity/homepage or fallback downloads. Require exactl
 one embedded EX-101.SCH, EX-101.PRE, EX-101.LAB and EX-101.INS component. Optional
 EX-101.CAL/DEF are parsed when present; duplicates fail. Inline-only, external-only
 or incomplete XBRL packages fail with explicit unsupported/missing errors.
+
+For only those known embedded EX-101 components, the extractor accepts one exact
+SGML `<XBRL>…</XBRL>` outer wrapper and passes its nonempty inner text to the
+existing XML checks and parser. Bare XML remains unchanged. Missing or repeated
+wrapper tags, or non-whitespace content outside the outer wrapper, fail; the
+retained SGML snapshot bytes are never rewritten.
 
 Validate bounded document structure and XML before passing it to the permissive
 library parser: at most 64 documents; no DOCTYPE/entity declarations, malformed

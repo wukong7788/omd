@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Accept one exact SGML `<XBRL>…</XBRL>` wrapper around retained embedded
+  traditional-XBRL component text before the existing local XML checks. Bare
+  XML and retained snapshot bytes remain unchanged; malformed wrappers fail.
+
+- Accept the current SEC text-SGML `COMPANY CONFORMED NAME` header label in the
+  offline full-SGML producer while retaining the legacy `CONFORMED NAME` label.
+  Exactly one nonempty, one-line current-or-legacy value is required; former
+  company-name history cannot satisfy the filing identity header.
+
 - Add offline replay from a separately retained, receipt-bound SEC extracted
   traditional-XBRL package for inline-only filings. Package availability remains
   caller-declared and timestamp-bound; the library neither fetches nor parses

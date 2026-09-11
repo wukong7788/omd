@@ -105,7 +105,6 @@ def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date
         "CONFORMED SUBMISSION TYPE": r"(?m)^[ \t]*CONFORMED SUBMISSION TYPE:[ \t]*(\S[^\r\n]*)$",
         "FILED AS OF DATE": r"(?m)^[ \t]*FILED AS OF DATE:[ \t]*([0-9]{8})[ \t]*$",
         "CONFORMED PERIOD OF REPORT": r"(?m)^[ \t]*CONFORMED PERIOD OF REPORT:[ \t]*([0-9]{8})[ \t]*$",
-        "CONFORMED NAME": r"(?m)^[ \t]*CONFORMED NAME:[ \t]*(\S[^\r\n]*)$",
         "CENTRAL INDEX KEY": r"(?m)^[ \t]*CENTRAL INDEX KEY:[ \t]*([0-9]{1,10})[ \t]*$",
         "ACCEPTANCE-DATETIME": r"(?m)^[ \t]*<ACCEPTANCE-DATETIME>([0-9]{14})[ \t]*$",
     }
@@ -118,6 +117,21 @@ def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date
         if len(found) != 1:
             raise ValueError(f"missing, duplicate, or malformed SEC header {name}")
         values[name] = found[0].strip()
+    company_name_labels = (
+        "COMPANY CONFORMED NAME",
+        "CONFORMED NAME",
+    )
+    label_count = sum(
+        len(re.findall(rf"(?m)^[ \t]*{re.escape(label)}", header)) for label in company_name_labels
+    )
+    company_name_matches = [
+        match
+        for label in company_name_labels
+        for match in re.findall(rf"(?m)^[ \t]*{re.escape(label)}:[ \t]*([^\r\n]*)$", header)
+    ]
+    if label_count != 1 or len(company_name_matches) != 1 or not company_name_matches[0].strip():
+        raise ValueError("missing, duplicate, or malformed SEC header COMPANY/CONFORMED NAME")
+    company_name = company_name_matches[0].strip()
     if (
         values["ACCESSION NUMBER"] != request.accession_number
         or values["CONFORMED SUBMISSION TYPE"] != request.form
@@ -141,7 +155,7 @@ def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date
         or first.astimezone(UTC).astimezone(_EASTERN).replace(tzinfo=None) != wall
     ):
         raise ValueError("ambiguous or nonexistent SEC acceptance time")
-    return first.astimezone(UTC), filed, period, values["CONFORMED NAME"]
+    return first.astimezone(UTC), filed, period, company_name
 
 
 def _documents(raw: str, *, require_traditional: bool = True) -> dict[str, str]:
@@ -168,11 +182,31 @@ def _documents(raw: str, *, require_traditional: bool = True) -> dict[str, str]:
         if name in _COMPONENTS | {"EX-101.CAL", "EX-101.DEF"}:
             if name in found:
                 raise ValueError("duplicate required XBRL component")
-            found[name] = text.strip()
+            found[name] = _component_text(text)
     missing = _COMPONENTS - set(found)
     if require_traditional and missing:
         raise ValueError("missing required traditional XBRL component")
     return found
+
+
+def _component_text(text: str) -> str:
+    """Remove one exact SGML XBRL wrapper without changing retained raw bytes."""
+    component = text.strip()
+    opening = "<XBRL>"
+    closing = "</XBRL>"
+    if not (component.startswith(opening) or component.endswith(closing)):
+        return component
+    if (
+        component.count(opening) != 1
+        or component.count(closing) != 1
+        or not component.startswith(opening)
+        or not component.endswith(closing)
+    ):
+        raise ValueError("malformed SEC XBRL wrapper")
+    unwrapped = component[len(opening) : -len(closing)].strip()
+    if not unwrapped:
+        raise ValueError("malformed SEC XBRL wrapper")
+    return unwrapped
 
 
 def _validate_xml(text: str) -> int:
