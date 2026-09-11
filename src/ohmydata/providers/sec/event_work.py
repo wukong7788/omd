@@ -83,7 +83,7 @@ class SecEventWorkLedger:
         edges: tuple[SecDependencyEdge, ...] = ()
         receipts: dict[str, SecEventWorkReceipt] = {}
         total = 0
-        for name in io.generation_names(fd):
+        for name in io.generation_names(fd, allow_execution=True):
             raw = io.read_manifest(fd, name, io.MAX_TOTAL_MANIFEST_BYTES - total)
             total += len(raw)
             stored = io.decode_manifest(raw)

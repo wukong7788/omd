@@ -131,7 +131,7 @@ def root_directory(path: Path, *, create: bool) -> Iterator[int | None]:
         os.close(fd)
 
 
-def generation_names(fd: int) -> list[str]:
+def generation_names(fd: int, *, allow_execution: bool = False) -> list[str]:
     generations: list[str] = []
     stages = 0
     with os.scandir(fd) as entries:
@@ -145,6 +145,9 @@ def generation_names(fd: int) -> list[str]:
                 info = entry.stat(follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode) or info.st_size != 0 or info.st_nlink != 1:
                     raise SnapshotIntegrityError("invalid event ledger lock")
+            elif allow_execution and name == ".execution" and entry.is_dir(follow_symlinks=False):
+                # Execution has its own bounded strict replay; discovery ledgers reject it.
+                pass
             elif re.fullmatch(re.escape(STAGE_PREFIX) + r"[0-9a-f]{32}", name):
                 stages += 1
                 if stages > 1024 or not entry.is_dir(follow_symlinks=False):

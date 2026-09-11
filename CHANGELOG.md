@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add synchronous SEC event execution with injected acquisition/validation,
+  retained operation receipts, explicit uncertain-outcome recovery, bounded retry
+  waits and crash-released locking. Warm results replay retained bytes without
+  callbacks; the executor does not grant financial PASS or publish consumer data.
+
 - Add a runnable synthetic offline research example covering four-quarter TTM,
   immutable bundle reload, market/system cutoffs and future quality isolation.
 

@@ -692,6 +692,32 @@ reconstructs every transition from retained discovery evidence. READY preserves
 the previously reported outputs and requires quality-reference IDs; the report
 does not issue quality approval or publish data.
 
+`SecEventExecutor` drives that journal synchronously with injected acquisition
+and validation callbacks. Both callbacks support explicit COMPLETE/NOT_STARTED/
+UNKNOWN recovery and return retained operation-bound receipts created through
+`retain_sec_execution_outputs` or `retain_sec_execution_validation`. Uncertain
+side effects fail without automatic retry. Declared transient acquisition failures
+wait for an explicit retry time; there is no background loop or internal sleep.
+Warm READY/QUARANTINED reuse replays output and validation bytes without invoking
+callbacks. Output `RAW_FACT` IDs bind snapshot bytes and do not certify financial
+quality. See the [execution and recovery contract](docs/plans/sec-event-execution.md)
+for callback interfaces, fixed receipts, lock scope and cooperative resource limits.
+
+```python
+from ohmydata.providers.sec import SecEventExecutor
+
+executor = SecEventExecutor(work_ledger, store=execution_snapshot_store, clock=utc_clock)
+result = executor.run(
+    discovery_batch,
+    work_spec,
+    acquisition_handler,
+    validation_handler,
+    deadline=operation_deadline,
+    max_steps=16,
+)
+print(result.status, result.state)
+```
+
 `SecDependencyIndex` holds immutable, caller-declared typed version edges.
 `plan_sec_event_invalidation(index, changed_inputs, known_at=...)` returns exact
 reachable output IDs and traversed edge IDs using only edges recorded by that
