@@ -154,11 +154,43 @@ The later [offline v2 repair](sec-legacy-unit-safety.md) applies the same unit
 correction to retained SGML and declared-availability package production. Those
 paths still lack a successful real AAPL acceptance case: its SGML has no embedded
 instance, and exact package publication evidence is absent. Their explicit v1
-paths and the live provider retain the old unit behavior. Any consumer adopting
+paths retain the old unit behavior; the [live v2 follow-up](sec-live-unit-evidence.md)
+also preserves complete raw units while keeping explicit live v1 compatible. Any consumer adopting
 v2 or relying on old unit assumptions requires an impact assessment and rerun
 before corrected downstream comparisons can be claimed.
-Accounting relationships, period bridges, visible-report comparison, publication
-evidence and the broader P1 gate remain unverified; this filing receives no PASS.
+Selected accounting relationships are corroborated below; period bridges,
+visible-report comparison, publication evidence and the broader P1 gate remain
+unverified. This filing receives no PASS.
+
+## Selected same-filing accounting equalities
+
+An independent, network-denied and snapshot-write-denied diagnostic replayed the
+retained instance, package and corrected observed-v2 output. The corrected output
+SHA-256 is `daff03204fafe331928fe30d0f5c05ebe72fc4e88063908f5aa61c70e69eef3a`;
+the raw-instance identity remains the one recorded above. All 180 corrected rows
+match raw concept/context/value/precision/period/dimension fields and complete
+simple or compound units. Equivalent duplicate facts remain referenced.
+
+Twenty explicitly selected equalities match exactly in native integer USD with
+zero tolerance: four asset/liability/equity checks at two instants, twelve
+revenue/cost/gross-profit, operating-income and pretax/tax/net-income checks over
+four disclosed periods, two reported three-activity cash-flow sums, and two
+beginning/ending cash bridges using the identical restricted-cash definition.
+Every included term retains raw-fact ordinal, context, unit, native precision,
+source observation and corrected output-row references.
+
+Two additional checks requiring a separately disclosed FX cash-flow component
+are `MISSING`, with no residual calculated. That absent component is not treated
+as zero. The matching three-activity arithmetic does not establish completeness
+of an FX-inclusive cash-flow decomposition. No check is `MISMATCH` or
+`INCOMPARABLE`; this does not validate every filing fact, note or financial claim.
+
+The ignored harness is `run_accounting_qualification.py`, SHA-256
+`67d356cff8aeafa841a342930ba854a5c8a8d2e12b22de89c28cad77367128a8`.
+Its reviewed report is retained under
+`artifacts/sec-pit-qualification-20260911/accounting-qualification/20260911T154922980153Z/report.json`.
+Independent Astra review accepted this limited evidence. No SDK quality PASS,
+consumer commit, source first-publication claim or pilot expansion follows from it.
 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns
