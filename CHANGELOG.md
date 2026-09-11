@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add immutable SEC work-report journals with explicit state transitions,
+  total-attempt retry gates, retained discovery replay and output/quality
+  references. Add immutable typed dependency indexes and auditable cutoff-aware
+  invalidation plans. These report caller activity and declared lineage; they
+  do not execute jobs, certify financial quality or publish consumer data.
+
 - Add bounded offline SEC submissions event discovery and a replay-validated,
   immutable POSIX ledger that commits events and acceptance cursors together.
   Exact retries are idempotent; missing source pages, conflicting metadata and

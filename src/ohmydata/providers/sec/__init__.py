@@ -44,6 +44,14 @@ from .edgartools_adapter import (
     validate_user_agent,
 )
 from .endpoints import SecEdgarSubmissionsRequest, SecEmptyPolicy, SecNportQuarterRequest
+from .event_dependencies import (
+    SecDataVersionId,
+    SecDataVersionKind,
+    SecDependencyEdge,
+    SecDependencyIndex,
+    SecEventInvalidationPlan,
+    plan_sec_event_invalidation,
+)
 from .event_discovery import (
     SecDiscoveryBatch,
     SecDiscoveryCursor,
@@ -58,6 +66,15 @@ from .event_ledger import (
     SecEventDiscoveryLedger,
     SecEventLedgerConflictError,
     SecEventLedgerReceipt,
+)
+from .event_work import (
+    SecEventWorkCommand,
+    SecEventWorkErrorClass,
+    SecEventWorkLedger,
+    SecEventWorkPhase,
+    SecEventWorkReceipt,
+    SecEventWorkSpec,
+    SecEventWorkState,
 )
 from .financials import (
     SecCompanyFinancialVintage,
@@ -173,6 +190,10 @@ __all__ = [
     "SecAvailabilityPolicy",
     "SecCompanyFinancialVintage",
     "SecConsumerCommit",
+    "SecDataVersionId",
+    "SecDataVersionKind",
+    "SecDependencyEdge",
+    "SecDependencyIndex",
     "SecDiscoveryBatch",
     "SecDiscoveryCursor",
     "SecDiscoveryMode",
@@ -182,8 +203,16 @@ __all__ = [
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
     "SecEventDiscoveryLedger",
+    "SecEventInvalidationPlan",
     "SecEventLedgerConflictError",
     "SecEventLedgerReceipt",
+    "SecEventWorkCommand",
+    "SecEventWorkErrorClass",
+    "SecEventWorkLedger",
+    "SecEventWorkPhase",
+    "SecEventWorkReceipt",
+    "SecEventWorkSpec",
+    "SecEventWorkState",
     "SecFilingDiscoveryEvent",
     "SecFilingEventKind",
     "SecFinancialUnitEvidence",
@@ -269,6 +298,7 @@ __all__ = [
     "parse_statement_rows",
     "parse_submissions",
     "partition_identity",
+    "plan_sec_event_invalidation",
     "produce_sec_financials_from_observed_xbrl_package",
     "produce_sec_financials_from_sgml",
     "produce_sec_financials_from_xbrl_package",

@@ -574,6 +574,39 @@ batch = discover_sec_filing_events(
 receipt = ledger.append(batch, expected_receipt_id=None if head is None else head.receipt_id)
 ```
 
+`SecEventWorkLedger` records explicit caller reports through DISCOVERED, QUEUED,
+FETCHING and VALIDATING to READY, QUARANTINED or FAILED, with bounded transient
+retry waits. It binds one immutable work specification and discovery batch to a
+separate caller-selected directory. Entering FETCHING counts a total attempt;
+the caller supplies timestamps and retry deadlines. Replaying the journal
+reconstructs every transition from retained discovery evidence. READY preserves
+the previously reported outputs and requires quality-reference IDs; the report
+does not issue quality approval or publish data.
+
+`SecDependencyIndex` holds immutable, caller-declared typed version edges.
+`plan_sec_event_invalidation(index, changed_inputs, known_at=...)` returns exact
+reachable output IDs and traversed edge IDs using only edges recorded by that
+cutoff. Recipe/configuration versions can be explicit inputs. Unknown inputs
+have no known dependent output; that result does not prove complete lineage.
+The plan identifies existing outputs for reconsideration without changing their
+historical availability. See the [work and invalidation contract](docs/plans/sec-event-work-and-invalidation.md).
+
+```python
+from ohmydata.providers.sec import SecEventWorkLedger, plan_sec_event_invalidation
+
+work = SecEventWorkLedger(work_path, store=snapshot_store)
+head, state, registered_edges = work.load()
+report_receipt = work.append(
+    batch,
+    work_spec,
+    work_command,
+    expected_receipt_id=None if head is None else head.receipt_id,
+)
+invalidation = plan_sec_event_invalidation(
+    dependency_index, changed_version_ids, known_at=knowledge_cutoff
+)
+```
+
 `write_sec_pit_bundle` can freeze a caller-selected receipt closure through
 `SnapshotStore`; `load_sec_pit_bundle` rebuilds it only from an injected
 observation-ID resolver and source store, without persisting source bytes or paths.
