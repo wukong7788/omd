@@ -1521,9 +1521,7 @@ from ohmydata.providers.sec import (
 )
 
 target_index = SecDatedInvalidationIndex(dependency_edges, declared_targets)
-reconsider = plan_sec_dated_invalidation(
-    target_index, declared_changes, known_at=processing_cutoff
-)
+reconsider = plan_sec_dated_invalidation(target_index, declared_changes, known_at=processing_cutoff)
 ```
 
 A change's half-open valuation window selects dated targets. Separately, its

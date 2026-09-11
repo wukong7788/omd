@@ -64,3 +64,9 @@ identity conflicts, mutation isolation and resource rejection. A synthetic
 with 113,311,744 bytes peak RSS. Evidence is retained locally at
 `artifacts/sec-dated-invalidation-acceptance/report.json`; this is a bounded
 rejection probe, not whole-universe recomputation acceptance.
+
+Whole-repository regression after integration: 1,780 tests passed (318 upstream
+edgartools deprecation warnings), Ruff/type checks passed, and all formatted
+files passed after correcting the README example layout. The 0.2.5 wheel and
+sdist contain byte-identical versions of the four changed implementation
+modules; local evidence is `artifacts/sec-dated-invalidation-acceptance/integration.json`.
