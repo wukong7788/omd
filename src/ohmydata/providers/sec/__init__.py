@@ -28,6 +28,11 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .document_financial_bundle import (
+    SecDocumentFinancialBundle,
+    load_sec_document_financial_bundle,
+    write_sec_document_financial_bundle,
+)
 from .document_financial_replay import (
     SecDocumentFinancialReplayResult,
     select_sec_document_financial_productions,
@@ -262,6 +267,7 @@ __all__ = [
     "SecDiscoveryMode",
     "SecDiscoveryPolicy",
     "SecDiscoverySource",
+    "SecDocumentFinancialBundle",
     "SecDocumentFinancialProduction",
     "SecDocumentFinancialReplayResult",
     "SecDocumentSource",
@@ -383,6 +389,7 @@ __all__ = [
     "historical_basenames",
     "historical_submission_url",
     "latest_completed_quarter",
+    "load_sec_document_financial_bundle",
     "load_sec_observed_financial_bundle",
     "load_sec_pit_bundle",
     "load_universe",
@@ -421,6 +428,7 @@ __all__ = [
     "validate_user_agent",
     "write_financials_partition",
     "write_partition",
+    "write_sec_document_financial_bundle",
     "write_sec_observed_financial_bundle",
     "write_sec_pit_bundle",
     "write_tables",

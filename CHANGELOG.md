@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Persist document-financial lifecycle bundles with complete source/parser
+  restoration, strict canonical identities and bounded recursive dependency
+  reads. Preserve legacy observed bundle bytes and explicit caller quality
+  and consumer-publication boundaries.
+
 - Add a bounded document-financial known-by selector using exact caller quality
   and consumer-commit records. Reuse existing temporal selection rules while
   preserving legacy production type admission and identities; no implicit PASS

@@ -1420,8 +1420,7 @@ compares exact retained output bytes and performs no writes. Output is bounded
 by 8 MiB and 10,000 rows. `known_by_at` is the package observation timestamp;
 `produced_at` equals the output observation timestamp and cannot precede the package.
 The request class is reused as a selection value; no SGML is synthesized.
-Financial-bundle integration, real filing qualification and consumer
-publication are separate gates. See the [financial production contract](docs/plans/sec-document-financial-production.md).
+Real filing qualification and consumer publication remain separate gates. See the [financial production contract](docs/plans/sec-document-financial-production.md).
 
 Document productions have a separate in-memory system selector:
 
@@ -1451,5 +1450,49 @@ A conservative 32MiB serialization budget, 500,000 nodes and depth 16 can reject
 inputs below those count caps. Text costs twelve bytes per character plus overhead;
 Decimal admission also limits its in-memory coefficient storage to 8KiB and
 adjusted exponent to ±10,000, and integers to 64 bits. Limits can be tightened,
-not expanded. Queries perform no I/O. Persistent bundles remain separate work.
+not expanded. Queries perform no I/O.
 See the [known-by replay contract](docs/plans/sec-document-financial-replay.md).
+
+Persist document productions and their caller-attested lifecycle with a distinct
+immutable bundle. The resolver must locate **every** original observation, source
+package and financial output by exact observation identity:
+
+```python
+from ohmydata.providers.sec import (
+    load_sec_document_financial_bundle,
+    write_sec_document_financial_bundle,
+)
+
+bundle_ref = write_sec_document_financial_bundle(
+    store=bundle_store,
+    batch_identity="synthetic-document-batch-v1",
+    productions=(restored_financial,),
+    quality_records=caller_quality_records,
+    consumer_commits=caller_consumer_commits,
+    captured_at=bundle_captured_at,
+    resolve_observation=resolve_observation,
+)
+loaded = load_sec_document_financial_bundle(
+    store=bundle_store,
+    bundle_ref=bundle_ref,
+    resolve_observation=resolve_observation,
+)
+```
+
+Write validates the full source/parser closure before its single FROZEN snapshot.
+Load repeats that reconstruction, checks canonical bytes and all quality/commit
+causality, and performs no writes. The bundle is a manifest over retained
+dependencies; callers must preserve those snapshots for restart. It does not
+copy them into the bundle or grant financial quality approval. Capture cannot
+precede any included production, quality record or consumer commit.
+
+Each operation admits at most 10 productions, 100,000 rows, 10,000 quality records,
+10,000 commits and 120 distinct dependencies. The envelope limit is 8MiB; the
+32MiB unique dependency budget includes outputs, source packages and all raw
+sources. Repeated dependencies are counted once but remain subject to each
+role's integrity checks; payloads are not cached. Writer input admission also
+uses the conservative document-selector budget. `max_bundle_bytes` and
+`max_dependency_bytes` can tighten these caps. Identical writes are idempotent;
+conflicting content under the same frozen batch identity fails explicitly.
+Old observed bundles keep their own schema and reject document productions.
+See the [document bundle contract](docs/plans/sec-document-financial-bundle.md).

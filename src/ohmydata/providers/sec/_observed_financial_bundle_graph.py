@@ -7,13 +7,13 @@ from datetime import datetime
 from .observed_financial_replay import (
     SecObservedFinancialConsumerCommit,
     SecObservedFinancialQualityRecord,
+    _ReplayProduction,
 )
-from .observed_xbrl_financials import SecObservedFinancialProduction
 from .pit import SecQualityStatus
 
 
 def validate_lifecycle(
-    productions: tuple[SecObservedFinancialProduction, ...],
+    productions: tuple[_ReplayProduction, ...],
     qualities: tuple[SecObservedFinancialQualityRecord, ...],
     commits: tuple[SecObservedFinancialConsumerCommit, ...],
 ) -> None:
