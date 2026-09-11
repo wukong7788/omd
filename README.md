@@ -1506,3 +1506,31 @@ configuration identities. This reuse does not turn it into an old SGML product.
 A MATCH is an arithmetic diagnostic, never financial quality PASS. Missing rows
 remain MISSING, incompatible contexts/units/precision remain INCOMPARABLE, and
 detection cannot precede production. See the [document accounting contract](docs/plans/sec-document-accounting.md).
+
+Dated invalidation uses explicit target declarations instead of inferring
+securities from an issuer. `SecDatedInvalidationIndex` accepts existing
+`SecDependencyEdge` values and `SecDatedInvalidationTarget` declarations binding
+a derived output, issuer, instrument/binding, recipe, valuation time, knowledge
+cutoff and PIT mode. A `SecDatedInputChange` names the **old** version being
+superseded; its optional new version is context, not the dependency search seed.
+
+```python
+from ohmydata.providers.sec import (
+    SecDatedInvalidationIndex,
+    plan_sec_dated_invalidation,
+)
+
+target_index = SecDatedInvalidationIndex(dependency_edges, declared_targets)
+reconsider = plan_sec_dated_invalidation(
+    target_index, declared_changes, known_at=processing_cutoff
+)
+```
+
+A change's half-open valuation window selects dated targets. Separately, its
+mode-specific declared availability must be no later than each target's
+knowledge cutoff. Changes, edges and targets must have been recorded by
+`known_at`. Related targets lacking their required availability declaration
+fail explicitly. Missing market availability does not prevent a system-only
+plan. The result retains exact targets and a bounded deterministic proof path;
+it does not prove source timing, coverage of intervening dates, or execute
+metric recalculation. See the [dated invalidation contract](docs/plans/sec-dated-invalidation.md).

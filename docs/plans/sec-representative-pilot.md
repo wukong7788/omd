@@ -96,3 +96,22 @@ Local evidence: `artifacts/sec-document-live-pilot/20260911T182852043611Z/report
 SHA-256 `490eb3fe92cc0c36e756bcdef63276ae49c0a40059d45dd2e56117446487b5a6`.
 Independent review confirmed the bounded failure and supported continuing the
 offline document lifecycle work without relaxing the acquisition budget.
+
+### Directory-declared sizes and deferred primary-only expansion
+
+Offline inspection of that retained directory declares 7,731,948 bytes for
+`msft-20260331.htm`, 1,508,093 for its schema and 9,675,172 for its extracted
+instance. These are index declarations, not complete body measurements. The
+three declared sizes already exceed the 16MiB source budget, and the instance
+exceeds the 2MiB XML admission limit. Raising primary alone cannot complete
+this filing's current source path.
+
+Two ignored experiments temporarily patched only the primary cap to 8MiB
+inside their own processes. Near-32MiB, two-source actual parser/bundle probes
+used ASCII and astral-containing primary text; RSS was respectively 326,074,368
+and 371,671,040 bytes, with 2.637 and 2.719 seconds elapsed. Reports remain under
+`artifacts/sec-primary-admission-acceptance/{ascii,astral}/report.json`. These
+partial experiments did not cover larger instances or all structural shapes.
+No SDK cap changed, no extra network request followed, and no expanded-source
+acceptance is claimed. Independent review deferred isolated cap expansion in
+favor of a complete-source design; other offline plan work can proceed.

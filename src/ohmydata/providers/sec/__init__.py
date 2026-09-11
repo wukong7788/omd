@@ -28,6 +28,14 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .dated_invalidation import (
+    SecDatedInputChange,
+    SecDatedInvalidationIndex,
+    SecDatedInvalidationPlan,
+    SecDatedInvalidationProof,
+    SecDatedInvalidationTarget,
+    plan_sec_dated_invalidation,
+)
 from .document_accounting import evaluate_sec_document_accounting
 from .document_financial_bundle import (
     SecDocumentFinancialBundle,
@@ -261,6 +269,11 @@ __all__ = [
     "SecConsumerCommit",
     "SecDataVersionId",
     "SecDataVersionKind",
+    "SecDatedInputChange",
+    "SecDatedInvalidationIndex",
+    "SecDatedInvalidationPlan",
+    "SecDatedInvalidationProof",
+    "SecDatedInvalidationTarget",
     "SecDependencyEdge",
     "SecDependencyIndex",
     "SecDiscoveryBatch",
@@ -400,6 +413,7 @@ __all__ = [
     "parse_statement_rows",
     "parse_submissions",
     "partition_identity",
+    "plan_sec_dated_invalidation",
     "plan_sec_event_invalidation",
     "produce_sec_document_source_package",
     "produce_sec_financials_from_document_source",

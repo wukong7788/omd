@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Plan exact dated metric invalidations from caller-declared issuer, security,
+  recipe and availability scopes, with indexed target lookup, deterministic
+  proof paths, defensive copies and bounded traversal/serialization.
+
 - Apply existing explicit accounting diagnostics to sealed document-financial
   productions through a separate bounded entry, preserving old report identities
   and avoiding automatic financial quality approval.
