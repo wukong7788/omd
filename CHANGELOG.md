@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reduce SGML validation memory by scanning document spans and validating unused
+  XBRL wrappers without copying their payloads. Existing source and dependency
+  limits, parser identities, and financial output semantics remain unchanged.
+
 - Add synchronous SEC event execution with injected acquisition/validation,
   retained operation receipts, explicit uncertain-outcome recovery, bounded retry
   waits and crash-released locking. Warm results replay retained bytes without

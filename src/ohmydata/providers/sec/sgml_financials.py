@@ -165,35 +165,79 @@ def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date
     return first.astimezone(UTC), filed, period, company_name
 
 
-def _documents(raw: str, *, require_traditional: bool = True) -> dict[str, str]:
+def _documents(
+    raw: str, *, require_traditional: bool = True, validate_only: bool = False
+) -> dict[str, str]:
     if raw.count("<DOCUMENT>") != raw.count("</DOCUMENT>"):
         raise ValueError("unbalanced SEC document blocks")
-    blocks = re.findall(r"<DOCUMENT>\s*(.*?)</DOCUMENT>", raw, flags=re.DOTALL)
-    if not blocks or len(blocks) > 64 or len(blocks) != raw.count("<DOCUMENT>"):
+    blocks = re.finditer(r"<DOCUMENT>\s*(.*?)</DOCUMENT>", raw, flags=re.DOTALL)
+    count = raw.count("<DOCUMENT>")
+    if not 1 <= count <= 64:
         raise ValueError("invalid SEC document count")
     found: dict[str, str] = {}
-    for block in blocks:
-        if "<DOCUMENT>" in block or "</DOCUMENT>" in block:
+    seen = 0
+    kind_pattern = re.compile(r"(?m)^\s*<TYPE>\s*([^\n\r<]+)\s*$")
+    initial_kind_pattern = re.compile(r"(?m)\s*<TYPE>\s*([^\n\r<]+)\s*$")
+    text_pattern = re.compile(r"<TEXT>(.*?)</TEXT>", re.DOTALL)
+    for match in blocks:
+        seen += 1
+        start, end = match.span(1)
+        if raw.find("<DOCUMENT>", start, end) >= 0 or raw.find("</DOCUMENT>", start, end) >= 0:
             raise ValueError("nested SEC document block")
-        kinds = re.findall(r"(?m)^\s*<TYPE>\s*([^\n\r<]+)\s*$", block)
-        texts = re.findall(r"<TEXT>(.*?)</TEXT>", block, flags=re.DOTALL)
+        kinds = list(kind_pattern.finditer(raw, start, end))
+        # The old extracted block has its own start-of-string anchor, even
+        # when its first character is not at a line boundary in the source.
+        if start and raw[start - 1] != "\n":
+            initial = initial_kind_pattern.match(raw, start, end)
+            if initial is not None:
+                kinds.insert(0, initial)
+        text_match = text_pattern.search(raw, start, end)
         if (
             len(kinds) != 1
-            or len(texts) != 1
-            or block.count("<TEXT>") != 1
-            or block.count("</TEXT>") != 1
+            or text_match is None
+            or raw.count("<TEXT>", start, end) != 1
+            or raw.count("</TEXT>", start, end) != 1
         ):
             raise ValueError("malformed SEC document block")
-        kind, text = kinds[0], texts[0]
-        name = kind.strip().upper()
+        name = kinds[0].group(1).strip().upper()
         if name in _COMPONENTS | {"EX-101.CAL", "EX-101.DEF"}:
             if name in found:
                 raise ValueError("duplicate required XBRL component")
-            found[name] = _component_text(text)
+            if validate_only:
+                _validate_component_span(raw, *text_match.span(1))
+                found[name] = ""
+            else:
+                found[name] = _component_text(text_match.group(1))
+    if seen != count:
+        raise ValueError("invalid SEC document count")
     missing = _COMPONENTS - set(found)
     if require_traditional and missing:
         raise ValueError("missing required traditional XBRL component")
     return found
+
+
+def _validate_component_span(raw: str, start: int, end: int) -> None:
+    """Apply the component wrapper contract without materializing unused text."""
+    while start < end and raw[start].isspace():
+        start += 1
+    while end > start and raw[end - 1].isspace():
+        end -= 1
+    opening, closing = "<XBRL>", "</XBRL>"
+    if not (raw.startswith(opening, start, end) or raw.endswith(closing, start, end)):
+        return
+    if (
+        raw.count(opening, start, end) != 1
+        or raw.count(closing, start, end) != 1
+        or not raw.startswith(opening, start, end)
+        or not raw.endswith(closing, start, end)
+    ):
+        raise ValueError("malformed SEC XBRL wrapper")
+    start += len(opening)
+    end -= len(closing)
+    while start < end and raw[start].isspace():
+        start += 1
+    if start >= end:
+        raise ValueError("malformed SEC XBRL wrapper")
 
 
 def _component_text(text: str) -> str:

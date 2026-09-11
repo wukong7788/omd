@@ -300,7 +300,7 @@ def _build_sec_financials_from_observed_xbrl_package(
         documents["EX-101.CAL"] = package.components.calculation.decode("utf-8")
     if package.components.definition is not None:
         documents["EX-101.DEF"] = package.components.definition.decode("utf-8")
-    _documents(raw, require_traditional=False)
+    _documents(raw, require_traditional=False, validate_only=True)
     units = None
     if parser_version == _PARSER_VERSION_V2:
         units = decode_raw_units(

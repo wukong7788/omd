@@ -506,3 +506,14 @@ P4已补充可直接运行的[合成离线研究样例](../../examples/sec_offli
 语法和0.2.5构建源码一致性通过。合成申报经实际解析器和producer到达READY，暖启动禁止全部回调后
 仍重放相同状态与身份；证据位于`artifacts/sec-event-execution-acceptance/20260911T172426679287Z/report.json`。
 这不替代真实代表样本、生产规模性能、定时调度或消费者shadow门禁。
+
+
+### SGML扫描资源修复与未通过的上限扩展
+
+[资源实验](sec-observed-source-admission.md)确认32MiB源上限及随后16MiB多源恢复
+均未满足512MiB内存预算，因此撤回全部上限扩展，保留原8MiB源/32MiB依赖限制。
+只保留按源位置校验SGML文档及未使用XBRL包装的内存优化，完整UTF-8/FilingSGML校验不变。
+129项受影响回归通过，旧v1/v2输出、fact、production及混合bundle身份黄金值无漂移。
+原8MiB多文档UTF-8样本完整制作/写入/恢复峰值310,067,200字节、耗时0.377秒。
+这是现有切片的资源修复，不新增已完成切片，不解除真实pilot失败状态或授权扩抓。
+下一步单独冻结较小来源获取契约，保留来源完整性与known-by时间证据，不截断冒充完整SGML。

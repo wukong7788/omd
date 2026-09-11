@@ -1142,6 +1142,8 @@ Keep every referenced source/package/output observation and the pinned parser
 available for restoration. Defaults allow 10 productions, 10,000 quality records,
 10,000 commits, 100,000 rows, an 8 MiB bundle and 32 MiB of unique dependency
 payloads, with 8 MiB per dependency. Caller limits may only be stricter.
+Larger source admission remains deferred after [resource experiments](docs/plans/sec-observed-source-admission.md);
+SGML validation scans source spans to avoid copying unused document bodies.
 See the [observed bundle contract](docs/plans/sec-observed-lifecycle-bundle.md).
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
