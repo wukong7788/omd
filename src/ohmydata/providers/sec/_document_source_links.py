@@ -60,6 +60,8 @@ class _PrimaryReferences(HTMLParser):
         self.elements = 0
 
     def _start(self, tag: str, attrs: list[tuple[str, str | None]], closed: bool) -> None:
+        if len(attrs) > 256:
+            raise ValueError("SEC primary HTML attribute limit exceeded")
         self.elements += 1
         if self.elements > 200_000 or len(self.stack) >= 128:
             raise ValueError("SEC primary HTML structure limit exceeded")

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add distinct document-source financial production and full read-only
+  source/parser restoration, preserving raw units and native row semantics.
+  Seal checks reject nested identity mutation without modifying caller objects.
+- Restrict document-source primary HTML to 256 attributes per element. This
+  explicitly narrows the initial source-v1 admission range to bound resource
+  use; identities for still-admitted inputs remain unchanged.
+
 - Add SEC document-source closure production and strict read-only restoration:
   bind retained submissions, directory, primary and XBRL components by exact
   filing-local references and observation times, without requiring full SGML

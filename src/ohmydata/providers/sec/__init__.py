@@ -28,6 +28,11 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .document_financials import (
+    SecDocumentFinancialProduction,
+    produce_sec_financials_from_document_source,
+    restore_sec_document_financial_production,
+)
 from .document_source import (
     SecDocumentSource,
     SecDocumentSourcePackage,
@@ -253,6 +258,7 @@ __all__ = [
     "SecDiscoveryMode",
     "SecDiscoveryPolicy",
     "SecDiscoverySource",
+    "SecDocumentFinancialProduction",
     "SecDocumentSource",
     "SecDocumentSourcePackage",
     "SecEdgarSubmissionsRequest",
@@ -382,6 +388,7 @@ __all__ = [
     "partition_identity",
     "plan_sec_event_invalidation",
     "produce_sec_document_source_package",
+    "produce_sec_financials_from_document_source",
     "produce_sec_financials_from_observed_xbrl_package",
     "produce_sec_financials_from_sgml",
     "produce_sec_financials_from_xbrl_package",
@@ -390,6 +397,7 @@ __all__ = [
     "quarter_range",
     "read_member",
     "resolve_submissions",
+    "restore_sec_document_financial_production",
     "restore_sec_document_source_package",
     "retain_sec_execution_outputs",
     "retain_sec_execution_validation",

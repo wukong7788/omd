@@ -277,9 +277,9 @@ def test_base_uri_overrides_rejected(tmp_path, role, before, after):
         produce(tmp_path, inputs(tmp_path, change=change))
 
 
-def test_wide_namespace_root_does_not_expand_each_scope():
+def test_supported_namespace_root_does_not_expand_each_scope():
     parser = _PrimaryReferences()
-    attributes = " ".join(f'xmlns:unused{i}="urn:ignored:{i}"' for i in range(10_000))
+    attributes = " ".join(f'xmlns:unused{i}="urn:ignored:{i}"' for i in range(254))
     parser.feed(f'<html {attributes} xmlns:link="{LINK}" xmlns:xlink="{XLINK}">' + "<div>" * 120)
     assert len(parser.stack) == 121
     assert all(len(scope) == 2 for _, scope in parser.stack)
@@ -375,3 +375,45 @@ def test_metadata_and_retained_manifest_claims_fail_closed(tmp_path, kind):
             observation=obs,
             resolve_observation=lambda _: pytest.fail("invalid envelope reached resolver"),
         )
+
+
+@pytest.mark.parametrize("count,closed", [(256, False), (257, False), (256, True), (257, True)])
+def test_per_element_attribute_boundary(count, closed):
+    parser = _PrimaryReferences()
+    attributes = " ".join(f'a{i}="x"' for i in range(count))
+    raw = f"<div {attributes}" + ("/>" if closed else "></div>")
+    if count == 256:
+        parser.feed(raw)
+        parser.close()
+    else:
+        with pytest.raises(ValueError, match="attribute limit"):
+            parser.feed(raw)
+
+
+def test_excessive_attributes_fail_before_package_retention(tmp_path):
+    def change(payloads):
+        attrs = " ".join(f'xmlns:unused{i}="urn:x"' for i in range(10_000)).encode()
+        payloads["primary"] = payloads["primary"].replace(b"<html ", b"<html " + attrs + b" ")
+
+    with pytest.raises(ValueError, match="attribute limit"):
+        produce(tmp_path, inputs(tmp_path, change=change))
+    assert not list((tmp_path / "package").rglob("response.bin"))
+
+
+@pytest.mark.parametrize("divs", [126, 127])
+def test_primary_depth_includes_self_closed_reference(divs):
+    parser = _PrimaryReferences()
+    raw = (
+        f'<html xmlns:link="{LINK}" xmlns:xlink="{XLINK}">'
+        + "<div>" * divs
+        + '<link:schemaRef xlink:href="fake.xsd"/>'
+        + "</div>" * divs
+        + "</html>"
+    )
+    if divs == 126:
+        parser.feed(raw)
+        parser.close()
+        assert parser.references == ["fake.xsd"]
+    else:
+        with pytest.raises(ValueError, match="structure limit"):
+            parser.feed(raw)

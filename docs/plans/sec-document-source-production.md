@@ -168,3 +168,11 @@ with 100,000 irrelevant namespace declarations and 120 nested elements used
 476,037,120 bytes in 1.230 seconds. Reports are under ignored
 `artifacts/sec-document-source-acceptance/`. These probes validate source closure
 only, not financial parsing, complete financial replay, live data or quality PASS.
+
+
+Financial-path resource hardening (2026-09-12): primary HTML elements now admit
+at most 256 attributes, including namespace declarations, for ordinary and
+self-closing tags. This narrows the earlier source-v1 admission range; previously
+accepted wider elements now fail explicitly. Identities of still-admitted inputs
+remain unchanged. The count check precedes dict/scope construction, but HTMLParser
+has already tokenized the attributes; failure-path RSS must also be measured.

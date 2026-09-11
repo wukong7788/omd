@@ -312,7 +312,7 @@ def _validate_instance_identity(text: str, cik: str) -> None:
 
 
 def _rows_from_documents(
-    raw: str, documents: dict[str, str], request: SecSgmlFinancialsRequest, max_rows: int
+    raw: str | None, documents: dict[str, str], request: SecSgmlFinancialsRequest, max_rows: int
 ) -> tuple[SecStatementRow, ...]:
     ensure_edgar_available()
     try:
@@ -328,7 +328,8 @@ def _rows_from_documents(
     if sum(_validate_xml(text) for text in documents.values()) > 200_000:
         raise ValueError("embedded XBRL XML aggregate element limit exceeded")
     _validate_instance_identity(documents["EX-101.INS"], request.cik)
-    FilingSGML.from_text(raw)
+    if raw is not None:
+        FilingSGML.from_text(raw)
     xbrl = XBRL()
     xbrl.parser.parse_schema_content(documents["EX-101.SCH"])
     xbrl.parser.parse_labels_content(documents["EX-101.LAB"])

@@ -1367,8 +1367,58 @@ required sources. It does not establish first market publication or financial
 quality. This API closes and restores provenance only: financial production,
 financial-bundle replay and consumer quality integration are separate work.
 Fixed source limits are 2 MiB each for metadata/XML, 4 MiB for primary HTML,
-16 MiB in aggregate and 256 KiB for the manifest. Invalid source contracts raise
+16 MiB in aggregate and 256 KiB for the manifest. Primary HTML is limited to
+256 attributes per element, 200,000 elements and depth 128. Inputs with more
+attributes that the initial source-v1 implementation accepted now fail explicitly.
+Invalid source contracts raise
 `ValueError`/`SchemaMismatchError`; snapshot corruption or request mismatch raises
 `SnapshotIntegrityError`. No network calls or credential lookup occur here.
 See the [exact source contract](docs/plans/sec-document-source-production.md)
 for request endpoints, serialization identifiers, reference grammar and limits.
+
+
+`produce_sec_financials_from_document_source` builds native financial rows from
+that source package using pinned edgartools 5.56.0 and mandatory raw unit evidence.
+It returns a distinct `SecDocumentFinancialProduction`; old SGML productions and
+identities retain their behavior. The selected request CIK/accession/form must
+match the package; symbol remains a caller label. Missing requested statements,
+empty rows or unresolved raw units fail before output retention.
+
+```python
+from ohmydata.providers.sec import (
+    SecSgmlFinancialsRequest,
+    produce_sec_financials_from_document_source,
+    restore_sec_document_financial_production,
+)
+
+financial = produce_sec_financials_from_document_source(
+    package_store=package_store,
+    package_observation=source_package.observation,
+    resolve_observation=resolve_observation,
+    output_store=financial_store,
+    request=SecSgmlFinancialsRequest(
+        "FAKE",
+        "0000000001",
+        "0000000001-24-000001",
+        "10-Q",
+        ("income_statement",),
+        False,
+    ),
+    produced_at=produced_at,
+)
+restored_financial = restore_sec_document_financial_production(
+    output_store=financial_store,
+    output_observation=financial.output_observation,
+    resolve_observation=resolve_observation,
+)
+assert restored_financial.production_identity == financial.production_identity
+```
+
+The resolver must locate both the source-package observation and every original
+source observation. Restoration reruns source closure and financial parsing,
+compares exact retained output bytes and performs no writes. Output is bounded
+by 8 MiB and 10,000 rows. `known_by_at` is the package observation timestamp;
+`produced_at` equals the output observation timestamp and cannot precede the package.
+The request class is reused as a selection value; no SGML is synthesized.
+Financial-bundle/lifecycle integration, real filing qualification and consumer
+publication are separate gates. See the [financial production contract](docs/plans/sec-document-financial-production.md).
