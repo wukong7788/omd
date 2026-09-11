@@ -1,5 +1,7 @@
 """Bounded, offline accounting diagnostics for one observed SEC production."""
 
+from __future__ import annotations
+
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -9,6 +11,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...core.errors import ResourceLimitError
 from ._accounting_models import (
@@ -28,6 +31,9 @@ from ._observed_financial_bundle_codec import validate_existing_production
 from ._structural_admission import _check_row
 from .observed_xbrl_financials import SecObservedFinancialProduction
 from .quarter_ttm import _decimal_sum
+
+if TYPE_CHECKING:
+    from .document_financials import SecDocumentFinancialProduction
 
 __all__ = [
     "SecAccountingApplicability",
@@ -130,25 +136,14 @@ def _period_valid(row) -> bool:
     )
 
 
-def evaluate_sec_observed_accounting(
-    production: SecObservedFinancialProduction,
+def _evaluate_validated_accounting(
+    production: SecObservedFinancialProduction | SecDocumentFinancialProduction,
     rules: Iterable[SecAccountingRule],
     *,
-    detected_at: datetime,
-    recorded_at: datetime,
-    max_rules: int = 64,
-    max_rows: int = 10000,
+    detected: datetime,
+    recorded: datetime,
+    max_rules: int,
 ) -> SecObservedAccountingReport:
-    """Report selected equalities; a MATCH never grants financial quality PASS."""
-    for limit, maximum in ((max_rules, 64), (max_rows, 10000)):
-        if type(limit) is not int or not 1 <= limit <= maximum:
-            raise ValueError("invalid accounting resource cap")
-    detected, recorded = _utc(detected_at, "detected_at"), _utc(recorded_at, "recorded_at")
-    if recorded < detected:
-        raise ValueError("accounting recording precedes detection")
-    _bounded_production(production, max_rows)
-    if detected < max(production.produced_at, production.output_observation.snapshot_fetched_at):
-        raise ValueError("accounting detection precedes production")
     admitted = {}
     for count, rule in enumerate(rules, 1):
         if count > max_rules:
@@ -277,3 +272,27 @@ def evaluate_sec_observed_accounting(
     if len(encoded(report)) > 8 * 1024**2:
         raise ResourceLimitError("accounting report encoding budget exceeded")
     return report
+
+
+def evaluate_sec_observed_accounting(
+    production: SecObservedFinancialProduction,
+    rules: Iterable[SecAccountingRule],
+    *,
+    detected_at: datetime,
+    recorded_at: datetime,
+    max_rules: int = 64,
+    max_rows: int = 10000,
+) -> SecObservedAccountingReport:
+    """Report selected equalities; a MATCH never grants financial quality PASS."""
+    for limit, maximum in ((max_rules, 64), (max_rows, 10000)):
+        if type(limit) is not int or not 1 <= limit <= maximum:
+            raise ValueError("invalid accounting resource cap")
+    detected, recorded = _utc(detected_at, "detected_at"), _utc(recorded_at, "recorded_at")
+    if recorded < detected:
+        raise ValueError("accounting recording precedes detection")
+    _bounded_production(production, max_rows)
+    if detected < max(production.produced_at, production.output_observation.snapshot_fetched_at):
+        raise ValueError("accounting detection precedes production")
+    return _evaluate_validated_accounting(
+        production, rules, detected=detected, recorded=recorded, max_rules=max_rules
+    )

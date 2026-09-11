@@ -28,6 +28,7 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .document_accounting import evaluate_sec_document_accounting
 from .document_financial_bundle import (
     SecDocumentFinancialBundle,
     load_sec_document_financial_bundle,
@@ -383,6 +384,7 @@ __all__ = [
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
+    "evaluate_sec_document_accounting",
     "evaluate_sec_observed_accounting",
     "evaluate_sec_structural_quality",
     "extract_from_artifact",

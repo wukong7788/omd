@@ -1496,3 +1496,13 @@ uses the conservative document-selector budget. `max_bundle_bytes` and
 conflicting content under the same frozen batch identity fails explicitly.
 Old observed bundles keep their own schema and reject document productions.
 See the [document bundle contract](docs/plans/sec-document-financial-bundle.md).
+
+`evaluate_sec_document_accounting` applies the same explicit
+`SecAccountingRule` definitions and tolerance policies to one sealed document
+financial production. Its arguments match `evaluate_sec_observed_accounting`;
+it has a separate exact-type entry and performs no I/O. The returned
+`SecObservedAccountingReport` binds the document production/output/parser and
+configuration identities. This reuse does not turn it into an old SGML product.
+A MATCH is an arithmetic diagnostic, never financial quality PASS. Missing rows
+remain MISSING, incompatible contexts/units/precision remain INCOMPARABLE, and
+detection cannot precede production. See the [document accounting contract](docs/plans/sec-document-accounting.md).

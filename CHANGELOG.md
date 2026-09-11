@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Apply existing explicit accounting diagnostics to sealed document-financial
+  productions through a separate bounded entry, preserving old report identities
+  and avoiding automatic financial quality approval.
+
 - Persist document-financial lifecycle bundles with complete source/parser
   restoration, strict canonical identities and bounded recursive dependency
   reads. Preserve legacy observed bundle bytes and explicit caller quality
