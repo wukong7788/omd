@@ -115,3 +115,28 @@ partial experiments did not cover larger instances or all structural shapes.
 No SDK cap changed, no extra network request followed, and no expanded-source
 acceptance is claimed. Independent review deferred isolated cap expansion in
 favor of a complete-source design; other offline plan work can proceed.
+
+### Separate embedded-schema diagnostic
+
+A separately frozen one-request diagnostic retained the complete MSFT schema:
+1,508,093 bytes, 6,569 XML elements, HTTP 200, 2.118 seconds and 54,722,560 bytes
+peak RSS. It found one embedded label link, 85 presentation links, 22 calculation
+links and 40 definition links, with zero `linkbaseRef` elements. Thus this filing
+uses schema-embedded linkbases; the current separate-linkbase source contract
+cannot represent it merely by raising byte limits. No referenced resource was
+fetched and no financial output, source package or PASS was produced.
+
+Protocol SHA-256: `0045b4021f97244c42d0200ab4c234ae1208d15b61c009fc21d12754d98fea7b`.
+Local report: `artifacts/sec-schema-diagnostic/live/20260911T191719908529Z/report.json`,
+SHA-256 `6ba891523e21f83e27944c34bca1fe4d1bf3937365281e8c9d71b93ae9d337fd`.
+The diagnostic was independently reviewed after adding HTTP Content-Length
+equality validation; four offline transport cases passed before the one live run.
+The previous complete-filing pilot remains failed.
+
+A subsequent network-denied schema-only probe passed the intact retained schema
+to pinned edgartools 5.56.0. It populated 85 presentation trees, 22 calculation
+roles, 40 definition roles and 610 labeled elements in 0.740 seconds, with
+193,413,120 bytes peak RSS. The schema has one appinfo/linkbase container.
+Evidence: `artifacts/sec-schema-diagnostic/parser-probe.json`. This establishes
+only schema parsing compatibility; large-instance production and complete bundle
+restoration still need their own resource and correctness acceptance.
