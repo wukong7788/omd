@@ -49,8 +49,9 @@ be supplied), including repeated input records, before materializing a collectio
 This query is a quality-history lookup, not a new market-known/system-replay
 mode or a claim about source availability. It does not turn a finding into PASS
 or automatically quarantine all financial fields. Integrating findings with
-quality-policy evaluation and persistent bundle evidence is a later slice;
-the existing bundle format remains compatible and unchanged here.
+quality-policy evaluation is later work. Persistence integration is specified
+separately by the [bundle v2 extension](sec-pit-bundle-findings-v2.md); the
+standalone finding API and its identities remain unchanged there.
 
 ## Acceptance
 

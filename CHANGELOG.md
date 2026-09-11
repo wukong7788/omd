@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Add immutable, caller-authored SEC quality findings with bounded as-of
-  adjudication-history lookup. Evidence is identity-only; this does not add
-  automatic checks, bundle persistence, or financial corrections.
+  adjudication-history lookup and v2 immutable PIT bundle persistence. Finding
+  evidence is replay-verified by identity, including cross-provider snapshots;
+  this does not add automatic checks or financial corrections.
 - Add an offline-only SEC typed-row projection and explicit PIT selector.
   Market-known reconstruction requires caller-attested precise source evidence;
   system replay additionally requires replay-verified observation, production,

@@ -500,10 +500,14 @@ integer limits. See the [bundle replay contract](docs/plans/sec-pit-bundle-repla
 `SecQualityFinding` and `select_sec_quality_findings` additionally provide a
 separate, bounded history of caller-authored normalized-row quality assertions.
 Their evidence references are only caller-supplied observation/fact identities:
-they do not prove source correctness. Automatic accounting checks, persistent
-bundle integration, and financial-value corrections are intentionally not
-implemented by this API. The [quality-finding contract](docs/plans/sec-quality-findings-slice.md)
-defines classifications, time ordering and revision-chain requirements.
+they do not prove source correctness. Passing a non-empty `quality_findings`
+to `write_sec_pit_bundle` writes a v2 bundle and requires the same injected
+source store and observation resolver used at replay; every referenced
+observation is replay-verified without persisting payload bytes or paths.
+Automatic accounting checks and financial-value corrections are intentionally
+not implemented by this API. The [quality-finding contract](docs/plans/sec-quality-findings-slice.md)
+and [v2 bundle contract](docs/plans/sec-pit-bundle-findings-v2.md) define the
+history, evidence, and closure requirements.
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves

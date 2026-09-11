@@ -5,6 +5,11 @@ normalized PIT versions and their quality/consumer-commit evidence. It does not
 fetch SEC data, create a raw-data store, select a latest version, merge
 accessions, calculate metrics, or run an event loop.
 
+This document owns the v1 contract. The
+[v2 finding/evidence extension](sec-pit-bundle-findings-v2.md) retains v1 reads
+and exact v1 writes when no findings are supplied; it uses a separate explicit
+schema for non-empty finding histories.
+
 ## Stored object and write contract
 
 `SecPitBundle` contains an explicit `batch_identity`, normalized-version

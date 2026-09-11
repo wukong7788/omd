@@ -11,9 +11,9 @@ from typing import Any
 
 from ...core import SnapshotMode, SnapshotObservationRef, SnapshotRef, SnapshotStore
 from ...core.specs import RequestSpec
-from ._pit_projection import _decode_projection, _projection_datetime
+from . import _pit_bundle_findings as _findings
+from ._pit_projection import _projection_datetime
 from .pit import (
-    _SERIALIZATION,
     SecConsumerCommit,
     SecNormalizedFinancialFactVersion,
     SecQualityRecord,
@@ -21,10 +21,14 @@ from .pit import (
     _utc,
     _version_from_replayed_projection,
 )
+from .quality_findings import SecQualityFinding
 
 _SCHEMA = "sec-pit-bundle-v1"
 _SERIALIZATION_BUNDLE = "sec-pit-bundle-v1"
+_SCHEMA_V2 = "sec-pit-bundle-v2"
+_SERIALIZATION_BUNDLE_V2 = "sec-pit-bundle-v2"
 _TOP = frozenset({"schema", "batch_identity", "versions", "quality_records", "consumer_commits"})
+_TOP_V2 = _TOP | {"quality_findings"}
 _VERSION_FIELDS = frozenset(
     {
         "observation_id",
@@ -60,7 +64,7 @@ def _bounded(values: Iterable[Any], maximum: int) -> tuple[Any, ...]:
     return items
 
 
-def _decode_json(payload: bytes) -> dict[str, Any]:
+def _decode_json(payload: bytes, *, schema: str) -> dict[str, Any]:
     def reject_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         output: dict[str, Any] = {}
         for key, value in items:
@@ -77,7 +81,12 @@ def _decode_json(payload: bytes) -> dict[str, Any]:
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("invalid SEC PIT bundle JSON") from exc
-    if not isinstance(value, dict) or frozenset(value) != _TOP or value["schema"] != _SCHEMA:
+    expected_fields = _TOP if schema == _SCHEMA else _TOP_V2
+    if (
+        not isinstance(value, dict)
+        or frozenset(value) != expected_fields
+        or value["schema"] != schema
+    ):
         raise ValueError("invalid SEC PIT bundle schema")
     if not isinstance(value["batch_identity"], str) or not value["batch_identity"]:
         raise ValueError("invalid SEC PIT bundle batch identity")
@@ -86,6 +95,8 @@ def _decode_json(payload: bytes) -> dict[str, Any]:
         for key in ("versions", "quality_records", "consumer_commits")
     ):
         raise ValueError("invalid SEC PIT bundle receipts")
+    if schema == _SCHEMA_V2 and not isinstance(value["quality_findings"], list):
+        raise ValueError("invalid SEC PIT bundle findings")
     return value
 
 
@@ -141,6 +152,7 @@ def _canonical_bundle(
     versions: Iterable[SecNormalizedFinancialFactVersion],
     qualities: Iterable[SecQualityRecord],
     commits: Iterable[SecConsumerCommit],
+    findings: Iterable[Any] = (),
     *,
     max_bytes: int | None = None,
 ) -> bytes:
@@ -151,13 +163,22 @@ def _canonical_bundle(
         {_quality(value)["quality_record_id"]: _quality(value) for value in qualities}.values()
     )
     c_entries = list({_commit(value)["commit_id"]: _commit(value) for value in commits}.values())
-    data = {
+    data: dict[str, Any] = {
         "schema": _SCHEMA,
         "batch_identity": batch_identity,
         "versions": sorted(entries, key=lambda x: x["normalized_version_id"]),
         "quality_records": sorted(q_entries, key=lambda x: x["quality_record_id"]),
         "consumer_commits": sorted(c_entries, key=lambda x: x["commit_id"]),
     }
+    finding_entries = list(
+        {
+            _findings.receipt(value, _stamp)["finding_id"]: _findings.receipt(value, _stamp)
+            for value in findings
+        }.values()
+    )
+    if finding_entries:
+        data["schema"] = _SCHEMA_V2
+        data["quality_findings"] = sorted(finding_entries, key=lambda x: x["finding_id"])
     if max_bytes is not None:
 
         def check_strings(value: Any) -> None:
@@ -254,6 +275,7 @@ class SecPitBundle:
     quality_records: tuple[SecQualityRecord, ...]
     consumer_commits: tuple[SecConsumerCommit, ...]
     captured_at: datetime
+    quality_findings: tuple[SecQualityFinding, ...] = ()
 
 
 def write_sec_pit_bundle(
@@ -263,6 +285,9 @@ def write_sec_pit_bundle(
     versions: Iterable[SecNormalizedFinancialFactVersion],
     quality_records: Iterable[SecQualityRecord],
     consumer_commits: Iterable[SecConsumerCommit] = (),
+    quality_findings: Iterable[SecQualityFinding] = (),
+    source_store: SnapshotStore | None = None,
+    resolve_observation: Callable[[str], SnapshotObservationRef] | None = None,
     captured_at: datetime,
     max_records: int = 10_000,
     max_bytes: int = 8 * 1024 * 1024,
@@ -275,29 +300,68 @@ def write_sec_pit_bundle(
     version_items = _bounded(versions, max_records)
     quality_items = _bounded(quality_records, max_records - len(version_items))
     commit_items = _bounded(consumer_commits, max_records - len(version_items) - len(quality_items))
+    finding_items = _findings.bounded_findings(
+        quality_findings, max_records - len(version_items) - len(quality_items) - len(commit_items)
+    )
     if any(type(item) is not SecNormalizedFinancialFactVersion for item in version_items):
         raise TypeError("versions must contain SecNormalizedFinancialFactVersion values")
     if any(type(item) is not SecQualityRecord for item in quality_items) or any(
         type(item) is not SecConsumerCommit for item in commit_items
     ):
         raise TypeError("quality records and commits must be SEC receipt values")
+    expected_ids = (
+        {id(item): item.normalized_version_id for item in version_items},
+        {id(item): item.quality_record_id for item in quality_items},
+        {id(item): item.commit_id for item in commit_items},
+    )
     for item in (*version_items, *quality_items, *commit_items):
         item.__post_init__()
+    if finding_items and (
+        any(item.normalized_version_id != expected_ids[0][id(item)] for item in version_items)
+        or any(item.quality_record_id != expected_ids[1][id(item)] for item in quality_items)
+        or any(item.commit_id != expected_ids[2][id(item)] for item in commit_items)
+    ):
+        raise ValueError("SEC PIT receipt identity mismatch")
     version_items = tuple({item.normalized_version_id: item for item in version_items}.values())
     quality_items = tuple({item.quality_record_id: item for item in quality_items}.values())
     commit_items = tuple({item.commit_id: item for item in commit_items}.values())
+    finding_items = tuple({item.finding_id: item for item in finding_items}.values())
     version_map = {item.normalized_version_id: item for item in version_items}
     records, commits = _validate_graph(version_map, quality_items, commit_items)
+    if finding_items:
+        if source_store is None or resolve_observation is None:
+            raise ValueError("quality findings require source_store and resolve_observation")
+        cache: dict[str, tuple[SnapshotObservationRef, bytes]] = {}
+        _findings.verify_versions(
+            version_items,
+            source_store=source_store,
+            resolve_observation=resolve_observation,
+            max_bytes=max_bytes,
+            cache=cache,
+        )
+        findings = _findings.validate_graph(finding_items, version_map)
+        _findings.verify_evidence(
+            findings,
+            source_store=source_store,
+            resolve_observation=resolve_observation,
+            max_bytes=max_bytes,
+            cache=cache,
+        )
+    else:
+        findings = ()
     all_times = (
         [item.observation.snapshot_fetched_at for item in version_items]
         + [item.recorded_at for item in version_items]
         + [item.recorded_at for item in records]
         + [item.committed_at for item in commits]
+        + [item.detected_at for item in findings]
+        + [item.recorded_at for item in findings]
+        + [item.adjudicated_at for item in findings if item.adjudicated_at is not None]
     )
     if any(captured < value for value in all_times):
         raise ValueError("captured_at precedes bundle evidence")
     payload = _canonical_bundle(
-        batch_identity, version_items, records, commits, max_bytes=max_bytes
+        batch_identity, version_items, records, commits, findings, max_bytes=max_bytes
     )
     if len(payload) > max_bytes:
         raise ValueError("SEC PIT bundle byte limit exceeded")
@@ -305,7 +369,7 @@ def write_sec_pit_bundle(
         RequestSpec("sec", "pit-bundle", {"batch_identity": batch_identity}),
         payload,
         captured,
-        _SERIALIZATION_BUNDLE,
+        _SERIALIZATION_BUNDLE_V2 if findings else _SERIALIZATION_BUNDLE,
         SnapshotMode.FROZEN,
     )
 
@@ -322,23 +386,36 @@ def load_sec_pit_bundle(
     """Load only after rebuilding every version from its replayed source observation."""
     _limits(max_records, max_bytes)
     replay = store.replay(bundle_ref, max_payload_bytes=max_bytes)
+    serializations = {_SERIALIZATION_BUNDLE: _SCHEMA, _SERIALIZATION_BUNDLE_V2: _SCHEMA_V2}
     if (
         bundle_ref.provider != "sec"
         or bundle_ref.endpoint != "pit-bundle"
         or bundle_ref.mode is not SnapshotMode.FROZEN
-        or bundle_ref.serialization_identifier != _SERIALIZATION_BUNDLE
+        or bundle_ref.serialization_identifier not in serializations
     ):
         raise ValueError("not a SEC PIT bundle snapshot")
     if len(replay.payload) > max_bytes:
         raise ValueError("SEC PIT bundle byte limit exceeded")
-    data = _decode_json(replay.payload)
+    schema = serializations[bundle_ref.serialization_identifier]
+    data = _decode_json(replay.payload, schema=schema)
     expected = RequestSpec("sec", "pit-bundle", {"batch_identity": data["batch_identity"]})
     if bundle_ref.request_identity != expected.request_identity:
         raise ValueError("bundle batch identity does not match snapshot request")
     receipts = data["versions"]
-    if len(receipts) + len(data["quality_records"]) + len(data["consumer_commits"]) > max_records:
+    finding_receipts = data.get("quality_findings", [])
+    if (
+        len(receipts)
+        + len(data["quality_records"])
+        + len(data["consumer_commits"])
+        + len(finding_receipts)
+        + sum(
+            len(item.get("evidence", ())) if isinstance(item, dict) else max_records + 1
+            for item in finding_receipts
+        )
+        > max_records
+    ):
         raise ValueError("SEC PIT bundle record limit exceeded")
-    observations: dict[str, tuple[SnapshotObservationRef, dict[str, Any]]] = {}
+    observations: dict[str, tuple[SnapshotObservationRef, bytes]] = {}
     rebuilt: list[SecNormalizedFinancialFactVersion] = []
     for item in receipts:
         if not isinstance(item, dict) or set(item) != _VERSION_FIELDS:
@@ -346,27 +423,13 @@ def load_sec_pit_bundle(
         observation_id = item["observation_id"]
         if not isinstance(observation_id, str):
             raise TypeError("invalid observation receipt")
-        if observation_id not in observations:
-            observation = resolve_observation(observation_id)
-            if (
-                not isinstance(observation, SnapshotObservationRef)
-                or observation.observation_identity != observation_id
-            ):
-                raise ValueError("observation resolver identity mismatch")
-            if (
-                observation.provider != "sec"
-                or observation.serialization_identifier != _SERIALIZATION
-            ):
-                raise ValueError("invalid SEC source observation")
-            observations[observation_id] = (
-                observation,
-                _decode_projection(
-                    source_store.replay_observation(
-                        observation, max_payload_bytes=max_bytes
-                    ).payload
-                ),
-            )
-        observation, projection = observations[observation_id]
+        observation, projection = _findings.replay_source(
+            observation_id,
+            source_store=source_store,
+            resolve_observation=resolve_observation,
+            max_bytes=max_bytes,
+            cache=observations,
+        )
         source_at = _time(item["source_available_at"], "source_available_at")
         if (
             projection["source_artifact_identity"] != item["source_artifact_identity"]
@@ -396,9 +459,20 @@ def load_sec_pit_bundle(
         rebuilt.append(version)
     if len({item.normalized_version_id for item in rebuilt}) != len(rebuilt):
         raise ValueError("duplicate normalized version receipt")
-    qualities = tuple(_load_quality(item) for item in data["quality_records"])
-    commits = tuple(_load_commit(item) for item in data["consumer_commits"])
+    qualities = tuple(_findings.load_quality(item, _time) for item in data["quality_records"])
+    commits = tuple(_findings.load_commit(item, _time) for item in data["consumer_commits"])
     _validate_graph({item.normalized_version_id: item for item in rebuilt}, qualities, commits)
+    findings = tuple(_findings.load(item, _time) for item in finding_receipts)
+    findings = _findings.validate_graph(
+        findings, {item.normalized_version_id: item for item in rebuilt}
+    )
+    _findings.verify_evidence(
+        findings,
+        source_store=source_store,
+        resolve_observation=resolve_observation,
+        max_bytes=max_bytes,
+        cache=observations,
+    )
     captured = _time(replay.manifest["retrieved_at"], "captured_at")
     if any(
         captured < value
@@ -407,58 +481,15 @@ def load_sec_pit_bundle(
             *(item.recorded_at for item in rebuilt),
             *(item.recorded_at for item in qualities),
             *(item.committed_at for item in commits),
+            *(item.detected_at for item in findings),
+            *(item.recorded_at for item in findings),
+            *(item.adjudicated_at for item in findings if item.adjudicated_at is not None),
         ]
     ):
         raise ValueError("bundle capture precedes evidence")
-    return SecPitBundle(data["batch_identity"], tuple(rebuilt), qualities, commits, captured)
-
-
-def _load_quality(value: object) -> SecQualityRecord:
-    if not isinstance(value, dict) or set(value) != {
-        "normalized_version_id",
-        "quality_policy_version",
-        "status",
-        "recorded_at",
-        "supersedes_quality_record_id",
-        "quality_record_id",
-    }:
-        raise ValueError("invalid quality receipt")
-    try:
-        item = SecQualityRecord(
-            value["normalized_version_id"],
-            value["quality_policy_version"],
-            SecQualityStatus(value["status"]),
-            _time(value["recorded_at"], "quality timestamp"),
-            value["supersedes_quality_record_id"],
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid quality receipt") from exc
-    if item.quality_record_id != value["quality_record_id"]:
-        raise ValueError("quality receipt identity mismatch")
-    return item
-
-
-def _load_commit(value: object) -> SecConsumerCommit:
-    if not isinstance(value, dict) or set(value) != {
-        "normalized_version_id",
-        "quality_record_id",
-        "consumer_dataset_identity",
-        "committed_at",
-        "commit_id",
-    }:
-        raise ValueError("invalid consumer commit receipt")
-    try:
-        item = SecConsumerCommit(
-            value["normalized_version_id"],
-            value["quality_record_id"],
-            value["consumer_dataset_identity"],
-            _time(value["committed_at"], "commit timestamp"),
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid consumer commit receipt") from exc
-    if item.commit_id != value["commit_id"]:
-        raise ValueError("consumer commit receipt identity mismatch")
-    return item
+    return SecPitBundle(
+        data["batch_identity"], tuple(rebuilt), qualities, commits, captured, findings
+    )
 
 
 __all__ = ["SecPitBundle", "load_sec_pit_bundle", "write_sec_pit_bundle"]
