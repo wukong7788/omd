@@ -10,6 +10,10 @@ The follow-up [in-memory system replay contract](sec-observed-system-replay.md)
 adds a separate selector requiring explicit quality and consumer-commit evidence.
 The production receipt alone still does not establish eligibility, and the
 original persisted observed-row schema remains unchanged.
+The [observed lifecycle bundle](sec-observed-lifecycle-bundle.md) supplies
+separate persistence and rebuilds retained source/package inputs before issuing
+restored producer-validated objects; it does not promote observation time to
+public availability.
 
 ## Inputs and package
 

@@ -701,11 +701,61 @@ Selection uses explicit schema/parser/configuration, quality policy and consumer
 dataset identities, and returns all eligible complete packages. It has no
 MARKET_KNOWN mode and performs no network, snapshot reads or parsing. Retain and
 reproduce source productions and supply lifecycle records yourself; durable
-observed lifecycle loading/bundles are not provided. See the
+observed lifecycle persistence uses the separate bundle API below. See the
 [system replay contract](docs/plans/sec-observed-system-replay.md).
 Queries are bounded to 100 production inputs, 10,000 quality records, 10,000
 commits and 100,000 aggregate rows; optional caller limits can only tighten
 these bounds. Over-limit inputs fail explicitly, including iterators.
+When several quality policies share a consumer dataset, selection ignores
+commits bound to an included quality record for another policy of the same
+production. Missing references and cross-production bindings still fail;
+commits for the selected policy must satisfy its original time and PASS gates.
+
+Persist observed productions and their complete lifecycle in a separate immutable
+bundle. The caller resolves observation identities to retained stores; bundle
+JSON contains no storage paths. Save and load both rebuild the original
+source/package parsing chain and compare its exact bytes with the retained
+output before accepting production objects. Loading performs no writes.
+
+```python
+from ohmydata.providers.sec import (
+    load_sec_observed_financial_bundle,
+    write_sec_observed_financial_bundle,
+)
+
+observations = {
+    raw_observation.observation_identity: (source_store, raw_observation),
+    observed_package.observation_identity: (package_store, observed_package),
+    observed_production.output_observation.observation_identity: (
+        output_store, observed_production.output_observation,
+    ),
+}
+bundle_ref = write_sec_observed_financial_bundle(
+    store=bundle_store, batch_identity="example-observed-batch-v1",
+    productions=[observed_production], quality_records=[quality],
+    consumer_commits=[commit], captured_at=captured_at,
+    resolve_observation=observations.__getitem__,
+)
+restored = load_sec_observed_financial_bundle(
+    store=bundle_store, bundle_ref=bundle_ref,
+    resolve_observation=observations.__getitem__,
+)
+replayed = select_sec_observed_financial_productions(
+    restored.productions, restored.quality_records,
+    restored.consumer_commits, replay_policy,
+)
+```
+
+`captured_at` must be no earlier than every retained observation, production,
+quality record and commit in the bundle. It records persistence, not historical
+eligibility. Reusing a batch identity with changed content or capture time fails;
+exact repeats are idempotent. Save/load validate all included quality policies
+and consumer datasets, including records beyond a later query's cutoff.
+Keep every referenced source/package/output observation and the pinned parser
+available for restoration. Defaults allow 10 productions, 10,000 quality records,
+10,000 commits, 100,000 rows, an 8 MiB bundle and 32 MiB of unique dependency
+payloads, with 8 MiB per dependency. Caller limits may only be stricter.
+See the [observed bundle contract](docs/plans/sec-observed-lifecycle-bundle.md).
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves

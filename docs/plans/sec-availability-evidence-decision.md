@@ -63,7 +63,9 @@ and consumer-commit cutoffs; it is not a proof of first public availability.
   product is separate from legacy PIT versions. The follow-up
   [in-memory system replay contract](sec-observed-system-replay.md) requires
   explicit quality and consumer-commit evidence; it does not establish public
-  availability or add durable lifecycle replay.
+  availability. The separate [lifecycle bundle](sec-observed-lifecycle-bundle.md)
+  preserves these records and rebuilds the retained source chain on restoration;
+  neither its hashes nor that rebuild authenticate the caller's attestations.
 
 The query restriction is delivered. No consumer migration or market-backtest
 rerun is claimed here.

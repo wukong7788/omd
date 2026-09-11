@@ -66,6 +66,11 @@ from .nport import (
     parse_sec_date,
     read_member,
 )
+from .observed_financial_bundle import (
+    SecObservedFinancialBundle,
+    load_sec_observed_financial_bundle,
+    write_sec_observed_financial_bundle,
+)
 from .observed_financial_replay import (
     SecObservedFinancialConsumerCommit,
     SecObservedFinancialQualityRecord,
@@ -165,6 +170,7 @@ __all__ = [
     "SecNportQuarterRequest",
     "SecNportQuarterResult",
     "SecNportScanCounts",
+    "SecObservedFinancialBundle",
     "SecObservedFinancialConsumerCommit",
     "SecObservedFinancialEvidence",
     "SecObservedFinancialProduction",
@@ -211,6 +217,7 @@ __all__ = [
     "historical_basenames",
     "historical_submission_url",
     "latest_completed_quarter",
+    "load_sec_observed_financial_bundle",
     "load_sec_pit_bundle",
     "load_universe",
     "logical_table_hash",
@@ -240,6 +247,7 @@ __all__ = [
     "validate_user_agent",
     "write_financials_partition",
     "write_partition",
+    "write_sec_observed_financial_bundle",
     "write_sec_pit_bundle",
     "write_tables",
 ]

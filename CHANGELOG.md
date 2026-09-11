@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add immutable, bounded SEC observed-financial lifecycle bundles. Bundles
+  replay caller-resolved source, package, and output observations, rebuild the
+  pinned offline result before resealing it, and retain complete quality and
+  consumer-commit histories without asserting public availability.
+
+- Allow observed replay selection to ignore a valid same-dataset commit from a
+  different quality policy. Missing or cross-production commit bindings still
+  fail explicitly.
+
 - Add bounded in-memory known-by replay for sealed SEC observed financial
   productions. Selection requires explicit producer versions, system cutoff,
   quality history, and consumer dataset commits; it does not invoke parsers,

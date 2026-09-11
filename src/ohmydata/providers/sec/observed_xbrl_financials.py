@@ -207,6 +207,15 @@ class SecObservedFinancialProduction:
         )
 
 
+@dataclass(frozen=True)
+class _ObservedFinancialBuild:
+    """Write-free result of the complete retained-input financial build."""
+
+    evidence: SecObservedFinancialEvidence
+    vintage: SecObservedFinancialVintage
+    payload: bytes
+
+
 def _validate_output_observation(
     output: SnapshotObservationRef,
     request: SecSgmlFinancialsRequest,
@@ -335,13 +344,12 @@ def _serialize_result(
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def produce_sec_financials_from_observed_xbrl_package(
+def _build_sec_financials_from_observed_xbrl_package(
     *,
     source_store: SnapshotStore,
     source_observation: SnapshotObservationRef,
     package_store: SnapshotStore,
     package_observation: SnapshotObservationRef,
-    output_store: SnapshotStore,
     request: SecSgmlFinancialsRequest,
     produced_at: datetime,
     max_raw_bytes: int = _MAX_BYTES,
@@ -351,11 +359,8 @@ def produce_sec_financials_from_observed_xbrl_package(
     max_xml_elements: int = 200_000,
     max_xml_depth: int = 128,
     max_rows: int = 10_000,
-) -> SecObservedFinancialProduction:
-    """Replay two receipts once and persist bounded rows at ``financial-observed-rows``.
-
-    This local observation product intentionally does not establish public availability.
-    """
+) -> _ObservedFinancialBuild:
+    """Build retained source/package data without issuing an output observation."""
     for value, name, maximum in (
         (max_raw_bytes, "max_raw_bytes", _MAX_BYTES),
         (max_package_bytes, "max_package_bytes", _MAX_BYTES),
@@ -458,6 +463,43 @@ def produce_sec_financials_from_observed_xbrl_package(
     )
     if len(payload) > max_result_bytes:
         raise ValueError("SEC observed financial result exceeds limit")
+    return _ObservedFinancialBuild(evidence, vintage, payload)
+
+
+def produce_sec_financials_from_observed_xbrl_package(
+    *,
+    source_store: SnapshotStore,
+    source_observation: SnapshotObservationRef,
+    package_store: SnapshotStore,
+    package_observation: SnapshotObservationRef,
+    output_store: SnapshotStore,
+    request: SecSgmlFinancialsRequest,
+    produced_at: datetime,
+    max_raw_bytes: int = _MAX_BYTES,
+    max_package_bytes: int = _MAX_BYTES,
+    max_result_bytes: int = _MAX_BYTES,
+    max_component_bytes: int = 2 * 1024 * 1024,
+    max_xml_elements: int = 200_000,
+    max_xml_depth: int = 128,
+    max_rows: int = 10_000,
+) -> SecObservedFinancialProduction:
+    """Replay retained inputs, build rows, and issue the sealed output observation."""
+    build = _build_sec_financials_from_observed_xbrl_package(
+        source_store=source_store,
+        source_observation=source_observation,
+        package_store=package_store,
+        package_observation=package_observation,
+        request=request,
+        produced_at=produced_at,
+        max_raw_bytes=max_raw_bytes,
+        max_package_bytes=max_package_bytes,
+        max_result_bytes=max_result_bytes,
+        max_component_bytes=max_component_bytes,
+        max_xml_elements=max_xml_elements,
+        max_xml_depth=max_xml_depth,
+        max_rows=max_rows,
+    )
+    produced = _utc(produced_at, "produced_at")
     output = output_store.observe(
         RequestSpec(
             "sec",
@@ -468,18 +510,75 @@ def produce_sec_financials_from_observed_xbrl_package(
                 "form": request.form,
             },
         ),
-        payload,
+        build.payload,
         produced,
         _OUTPUT_SERIALIZATION,
     )
     return SecObservedFinancialProduction(
         request,
-        evidence,
+        build.evidence,
         output,
-        vintage,
+        build.vintage,
         produced,
         _FACTORY,
-        _production_binding(request, evidence, output, vintage, produced),
+        _production_binding(request, build.evidence, output, build.vintage, produced),
+    )
+
+
+def _restore_sec_observed_financial_production(
+    *,
+    source_store: SnapshotStore,
+    source_observation: SnapshotObservationRef,
+    package_store: SnapshotStore,
+    package_observation: SnapshotObservationRef,
+    output_store: SnapshotStore,
+    output_observation: SnapshotObservationRef,
+    request: SecSgmlFinancialsRequest,
+    produced_at: datetime,
+    max_raw_bytes: int = _MAX_BYTES,
+    max_package_bytes: int = _MAX_BYTES,
+    max_result_bytes: int = _MAX_BYTES,
+    max_component_bytes: int = 2 * 1024 * 1024,
+    max_xml_elements: int = 200_000,
+    max_xml_depth: int = 128,
+    max_rows: int = 10_000,
+) -> SecObservedFinancialProduction:
+    """Reissue a production seal only after retained output equals a complete rebuild."""
+    produced = _utc(produced_at, "produced_at")
+    build = _build_sec_financials_from_observed_xbrl_package(
+        source_store=source_store,
+        source_observation=source_observation,
+        package_store=package_store,
+        package_observation=package_observation,
+        request=request,
+        produced_at=produced,
+        max_raw_bytes=max_raw_bytes,
+        max_package_bytes=max_package_bytes,
+        max_result_bytes=max_result_bytes,
+        max_component_bytes=max_component_bytes,
+        max_xml_elements=max_xml_elements,
+        max_xml_depth=max_xml_depth,
+        max_rows=max_rows,
+    )
+    expected = RequestSpec(
+        "sec",
+        "financial-observed-rows",
+        {"cik": request.cik, "accession_number": request.accession_number, "form": request.form},
+    )
+    replay = output_store.replay_observation(output_observation, expected, max_result_bytes)
+    if (
+        output_observation.serialization_identifier != _OUTPUT_SERIALIZATION
+        or replay.payload != build.payload
+    ):
+        raise ValueError("SEC observed financial retained output does not match rebuilt bytes")
+    return SecObservedFinancialProduction(
+        request,
+        build.evidence,
+        output_observation,
+        build.vintage,
+        produced,
+        _FACTORY,
+        _production_binding(request, build.evidence, output_observation, build.vintage, produced),
     )
 
 

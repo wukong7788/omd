@@ -337,8 +337,17 @@ def select_sec_observed_financial_productions(
     ]
     commits_by_quality: dict[tuple[str, str], list[SecObservedFinancialConsumerCommit]] = {}
     quality_ids = {item.quality_record_id: item for item in visible_quality}
+    all_quality_ids = {item.quality_record_id: item for item in qualities}
     for item in visible_commits:
         quality = quality_ids.get(item.quality_record_id)
+        if quality is None:
+            referenced = all_quality_ids.get(item.quality_record_id)
+            if (
+                referenced is not None
+                and referenced.production_identity == item.production_identity
+                and referenced.quality_policy_version != policy.quality_policy_version
+            ):
+                continue
         if (
             quality is None
             or quality.production_identity != item.production_identity

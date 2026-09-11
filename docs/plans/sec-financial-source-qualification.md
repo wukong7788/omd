@@ -73,6 +73,16 @@ quality and consumer-commit evidence in addition to this production result.
 No such evidence is attested for this real filing by the parsing probe.
 Do not mark the P1 real-source gate complete or expand the pilot on this result.
 
+The follow-up [observed lifecycle bundle](sec-observed-lifecycle-bundle.md)
+probe captured the retained production at 2026-09-11T11:16:03.033675Z, then
+reopened the bundle and dependency stores. With network connections denied and
+SnapshotStore writes disabled during load, source reconstruction preserved all
+180 rows, the production identity, and the original output bytes. Bundle files
+were unchanged after load. The probe includes zero quality records and zero
+consumer commits; it establishes durable reconstruction, not a financial PASS
+or historical market-availability claim. The report and all source data remain
+ignored local artifacts.
+
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns
 the exact availability and provenance requirements.
