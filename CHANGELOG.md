@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add bounded, immutable caller-declared issuer/security/provider-alias catalogs
+  with explicit effective intervals and recording cutoffs. Exact-key indexed
+  resolution preserves stable binding evidence for metric declarations and
+  SEC dependency invalidation, without certifying listing history or PIT quality.
+
 - Add bounded neutral metric graphs for TTM period bridges, CFO−CapEx, YoY,
   margins and PE/PS/FPE, with explicit financial declarations, sign/domain/
   rounding policies and SEC PIT selection. External price, company-cap and

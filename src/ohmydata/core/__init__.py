@@ -3,6 +3,7 @@ from .errors import (
     AuthenticationError,
     CoverageError,
     EmptyResponseError,
+    IdentityConflictError,
     OhMyDataError,
     PaginationError,
     PermanentProviderError,
@@ -16,6 +17,14 @@ from .errors import (
     TransientProviderError,
 )
 from .facts import RawFactEnvelope, RawFactQualityFlag, RawFactRevisionStatus
+from .instruments import (
+    InstrumentIdentity,
+    InstrumentIdentityIndex,
+    InstrumentResolution,
+    InstrumentType,
+    IssuerIdentity,
+    ProviderInstrumentAlias,
+)
 from .policy import AttemptRecord, RetryPolicy, RetryResult, execute_with_retry
 from .provenance import EmptyDisposition, FetchProvenance
 from .rate_limit import RateLimitDecision, RateLimiter, RateLimitPolicy
@@ -45,11 +54,18 @@ __all__ = [
     "EmptyDisposition",
     "EmptyResponseError",
     "FetchProvenance",
+    "IdentityConflictError",
+    "InstrumentIdentity",
+    "InstrumentIdentityIndex",
+    "InstrumentResolution",
+    "InstrumentType",
+    "IssuerIdentity",
     "OhMyDataError",
     "PaginationError",
     "PermanentProviderError",
     "PermissionDeniedError",
     "ProviderError",
+    "ProviderInstrumentAlias",
     "RateLimitDecision",
     "RateLimitError",
     "RateLimitPolicy",

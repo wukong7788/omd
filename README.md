@@ -84,6 +84,70 @@ pagination truncation, and historical-vintage claims remain fail-closed. OMD
 does not choose consumer cutoffs, calendars, dataset commits, or usable
 sessions.
 
+### Dated instrument identity declarations
+
+`InstrumentIdentityIndex` separates issuer IDs, securities and dated provider
+aliases. Queries require an exact provider/alias/venue, effective date and
+knowledge cutoff; missing mappings raise `CoverageError`. All interval overlaps
+reject the proposed catalog, even if recorded later. Retain prior catalogs for
+replay; v1 has no metadata revision or revocation model. Caller evidence is not
+verified listing history, market availability or financial approval.
+
+```python
+from datetime import UTC, date, datetime
+from ohmydata.core import (
+    InstrumentIdentity,
+    InstrumentIdentityIndex,
+    InstrumentType,
+    IssuerIdentity,
+    ProviderInstrumentAlias,
+)
+from ohmydata.providers.sec import SecDataVersionId, SecDataVersionKind
+
+recorded = datetime(2025, 1, 1, tzinfo=UTC)
+issuer = IssuerIdentity("demo:issuer", "evidence:issuer", recorded)
+security = InstrumentIdentity(
+    "demo:class-a",
+    issuer.issuer_id,
+    InstrumentType.COMMON_SHARE,
+    "evidence:security",
+    recorded,
+)
+alias = ProviderInstrumentAlias(
+    "demo",
+    "EXAMPLE",
+    "XNAS",
+    "USD",
+    security.instrument_id,
+    date(2025, 1, 1),
+    date(2026, 1, 1),
+    "evidence:listing",
+    recorded,
+)
+catalog = InstrumentIdentityIndex([issuer], [security], [alias])
+resolution = catalog.resolve(
+    provider="demo",
+    alias="EXAMPLE",
+    venue="XNAS",
+    effective_date=date(2025, 1, 1),
+    knowledge_cutoff=recorded,
+)
+dependency_input = SecDataVersionId(
+    SecDataVersionKind.INSTRUMENT_IDENTITY,
+    resolution.binding_identity,
+)
+# Explicit inputs for a SecMetricTerminalDeclaration or SecMetricExternalInput:
+security_basis = resolution.instrument.instrument_id
+declaration_reference = resolution.resolution_identity
+```
+
+`binding_identity` includes selected issuer/security/alias evidence and is stable
+across unrelated catalog changes and query cutoffs. `resolution_identity`
+additionally binds the complete catalog and query. Opaque issuer IDs do not
+encode a CIK contract; SEC callers supply CIK separately. Effective intervals are
+required half-open dates, not timestamps or trading sessions. Limits and scope
+are in the [identity contract](docs/plans/instrument-identity-declarations.md).
+
 ## Tushare Provider (A-Share & China ETF Ingestion)
 
 Pass an already initialized official-client-compatible object. The adapter

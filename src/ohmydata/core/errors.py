@@ -53,6 +53,10 @@ class CoverageError(OhMyDataError):
     pass
 
 
+class IdentityConflictError(OhMyDataError):
+    pass
+
+
 class AmbiguousPartitionError(OhMyDataError):
     pass
 
