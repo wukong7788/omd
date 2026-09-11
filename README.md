@@ -583,6 +583,16 @@ XBRL/SGML validation. `SYSTEM_REPLAY` additionally requires an exact PASS
 quality record and consumer commit before the requested cutoff. See the
 [SEC financial production PIT contract](docs/plans/sec-financial-production-pit-slice.md).
 
+For a runnable offline introduction, execute
+`uv run python examples/sec_offline_research.py` from a repository checkout.
+The [synthetic research example](examples/sec_offline_research.py) creates four
+synthetic quarters, writes and reloads an immutable PIT bundle, and demonstrates
+publication, consumer-commit and later-quarantine cutoffs. It verifies a TTM of
+100.00 USD with four input identities. All timestamps and quality/commit records
+are synthetic declarations; this does not qualify real SEC data for market
+reconstruction or prove a research strategy. It uses temporary local files and
+needs no credentials or network access.
+
 `compute_sec_four_quarter_ttm` provides offline revenue and net-income sums from
 exactly four declared independent fiscal quarters. `SecQuarterTtmConfig` binds
 their normalized version IDs, native concepts, fiscal dates, accounting scope,

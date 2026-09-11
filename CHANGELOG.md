@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a runnable synthetic offline research example covering four-quarter TTM,
+  immutable bundle reload, market/system cutoffs and future quality isolation.
+
 - Add bounded accounting diagnostics for one retained observed SEC production:
   explicit same-context equalities and cash rollforwards, exact or explicitly
   assumed nearest-rounding tolerances, complete selected row evidence and
