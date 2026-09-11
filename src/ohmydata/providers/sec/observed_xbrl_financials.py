@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
-from typing import Any
 
 from ...core import RequestSpec, SnapshotObservationRef, SnapshotStore
-from ._observed_financial_receipts import receipt_binding
+from ._observed_financial_output import (
+    _configuration_identity,
+    _evidence_binding,
+    _identity,
+    _production_binding,
+    _serialize_result,
+    _stamp,
+    _validate_output_observation,
+)
+from ._observed_xbrl_units import decode_raw_units
 from .financials import SecStatementRow
 from .observed_xbrl_package import decode_sec_observed_xbrl_package
 from .pit import _row_payload
@@ -18,7 +25,9 @@ from .sgml_financials import SecSgmlFinancialsRequest, _documents, _header, _row
 _OUTPUT_SERIALIZATION = "sec-financial-observed-rows-v1"
 _PACKAGE_SERIALIZATION = "sec-observed-xbrl-package-v1"
 _SOURCE_SERIALIZATION = "sec-filing-sgml-v1"
-_PARSER_VERSION = "sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+_PARSER_VERSION_V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+_PARSER_VERSION_V2 = "sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0"
+_PARSER_VERSIONS = frozenset({_PARSER_VERSION_V1, _PARSER_VERSION_V2})
 _CONFIG_VERSION = "sec-observed-xbrl-financial-config-v1"
 _MAX_BYTES = 8 * 1024 * 1024
 _FACTORY = object()
@@ -34,16 +43,6 @@ def _limit(value: int, name: str, maximum: int) -> int:
     if type(value) is not int or value <= 0 or value > maximum:
         raise ValueError(f"{name} must be a positive integer no greater than {maximum}")
     return value
-
-
-def _stamp(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
-
-
-def _identity(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -75,22 +74,6 @@ class SecObservedFinancialEvidence:
             raise ValueError("SEC observed financial evidence binding mismatch")
         object.__setattr__(self, "accepted_at", accepted)
         object.__setattr__(self, "known_by_at", known)
-
-
-def _evidence_binding(
-    source: SnapshotObservationRef,
-    package: SnapshotObservationRef,
-    accepted: datetime,
-    known: datetime,
-) -> str:
-    return _identity(
-        {
-            "source_receipt": receipt_binding(source),
-            "package_receipt": receipt_binding(package),
-            "accepted_at": _stamp(accepted),
-            "known_by_at": _stamp(known),
-        }
-    )
 
 
 @dataclass(frozen=True)
@@ -153,6 +136,9 @@ class SecObservedFinancialProduction:
     output_observation: SnapshotObservationRef
     vintage: SecObservedFinancialVintage
     produced_at: datetime
+    _parser_version: str = field(
+        default=_PARSER_VERSION_V1, repr=False, compare=False, kw_only=True
+    )
     _capability: object = field(repr=False, compare=False)
     _binding_identity: str = field(repr=False, compare=False)
     production_identity: str = field(init=False)
@@ -163,7 +149,7 @@ class SecObservedFinancialProduction:
 
     @property
     def parser_version(self) -> str:
-        return _PARSER_VERSION
+        return self._parser_version
 
     @property
     def configuration_version(self) -> str:
@@ -171,11 +157,13 @@ class SecObservedFinancialProduction:
 
     @property
     def configuration_identity(self) -> str:
-        return _configuration_identity(self.request)
+        return _configuration_identity(self.request, self._parser_version)
 
     def __post_init__(self) -> None:
         if self._capability is not _FACTORY:
             raise ValueError("SEC observed financial production is created by production only")
+        if type(self._parser_version) is not str or self._parser_version not in _PARSER_VERSIONS:
+            raise ValueError("invalid SEC observed financial parser version seal")
         # Revalidate nested seals: frozen dataclasses can still be illicitly
         # changed with object.__setattr__ after producer construction.
         self.evidence.__post_init__()
@@ -187,6 +175,7 @@ class SecObservedFinancialProduction:
             self.evidence,
             self.vintage,
             produced,
+            self._parser_version,
         )
         binding = _production_binding(
             self.request, self.evidence, self.output_observation, self.vintage, produced
@@ -216,134 +205,6 @@ class _ObservedFinancialBuild:
     payload: bytes
 
 
-def _validate_output_observation(
-    output: SnapshotObservationRef,
-    request: SecSgmlFinancialsRequest,
-    evidence: SecObservedFinancialEvidence,
-    vintage: SecObservedFinancialVintage,
-    produced: datetime,
-) -> None:
-    expected = RequestSpec(
-        "sec",
-        "financial-observed-rows",
-        {"cik": request.cik, "accession_number": request.accession_number, "form": request.form},
-    )
-    if (
-        output.provider != expected.provider
-        or output.endpoint != expected.endpoint
-        or output.request_identity != expected.request_identity
-        or output.serialization_identifier != _OUTPUT_SERIALIZATION
-        or output.snapshot_fetched_at != produced
-    ):
-        raise ValueError("SEC observed financial output receipt does not match production")
-    if (
-        output.response_sha256
-        != hashlib.sha256(
-            _serialize_result(
-                request=request,
-                evidence=evidence,
-                vintage=vintage,
-                produced_at=produced,
-                configuration_identity=_configuration_identity(request),
-            )
-        ).hexdigest()
-    ):
-        raise ValueError("SEC observed financial output receipt does not bind result bytes")
-    if (
-        vintage.accepted_at != evidence.accepted_at
-        or vintage.known_by_at != evidence.known_by_at
-        or evidence.accepted_at > evidence.source_observation.snapshot_fetched_at
-        or evidence.known_by_at > produced
-    ):
-        raise ValueError("SEC observed financial production identities or times are invalid")
-
-
-def _production_binding(
-    request: SecSgmlFinancialsRequest,
-    evidence: SecObservedFinancialEvidence,
-    output: SnapshotObservationRef,
-    vintage: SecObservedFinancialVintage,
-    produced: datetime,
-) -> str:
-    return _identity(
-        {
-            "domain": "sec-observed-financial-production-binding-v1",
-            "request": _request_payload(request),
-            "evidence": evidence._binding_identity,
-            "output_receipt": receipt_binding(output),
-            "vintage": {
-                "identity": vintage.vintage_identity,
-                "accepted_at": _stamp(vintage.accepted_at),
-                "known_by_at": _stamp(vintage.known_by_at),
-                "rows": [_row_payload(row) for row in vintage.rows],
-            },
-            "produced_at": _stamp(produced),
-        }
-    )
-
-
-def _request_payload(request: SecSgmlFinancialsRequest) -> dict[str, Any]:
-    return {
-        "symbol": request.symbol,
-        "cik": request.cik,
-        "accession_number": request.accession_number,
-        "form": request.form,
-        "statement_types": list(request.statement_types),
-        "include_dimensions": request.include_dimensions,
-    }
-
-
-def _configuration_identity(request: SecSgmlFinancialsRequest) -> str:
-    return _identity(
-        {
-            "parser_version": _PARSER_VERSION,
-            "configuration_version": _CONFIG_VERSION,
-            "statement_types": request.statement_types,
-            "include_dimensions": request.include_dimensions,
-        }
-    )
-
-
-def _serialize_result(
-    *,
-    request: SecSgmlFinancialsRequest,
-    evidence: SecObservedFinancialEvidence,
-    vintage: SecObservedFinancialVintage,
-    produced_at: datetime,
-    configuration_identity: str,
-) -> bytes:
-    payload = {
-        "schema": _OUTPUT_SERIALIZATION,
-        "request": _request_payload(request),
-        "source_receipt": {
-            "observation_identity": evidence.source_observation.observation_identity,
-            "fact_version": evidence.source_observation.fact_version,
-        },
-        "package_receipt": {
-            "observation_identity": evidence.package_observation.observation_identity,
-            "fact_version": evidence.package_observation.fact_version,
-        },
-        "parser_version": _PARSER_VERSION,
-        "configuration_version": _CONFIG_VERSION,
-        "configuration_identity": configuration_identity,
-        "accepted_at": _stamp(vintage.accepted_at),
-        "known_by_at": _stamp(vintage.known_by_at),
-        "produced_at": _stamp(produced_at),
-        "filing": {
-            "cik": vintage.cik,
-            "accession_number": vintage.accession_number,
-            "form": vintage.form,
-            "company_name": vintage.company_name,
-            "filing_date": vintage.filing_date.isoformat(),
-            "period_end": vintage.period_end.isoformat(),
-            "is_amendment": vintage.is_amendment,
-            "vintage_identity": vintage.vintage_identity,
-        },
-        "rows": [_row_payload(row) for row in vintage.rows],
-    }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
 def _build_sec_financials_from_observed_xbrl_package(
     *,
     source_store: SnapshotStore,
@@ -359,6 +220,7 @@ def _build_sec_financials_from_observed_xbrl_package(
     max_xml_elements: int = 200_000,
     max_xml_depth: int = 128,
     max_rows: int = 10_000,
+    parser_version: str = _PARSER_VERSION_V2,
 ) -> _ObservedFinancialBuild:
     """Build retained source/package data without issuing an output observation."""
     for value, name, maximum in (
@@ -371,6 +233,8 @@ def _build_sec_financials_from_observed_xbrl_package(
         (max_rows, "max_rows", 10_000),
     ):
         _limit(value, name, maximum)
+    if type(parser_version) is not str or parser_version not in _PARSER_VERSIONS:
+        raise ValueError("unsupported SEC observed financial parser version")
     produced = _utc(produced_at, "produced_at")
     expected_source = RequestSpec(
         "sec",
@@ -437,7 +301,17 @@ def _build_sec_financials_from_observed_xbrl_package(
     if package.components.definition is not None:
         documents["EX-101.DEF"] = package.components.definition.decode("utf-8")
     _documents(raw, require_traditional=False)
+    units = None
+    if parser_version == _PARSER_VERSION_V2:
+        units = decode_raw_units(
+            package.components.instance, max_elements=max_xml_elements, max_depth=max_xml_depth
+        )
     rows = _rows_from_documents(raw, documents, request, max_rows)
+    if units is not None:
+        try:
+            rows = tuple(replace(row, unit=units[row.unit_ref or ""]) for row in rows)
+        except KeyError as exc:
+            raise ValueError("selected raw XBRL unit reference is missing") from exc
     if len(rows) > max_rows:
         raise ValueError("SEC observed financial row limit exceeded")
     vintage = SecObservedFinancialVintage(
@@ -453,13 +327,14 @@ def _build_sec_financials_from_observed_xbrl_package(
         request.form.endswith("/A"),
         rows,
     )
-    configuration_identity = _configuration_identity(request)
+    configuration_identity = _configuration_identity(request, parser_version)
     payload = _serialize_result(
         request=request,
         evidence=evidence,
         vintage=vintage,
         produced_at=produced,
         configuration_identity=configuration_identity,
+        parser_version=parser_version,
     )
     if len(payload) > max_result_bytes:
         raise ValueError("SEC observed financial result exceeds limit")
@@ -482,6 +357,7 @@ def produce_sec_financials_from_observed_xbrl_package(
     max_xml_elements: int = 200_000,
     max_xml_depth: int = 128,
     max_rows: int = 10_000,
+    parser_version: str = _PARSER_VERSION_V2,
 ) -> SecObservedFinancialProduction:
     """Replay retained inputs, build rows, and issue the sealed output observation."""
     build = _build_sec_financials_from_observed_xbrl_package(
@@ -498,6 +374,7 @@ def produce_sec_financials_from_observed_xbrl_package(
         max_xml_elements=max_xml_elements,
         max_xml_depth=max_xml_depth,
         max_rows=max_rows,
+        parser_version=parser_version,
     )
     produced = _utc(produced_at, "produced_at")
     output = output_store.observe(
@@ -522,6 +399,7 @@ def produce_sec_financials_from_observed_xbrl_package(
         produced,
         _FACTORY,
         _production_binding(request, build.evidence, output, build.vintage, produced),
+        _parser_version=parser_version,
     )
 
 
@@ -545,6 +423,52 @@ def _restore_sec_observed_financial_production(
 ) -> SecObservedFinancialProduction:
     """Reissue a production seal only after retained output equals a complete rebuild."""
     produced = _utc(produced_at, "produced_at")
+    if output_observation.serialization_identifier != _OUTPUT_SERIALIZATION:
+        raise ValueError("SEC observed financial retained output serialization is invalid")
+    replay = output_store.replay_observation(
+        output_observation,
+        RequestSpec(
+            "sec",
+            "financial-observed-rows",
+            {
+                "cik": request.cik,
+                "accession_number": request.accession_number,
+                "form": request.form,
+            },
+        ),
+        max_result_bytes,
+    )
+
+    def no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = item
+        return value
+
+    try:
+        decoded = json.loads(replay.payload, object_pairs_hook=no_duplicates)
+        if not isinstance(decoded, dict) or set(decoded) != {
+            "schema",
+            "request",
+            "source_receipt",
+            "package_receipt",
+            "parser_version",
+            "configuration_version",
+            "configuration_identity",
+            "accepted_at",
+            "known_by_at",
+            "produced_at",
+            "filing",
+            "rows",
+        }:
+            raise ValueError("invalid retained output selector envelope")
+        selector = decoded["parser_version"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError("invalid SEC observed financial retained parser version") from exc
+    if type(selector) is not str or selector not in _PARSER_VERSIONS:
+        raise ValueError("invalid SEC observed financial retained parser version")
     build = _build_sec_financials_from_observed_xbrl_package(
         source_store=source_store,
         source_observation=source_observation,
@@ -559,17 +483,9 @@ def _restore_sec_observed_financial_production(
         max_xml_elements=max_xml_elements,
         max_xml_depth=max_xml_depth,
         max_rows=max_rows,
+        parser_version=selector,
     )
-    expected = RequestSpec(
-        "sec",
-        "financial-observed-rows",
-        {"cik": request.cik, "accession_number": request.accession_number, "form": request.form},
-    )
-    replay = output_store.replay_observation(output_observation, expected, max_result_bytes)
-    if (
-        output_observation.serialization_identifier != _OUTPUT_SERIALIZATION
-        or replay.payload != build.payload
-    ):
+    if replay.payload != build.payload:
         raise ValueError("SEC observed financial retained output does not match rebuilt bytes")
     return SecObservedFinancialProduction(
         request,
@@ -579,6 +495,7 @@ def _restore_sec_observed_financial_production(
         produced,
         _FACTORY,
         _production_binding(request, build.evidence, output_observation, build.vintage, produced),
+        _parser_version=selector,
     )
 
 

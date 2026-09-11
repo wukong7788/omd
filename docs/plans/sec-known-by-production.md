@@ -1,5 +1,9 @@
 # SEC observed-package known-by production v1
 
+This original v1 contract is retained for historical reconstruction. The
+[compound-unit repair](sec-compound-unit-repair.md) defines the v2 default and
+explicit v1 compatibility path; output serialization remains v1.
+
 This slice produces offline financial rows with local observation evidence.
 First public availability stays unknown. It does not grant MARKET_KNOWN or
 SYSTEM_REPLAY eligibility and does not introduce a selector or consumer commit.

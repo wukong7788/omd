@@ -660,6 +660,22 @@ Callers that previously constructed production objects directly must now use
 `produce_sec_financials_from_observed_xbrl_package` with their retained inputs.
 There is no snapshot migration or promotion of old PIT evidence.
 
+New observed productions default to
+`parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0"`.
+V2 resolves units directly from the retained instance: simple USD/shares/pure
+units remain strings; compound units use compact JSON containing `type` and
+either `measures` or `numerator`/`denominator` lists. Compound `currency` is
+`None`; a USD numerator does not make USD/share a plain currency amount.
+To reproduce historical v1 output explicitly pass
+`parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"`.
+Observed bundle loading selects the version recorded in the retained output
+and rebuilds that complete source chain. V1 retains its known compound-unit
+defect for historical reconstruction. V2 has a distinct configuration and
+production identity and requires its own quality assessment and consumer commit.
+This repair does not change the legacy live-provider, SGML or declared-availability
+package paths, whose compound-unit results still require validation. See the
+[versioned repair contract](docs/plans/sec-compound-unit-repair.md).
+
 The separate in-memory observed system selector requires caller-attested quality
 and consumer-commit records. A production alone is insufficient. A later
 quarantine or revocation blocks selection from that time onward; a later PASS
@@ -687,7 +703,7 @@ commit = SecObservedFinancialConsumerCommit(
 )
 replay_policy = SecObservedFinancialReplayPolicy(
     output_schema_version="sec-financial-observed-rows-v1",
-    parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0",
+    parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0",
     configuration_version="sec-observed-xbrl-financial-config-v1",
     configuration_identity=expected_configuration_identity,
     quality_policy_version="example-quality-v1",

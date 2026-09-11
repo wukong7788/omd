@@ -1,5 +1,9 @@
 # SEC observed financial lifecycle bundle v1
 
+The [compound-unit repair](sec-compound-unit-repair.md) extends reconstruction
+to explicit observed parser v1/v2 dispatch from the retained output. Bundle
+schema stays v1; historical v1 result bytes remain unchanged.
+
 - Goal: persist and restart the [observed system replay](sec-observed-system-replay.md) lifecycle without changing existing producer bytes, identities, row semantics, or public availability; local observations and caller-attested quality/commits remain unauthenticated local evidence.
 - Files: add `observed_financial_bundle.py` and focused private helpers if needed; refactor `observed_xbrl_financials.py` only to share its complete offline build/validation path; narrowly correct observed selector policy filtering as below; exports, synthetic offline tests, and linked documentation/changelog accompany implementation. Legacy PIT bundle/query types remain separate.
 - API: `write_sec_observed_financial_bundle(*, store, batch_identity, productions, quality_records, consumer_commits, captured_at, resolve_observation, limits...) -> SnapshotRef`; `load_sec_observed_financial_bundle(*, store, bundle_ref, resolve_observation, limits...) -> SecObservedFinancialBundle`. Resolver is `Callable[[str], tuple[SnapshotStore, SnapshotObservationRef]]`, keyed by observation identity; it supplies caller-owned storage locations, never paths from JSON.

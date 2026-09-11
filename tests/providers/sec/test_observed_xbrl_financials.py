@@ -23,13 +23,40 @@ from ohmydata.providers.sec import (
     select_sec_financial_versions,
     serialize_sec_observed_xbrl_package,
 )
+from ohmydata.providers.sec._observed_xbrl_units import decode_raw_units
 from ohmydata.providers.sec._pit_projection import _decode_projection
+from ohmydata.providers.sec.observed_xbrl_financials import (
+    _restore_sec_observed_financial_production,
+)
 from ohmydata.providers.sec.sgml_financials import _documents
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_sgml_financials import _observation, _raw, _request
 
 pytest.importorskip("edgar")
+
+
+def test_raw_unit_decoder_preserves_compound_dimensions_and_namespace_scope():
+    raw = b"""<xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:i="http://www.xbrl.org/2003/iso4217"><unit id="usd"><measure>i:USD</measure></unit><unit id="eps"><divide><unitNumerator><measure>i:USD</measure><measure>i:USD</measure></unitNumerator><unitDenominator><measure>shares</measure></unitDenominator></divide></unit><unit id="product"><measure>pure</measure><measure>shares</measure></unit><unit id="other" xmlns:i="urn:other"><measure>i:USD</measure></unit></xbrl>"""
+    assert decode_raw_units(raw, max_elements=100, max_depth=20) == {
+        "usd": "iso4217:USD",
+        "eps": '{"denominator":["shares"],"numerator":["iso4217:USD","iso4217:USD"],"type":"divide"}',
+        "product": '{"measures":["pure","shares"],"type":"product"}',
+        "other": "{urn:other}USD",
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'<xbrl xmlns="http://www.xbrl.org/2003/instance"><unit id="x"><measure/></unit></xbrl>',
+        b'<xbrl xmlns="http://www.xbrl.org/2003/instance"><unit id="x"><divide/></unit></xbrl>',
+        b'<xbrl xmlns="http://www.xbrl.org/2003/instance"><unit id="x"><measure>shares</measure></unit><unit id="x"><measure>shares</measure></unit></xbrl>',
+    ],
+)
+def test_raw_unit_decoder_rejects_invalid_definitions(raw):
+    with pytest.raises(ValueError):
+        decode_raw_units(raw, max_elements=100, max_depth=20)
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +173,38 @@ def test_fresh_stores_rebuild_identical_result_bytes_and_identity(tmp_path):
         first_output.replay_observation(first.output_observation).payload
         == second_output.replay_observation(second.output_observation).payload
     )
+
+
+def test_parser_versions_are_explicit_and_isolated(tmp_path):
+    v1, *_ = _produce(
+        tmp_path / "v1", parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+    )
+    v2, *_ = _produce(tmp_path / "v2")
+    assert v1.parser_version.endswith("v1-edgartools-5.56.0")
+    assert v2.parser_version.endswith("v2-edgartools-5.56.0")
+    assert v1.configuration_identity != v2.configuration_identity
+    assert v1.production_identity != v2.production_identity
+    with pytest.raises(ValueError, match="parser version"):
+        _produce(tmp_path / "bad", parser_version="unknown")
+
+
+def test_restore_uses_retained_v1_selector_without_writes(tmp_path, monkeypatch):
+    result, source, source_ref, packages, package_ref, _, output = _produce(
+        tmp_path, parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+    )
+    monkeypatch.setattr(SnapshotStore, "observe", lambda *_: pytest.fail("loader wrote"))
+    restored = _restore_sec_observed_financial_production(
+        source_store=source,
+        source_observation=source_ref,
+        package_store=packages,
+        package_observation=package_ref,
+        output_store=output,
+        output_observation=result.output_observation,
+        request=_request(),
+        produced_at=result.produced_at,
+    )
+    assert restored.parser_version == result.parser_version
+    assert restored.production_identity == result.production_identity
 
 
 def test_native_decimal_unit_period_and_dimension_match_sgml_parser(tmp_path):

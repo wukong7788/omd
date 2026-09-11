@@ -1,8 +1,9 @@
 # SEC financial source qualification: first probe
 
 Date: 2026-09-11. Status: parsing and reconstruction passed; independent raw-fact
-comparison found eight incorrect compound-unit fields. Complete qualification
-remains open. This is a bounded first-filing probe, not acceptance of the
+comparison found eight incorrect compound-unit fields, corrected by the observed
+v2 follow-up below. Complete qualification remains open. This is a bounded
+first-filing probe, not acceptance of the
 eight-symbol pilot or overall financial correctness.
 
 ## Scope and retained evidence
@@ -134,10 +135,25 @@ the original data. The final report binds instance SHA-256
 No original snapshot, producer result, quality record or consumer commit was
 changed. The report is diagnostic evidence, not a persisted SDK quality verdict.
 
-Next: implement an explicitly versioned compound-unit repair with synthetic
-regressions and an old-version replay policy. Changing the parser in place would
-invalidate byte-exact reconstruction of existing bundles. Consumer impact and
-rerun requirements must be assessed before claiming corrected comparisons.
+The [versioned observed repair](sec-compound-unit-repair.md) addresses these
+eight fields in parser v2 while preserving the v1 path for historical rebuilds.
+The network-denied follow-up produced v2 at 2026-09-11T13:23:32.650128Z and
+compared every row field against retained v1. Exactly eight `unit` fields changed
+to a divide with USD numerator and shares denominator; their derived `currency`
+became `None`. All other row fields and all 172 simple units stayed equal.
+Independent XML unit inspection confirmed the numerator and denominator without
+using the SDK unit decoder as its oracle. Reproducing explicit v1 retained its
+original output hash and production identity. A mixed v1/v2 bundle then loaded
+with SnapshotStore writes disabled, preserving both production identities.
+
+The ignored `run_compound_unit_repair_probe.py` and timestamped report under
+`compound-unit-repair/20260911T132332650128Z/` bind this follow-up. Both productions
+still have zero quality records and zero consumer commits. A corrected production
+requires new caller quality/commit evidence; v1 attestations cannot transfer.
+Legacy live-provider, SGML and declared-availability package paths remain affected
+by the compound-unit defect and are outside this observed-only repair. Any
+consumer using those paths or old unit assumptions requires a separate impact
+assessment and rerun before corrected downstream comparisons can be claimed.
 Accounting relationships, period bridges, visible-report comparison, publication
 evidence and the broader P1 gate remain unverified; this filing receives no PASS.
 

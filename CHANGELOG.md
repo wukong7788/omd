@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Default observed SEC financial production to parser v2, preserving compound
+  unit numerators and denominators from retained XML. Explicit parser v1 and
+  historical bundle reconstruction retain their original bytes. Existing quality
+  attestations do not transfer to corrected productions; legacy SEC provider,
+  SGML and declared-availability package paths are not repaired by this change.
+
 - Add immutable, bounded SEC observed-financial lifecycle bundles. Bundles
   replay caller-resolved source, package, and output observations, rebuild the
   pinned offline result before resealing it, and retain complete quality and

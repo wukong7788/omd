@@ -217,7 +217,12 @@ def test_deterministic_multiple_packages_and_seal_replace_rejection(tmp_path):
     selected = select_sec_observed_financial_productions(
         (second, first), (q2, q1), (c2, c1), policy
     )
-    assert tuple(item.production for item in selected) == (first, second)
+    assert tuple(item.production for item in selected) == tuple(
+        sorted((first, second), key=lambda item: item.production_identity)
+    )
+    assert selected == select_sec_observed_financial_productions(
+        (first, second), (q1, q2), (c1, c2), policy
+    )
     with pytest.raises(ValueError, match="output receipt|binding"):
         replace(first, produced_at=first.produced_at + timedelta(seconds=1))
     with pytest.raises(ValueError, match="result bytes|binding"):
