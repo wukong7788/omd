@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an offline SEC full-SGML traditional-XBRL production path. It replay-binds
+  retained filing bytes, header acceptance time, parsed native rows, typed-row
+  projections, and normalized versions; inline-only or incomplete filings fail
+  explicitly and this does not prove original download authenticity.
 - Add bounded, offline SEC structural quality findings for supplied
   replay-bound normalized rows. The fixed checks only annotate absent identity
   fields, incomplete or unknown periods, and exact duplicate-value candidates;

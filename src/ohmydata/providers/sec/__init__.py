@@ -96,6 +96,11 @@ from .quality_findings import (
     SecQualityIssueClass,
     select_sec_quality_findings,
 )
+from .sgml_financials import (
+    SecSgmlFinancialProduction,
+    SecSgmlFinancialsRequest,
+    produce_sec_financials_from_sgml,
+)
 from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
 
 __all__ = [
@@ -144,6 +149,8 @@ __all__ = [
     "SecQualityStatus",
     "SecReplaySession",
     "SecScheduledFundSelector",
+    "SecSgmlFinancialProduction",
+    "SecSgmlFinancialsRequest",
     "SecStatementParseError",
     "SecStatementRow",
     "SecStructuralQualityReport",
@@ -168,6 +175,7 @@ __all__ = [
     "parse_statement_rows",
     "parse_submissions",
     "partition_identity",
+    "produce_sec_financials_from_sgml",
     "publish_directory",
     "qualify_sec_nport",
     "quarter_range",

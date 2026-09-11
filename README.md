@@ -515,6 +515,38 @@ implemented. The [quality-finding contract](docs/plans/sec-quality-findings-slic
 [v2 bundle contract](docs/plans/sec-pit-bundle-findings-v2.md) define the
 history, assertions, and closure requirements.
 
+For retained traditional-XBRL full submissions, `produce_sec_financials_from_sgml`
+builds the same typed projection from one offline raw observation. The source
+must use this exact request shape and serialization; the call accepts no URL,
+path, credential, or caller-supplied publication time:
+
+```python
+from ohmydata.core import RequestSpec
+from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
+
+raw_observation = source_store.observe(
+    RequestSpec("sec", "company-filing-sgml", {
+        "cik": "0000320193", "accession_number": "0000320193-24-000006", "form": "10-Q",
+    }),
+    retained_full_sgml_bytes, observed_at, "sec-filing-sgml-v1",
+)
+production = produce_sec_financials_from_sgml(
+    source_store=source_store, source_observation=raw_observation,
+    projection_store=projection_store,
+    request=SecSgmlFinancialsRequest(
+        "AAPL", "0000320193", "0000320193-24-000006", "10-Q", ("income_statement",),
+        include_dimensions=False,
+    ),
+    produced_at=produced_at,
+)
+```
+
+It supports only full SEC SGML with embedded traditional XBRL schema,
+presentation, label, and instance documents. The parser derives and preserves
+the header acceptance timestamp; it does not fetch filings or support inline XBRL.
+`max_rows` bounds emitted normalized rows; it does not claim to be a hard limit
+on memory used inside the third-party XBRL parser.
+
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves
 unlimited payload reads; exceeding an explicit limit raises
