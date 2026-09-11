@@ -544,6 +544,41 @@ ttm = compute_sec_four_quarter_ttm(
 )
 ```
 
+`compute_sec_metric_graph` evaluates a bounded, topologically ordered graph of
+fixed recipes: four-quarter or FY+current-YTD−prior-YTD revenue/net-income TTM,
+CFO−CapEx, YoY, margins, PE, PS and FPE. SEC terminals pass through the existing
+PIT selector once; market-cap, security-price and forecast-EPS inputs remain
+distinct caller attestations with explicit source, observation, quality and
+optional commit references. The graph does not authenticate those attestations.
+
+Every terminal declares period/fiscal labels, accounting and attribution scope,
+currency, dimensions, comparability cohort and security basis. CapEx sign,
+denominator policy, division precision and rounding are explicit. PE/PS require
+company-total equity and a graph-derived TTM denominator; FPE preserves the
+forecast horizon and requires identical `currency/security` units and security
+basis. No implicit FX, share-class/ADR conversion or PE×EPS price reconstruction
+is performed. Domain policies can return a labeled missing final value for an
+invalid denominator; missing source coverage and incompatible basis fail.
+
+Results retain complete selected SEC evidence or labeled external attestations,
+transitive input identities and input availability bounds. Monetary arithmetic
+is exact; division uses an isolated Decimal context and reports a conservative
+absolute error bound. Rounded ratio outputs are final outputs only. See the
+[neutral metric graph contract](docs/plans/sec-neutral-metric-graph.md).
+
+```python
+from ohmydata.providers.sec import compute_sec_metric_graph
+
+metrics = compute_sec_metric_graph(
+    config=metric_graph_config,
+    versions=normalized_versions,
+    quality_records=quality_records,
+    consumer_commits=consumer_commits,
+    external_inputs=external_attestations,
+)
+final_metric = metrics.final
+```
+
 `discover_sec_filing_events` replays a retained SEC submissions root and every
 historical file declared by that root. The caller supplies a CIK, selected forms,
 UTC acceptance window, overlap duration and incremental/reconciliation mode.

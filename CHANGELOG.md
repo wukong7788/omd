@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add bounded neutral metric graphs for TTM period bridges, CFO−CapEx, YoY,
+  margins and PE/PS/FPE, with explicit financial declarations, sign/domain/
+  rounding policies and SEC PIT selection. External price, company-cap and
+  forecast-EPS evidence stays labeled as caller attestation. Results retain
+  input lineage and availability bounds without certifying financial quality.
+
 - Add immutable SEC work-report journals with explicit state transitions,
   total-attempt retry gates, retained discovery replay and output/quality
   references. Add immutable typed dependency indexes and auditable cutoff-aware
