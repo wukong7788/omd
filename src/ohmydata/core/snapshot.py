@@ -138,14 +138,29 @@ class SnapshotStore:
             )
         return base
 
-    def _read_validated(self, path: Path) -> _ValidatedSnapshot:
+    def _read_validated(
+        self, path: Path, max_payload_bytes: int | None = None
+    ) -> _ValidatedSnapshot:
         path = Path(os.path.abspath(path))
+        if max_payload_bytes is not None and (
+            type(max_payload_bytes) is not int or max_payload_bytes < 0
+        ):
+            raise ValueError("invalid payload limit")
         try:
             manifest = json.loads(
                 (path / "manifest.json").read_text(encoding="utf-8"),
                 parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
             )
-            payload = (path / "response.bin").read_bytes()
+            with (path / "response.bin").open("rb") as handle:
+                payload = (
+                    handle.read()
+                    if max_payload_bytes is None
+                    else handle.read(max_payload_bytes + 1)
+                )
+            if max_payload_bytes is not None and len(payload) > max_payload_bytes:
+                raise SnapshotIntegrityError("snapshot payload exceeds limit")
+        except SnapshotIntegrityError:
+            raise
         except Exception as exc:
             raise SnapshotIntegrityError("invalid snapshot files") from exc
         if not isinstance(manifest, dict):
@@ -256,7 +271,9 @@ class SnapshotStore:
             / ref.snapshot_identity
         )
 
-    def _read_observation(self, path: Path, snapshot: SnapshotRef) -> SnapshotObservationRef:
+    def _read_observation(
+        self, path: Path, snapshot: SnapshotRef, *, first_observed_at: datetime | None = None
+    ) -> SnapshotObservationRef:
         path = Path(os.path.abspath(path))
         if path.is_dir():
             path = path / "observation.json"
@@ -305,7 +322,9 @@ class SnapshotStore:
                 raise ValueError
         except Exception as exc:
             raise SnapshotIntegrityError("observation timestamp mismatch") from exc
-        if fetched < self.provider_first_observed_at(snapshot):
+        if first_observed_at is None:
+            first_observed_at = self.provider_first_observed_at(snapshot)
+        if fetched < first_observed_at:
             raise SnapshotIntegrityError("observation timestamp predates first observation")
         identity = manifest["observation_identity"]
         if (
@@ -415,8 +434,13 @@ class SnapshotStore:
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
 
-    def replay(self, ref: SnapshotRef, expected: RequestSpec | None = None) -> SnapshotReplay:
-        validated = self._read_validated(ref.path)
+    def replay(
+        self,
+        ref: SnapshotRef,
+        expected: RequestSpec | None = None,
+        max_payload_bytes: int | None = None,
+    ) -> SnapshotReplay:
+        validated = self._read_validated(ref.path, max_payload_bytes)
         if validated.ref != ref:
             raise SnapshotIntegrityError("snapshot reference mismatch")
         if expected is not None and (
@@ -506,7 +530,10 @@ class SnapshotStore:
         )
 
     def replay_observation(
-        self, observation_ref: SnapshotObservationRef, expected: RequestSpec | None = None
+        self,
+        observation_ref: SnapshotObservationRef,
+        expected: RequestSpec | None = None,
+        max_payload_bytes: int | None = None,
     ) -> SnapshotReplay:
         if type(observation_ref.mode) is not SnapshotMode:
             raise SnapshotIntegrityError("observation reference mismatch")
@@ -556,8 +583,13 @@ class SnapshotStore:
         )
         if not snapshot_path.exists():
             raise SnapshotIntegrityError("linked snapshot missing")
-        snapshot = self._read_validated(snapshot_path).ref
-        validated_obs = self._read_observation(observation_ref.path, snapshot)
+        validated = self._read_validated(snapshot_path, max_payload_bytes)
+        snapshot = validated.ref
+        validated_obs = self._read_observation(
+            observation_ref.path,
+            snapshot,
+            first_observed_at=datetime.fromisoformat(validated.replay.manifest["retrieved_at"]),
+        )
         if validated_obs != observation_ref:
             raise SnapshotIntegrityError("observation reference mismatch")
-        return self.replay(snapshot, expected)
+        return self.replay(snapshot, expected, max_payload_bytes)

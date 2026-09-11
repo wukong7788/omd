@@ -7,6 +7,12 @@
   system replay additionally requires replay-verified observation, production,
   quality, and consumer-commit evidence at the cutoff. This API neither fetches
   SEC data nor treats `accepted_at` as source-availability proof.
+- Add immutable, bounded SEC PIT receipt bundles. Bundles persist normalized,
+  quality, and consumer-commit identities through `SnapshotStore` and rebuild
+  versions only from caller-resolved source observations during replay.
+- Add optional `max_payload_bytes` replay limits to `SnapshotStore`; the
+  backwards-compatible default remains unlimited and an exceeded payload raises
+  `SnapshotIntegrityError` before its bytes are fully read.
 
 ## 0.2.5 — 2026-09-11
 

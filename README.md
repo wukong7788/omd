@@ -490,6 +490,17 @@ row and caller-attested source-artifact identity, but is not original SEC
 XBRL/SGML validation. `SYSTEM_REPLAY` additionally requires an exact PASS
 quality record and consumer commit before the requested cutoff. See the
 [SEC financial production PIT contract](docs/plans/sec-financial-production-pit-slice.md).
+`write_sec_pit_bundle` can freeze a caller-selected receipt closure through
+`SnapshotStore`; `load_sec_pit_bundle` rebuilds it only from an injected
+observation-ID resolver and source store, without persisting source bytes or paths.
+Both functions default to at most 10,000 input receipts and 8 MiB per bundle or
+replayed source payload; `max_records` and `max_bytes` accept stricter positive
+integer limits. See the [bundle replay contract](docs/plans/sec-pit-bundle-replay-slice.md).
+`SnapshotStore.replay` and `replay_observation` also accept optional
+`max_payload_bytes` (a non-negative integer). Their default `None` preserves
+unlimited payload reads; exceeding an explicit limit raises
+`SnapshotIntegrityError`. This limit covers response bytes, not JSON manifest
+metadata. Retain source snapshots and observation receipts alongside bundles.
 
 ```python
 from datetime import UTC, datetime

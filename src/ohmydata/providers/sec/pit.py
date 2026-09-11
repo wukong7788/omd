@@ -25,6 +25,7 @@ from ...core import (
     SnapshotObservationRef,
     SnapshotStore,
 )
+from ._pit_projection import _decode_projection, _projection_datetime, _row_from_payload
 from .financials import SecCompanyFinancialVintage, SecStatementRow
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -129,34 +130,6 @@ def serialize_sec_typed_rows_projection(
         "rows": [_row_payload(row) for row in vintage.rows],
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _decode_projection(payload: bytes) -> dict[str, Any]:
-    try:
-        decoded = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("invalid SEC typed-row projection") from exc
-    if not isinstance(decoded, dict) or set(decoded) != {
-        "schema",
-        "accession_number",
-        "source_artifact_identity",
-        "source_available_at",
-        "vintage_identity",
-        "rows",
-    }:
-        raise ValueError("invalid SEC typed-row projection fields")
-    if decoded["schema"] != _PROJECTION_SCHEMA or not isinstance(decoded["accession_number"], str):
-        raise ValueError("invalid SEC typed-row projection identity")
-    _sha(decoded["source_artifact_identity"], "source_artifact_identity")
-    _sha(decoded["vintage_identity"], "vintage_identity")
-    try:
-        value = datetime.fromisoformat(decoded["source_available_at"].removesuffix("Z") + "+00:00")
-        _utc(value, "source_available_at")
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise ValueError("invalid SEC typed-row projection availability") from exc
-    if not isinstance(decoded["rows"], list):
-        raise TypeError("invalid SEC typed-row projection rows")
-    return decoded
 
 
 class SecPitMode(str, Enum):
@@ -302,55 +275,94 @@ class SecNormalizedFinancialFactVersion:
         source_at = _utc(availability.source_available_at, "source_available_at")
         if source_at > observation.snapshot_fetched_at:
             raise ValueError("source availability cannot follow the source observation")
-        projected_at = datetime.fromisoformat(
-            projection["source_available_at"].removesuffix("Z") + "+00:00"
-        ).astimezone(UTC)
+        projected_at = _projection_datetime(
+            projection["source_available_at"], "source_available_at"
+        )
         if projected_at != source_at:
             raise ValueError("projection availability assertion does not match evidence")
         if projection["accession_number"] != vintage.accession_number:
             raise ValueError("projection accession does not match typed vintage")
         if projection["vintage_identity"] != vintage.vintage_identity:
             raise ValueError("projection vintage identity does not match typed vintage")
-        if row_ordinal < 0 or row_ordinal >= len(vintage.rows):
-            raise ValueError("row_ordinal is outside typed vintage")
-        row = vintage.rows[row_ordinal]
-        if projection["rows"][row_ordinal] != _row_payload(row):
-            raise ValueError("projection row does not match typed vintage")
-        content = _normalized_content_payload(
+        return _version_from_replayed_projection(
             observation=observation,
-            accession_number=vintage.accession_number,
-            source_artifact_identity=projection["source_artifact_identity"],
+            projection=projection,
             source_available_at=source_at,
+            accession_number=vintage.accession_number,
             vintage_identity=vintage.vintage_identity,
             row_ordinal=row_ordinal,
-            row=row,
-            schema_version=schema_version,
-            adapter_version=adapter_version,
-            normalization_version=normalization_version,
-            configuration_identity=configuration_identity,
-        )
-        return cls(
-            observation=observation,
-            accession_number=vintage.accession_number,
-            source_artifact_identity=projection["source_artifact_identity"],
-            source_available_at=source_at,
-            vintage_identity=vintage.vintage_identity,
-            row_ordinal=row_ordinal,
-            row=row,
+            expected_row=vintage.rows[row_ordinal]
+            if 0 <= row_ordinal < len(vintage.rows)
+            else None,
             schema_version=schema_version,
             adapter_version=adapter_version,
             normalization_version=normalization_version,
             configuration_identity=configuration_identity,
             recorded_at=recorded_at,
-            _factory_capability=_FACTORY_CAPABILITY,
-            _projection_binding_identity=_hash(
-                {
-                    "content": content,
-                    "recorded_at": _utc(recorded_at, "recorded_at"),
-                    "projection_payload_sha256": observation.response_sha256,
-                }
-            ),
         )
+
+
+def _version_from_replayed_projection(
+    *,
+    observation: SnapshotObservationRef,
+    projection: Mapping[str, Any],
+    source_available_at: datetime,
+    accession_number: str,
+    vintage_identity: str,
+    row_ordinal: int,
+    expected_row: SecStatementRow | None,
+    schema_version: str,
+    adapter_version: str,
+    normalization_version: str,
+    configuration_identity: str,
+    recorded_at: datetime,
+) -> SecNormalizedFinancialFactVersion:
+    """Restricted replay binding shared by the public and durable-bundle factories."""
+    if (
+        projection["accession_number"] != accession_number
+        or projection["vintage_identity"] != vintage_identity
+    ):
+        raise ValueError("projection identity does not match normalized version")
+    if type(row_ordinal) is not int or row_ordinal < 0 or row_ordinal >= len(projection["rows"]):
+        raise ValueError("row_ordinal is outside typed projection")
+    row = _row_from_payload(projection["rows"][row_ordinal])
+    if expected_row is not None and _row_payload(expected_row) != projection["rows"][row_ordinal]:
+        raise ValueError("projection row does not match typed vintage")
+    content = _normalized_content_payload(
+        observation=observation,
+        accession_number=accession_number,
+        source_artifact_identity=projection["source_artifact_identity"],
+        source_available_at=source_available_at,
+        vintage_identity=vintage_identity,
+        row_ordinal=row_ordinal,
+        row=row,
+        schema_version=schema_version,
+        adapter_version=adapter_version,
+        normalization_version=normalization_version,
+        configuration_identity=configuration_identity,
+    )
+    return SecNormalizedFinancialFactVersion(
+        observation=observation,
+        accession_number=accession_number,
+        source_artifact_identity=projection["source_artifact_identity"],
+        source_available_at=source_available_at,
+        vintage_identity=vintage_identity,
+        row_ordinal=row_ordinal,
+        row=row,
+        schema_version=schema_version,
+        adapter_version=adapter_version,
+        normalization_version=normalization_version,
+        configuration_identity=configuration_identity,
+        recorded_at=recorded_at,
+        _factory_capability=_FACTORY_CAPABILITY,
+        _projection_binding_identity=_hash(
+            {
+                "content": content,
+                "recorded_at": _utc(recorded_at, "recorded_at"),
+                "projection_payload_sha256": observation.response_sha256,
+            }
+        ),
+    )
 
 
 @dataclass(frozen=True)

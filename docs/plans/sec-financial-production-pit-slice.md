@@ -67,3 +67,8 @@ The public API accepts caller-injected in-memory iterables and makes no durable
 production or consumer-publication claim. Callers that need durable replay own
 immutable storage and must retain the referenced snapshot, version, quality and
 commit receipts.
+
+The follow-on [bundle replay slice](sec-pit-bundle-replay-slice.md) adds optional
+SnapshotStore-backed persistence for these receipts. It retains the same source
+evidence and PIT query boundaries; it does not turn a receipt capture into proof
+of actual consumer publication or original SEC filing verification.
