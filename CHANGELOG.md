@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5 — 2026-09-11
+
+- Add a nullable, syntactically derived SEC statement `currency` field and move
+  the financial Parquet dataset and vintage identity to v3. Native units and
+  values remain unchanged; existing v2 partitions require a new-root rebuild.
+
 ## 0.2.4 — 2026-09-09
 
 - Fix the SEC native-fact adapter for edgartools 5.56.0: `XBRL.facts` is a

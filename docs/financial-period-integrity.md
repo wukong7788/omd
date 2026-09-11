@@ -55,7 +55,7 @@ of a one-off gain or a known accounting basis.
 
 ## SEC schema migration
 
-The financial dataset and vintage identity move to `sec-company-financials-v2`.
+The financial dataset and vintage identity move to `sec-company-financials-v3`.
 The native adapter uses presentation-tree membership and XBRL instance facts,
 bypassing display-level revenue deduplication and complementary-concept merging.
 Period starts, ends, instant/duration identity and dimensions belong to each fact;
@@ -63,10 +63,11 @@ quarter and YTD facts with the same end date must remain separate. Unknown unit
 or duration start remains unknown. Availability continues to use filing
 `accepted_at`, never the financial period end.
 
-Typed `SecStatementRow.value` stays `Decimal`. Parquet v2 `value` is a canonical
-decimal **string**, so arbitrary source precision survives storage; convert with
-`Decimal(value)` when reading. `value_native` separately preserves the exact source
-text. The old v1 fixed `decimal128(28,4)` column is not reused. `unit_ref` retains
+Typed `SecStatementRow.value` stays `Decimal`. Parquet v2 introduced, and v3
+retains, `value` as a canonical decimal **string**, so arbitrary source precision
+survives storage; convert with `Decimal(value)` when reading. `value_native`
+separately preserves the exact source text. The old v1 fixed `decimal128(28,4)`
+column is not reused. `unit_ref` retains
 the native XBRL unit identifier; `unit` resolves its measure (for example
 `iso4217:USD`) or the compound unit definition. An absent definition remains
 unknown. `decimals_native` preserves `INF`; the integer `decimals` is then null.
@@ -121,14 +122,22 @@ arithmetic inputs beyond the bounded 10,000-digit guard, and non-intersecting
 intervals remain parse errors. Affected filings must be rerun from the same
 source after this repair; no automatic migration of existing data is performed.
 
-Both tables and manifest are staged before one directory rename. A matching
-existing v2 partition is reusable only after schema/hash verification; changed
-contents require a new root. CLI inspection and validation check actual table
+Both tables and manifest are staged before one directory rename. An existing v2
+partition is rejected by the v3 writer; changed contents require a new root. CLI
+inspection and validation check actual table
 schemas and required files as well as manifest versions and hashes.
 The client returns uppercase symbols. Manually constructed vintages must match
 the uppercase partition symbol exactly; invalid casing is rejected before writing.
 
-Rebuild into a new output root. Do not relabel v1 metadata as v2 or overwrite
+SEC statement rows also expose nullable `currency`, derived only from a complete
+bare uppercase three-letter unit (for example `USD`) or the exact `iso4217:`
+prefix form. The original `unit` and `value_native` remain unchanged; this field
+does not validate a registry, infer from concepts, or perform conversion. For
+example, `unit="iso4217:USD"` yields `currency="USD"` while the Decimal amount
+and native unit text remain unchanged. Existing v1 and v2 partitions must be
+rebuilt into a new output root for the v3 schema.
+
+Rebuild into a new output root. Do not relabel v1 or v2 metadata as v3 or overwrite
 old evidence. Consumers must rerun same-source, same-period comparisons against
 an immutable candidate build before replacing local safeguards. No consumer
 migration, live validation or publication is implied by the offline repair.

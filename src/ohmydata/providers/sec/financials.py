@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -12,6 +13,17 @@ from typing import Any, Literal
 
 STATEMENT_TYPES = ("balance_sheet", "income_statement", "cash_flow")
 StatementType = Literal["balance_sheet", "income_statement", "cash_flow"]
+FINANCIALS_DATASET_SCHEMA = "sec-company-financials-v3"
+
+_CURRENCY_UNIT_RE = re.compile(r"(?:iso4217:)?([A-Z]{3})\Z")
+
+
+def _normalized_currency(unit: str | None) -> str | None:
+    """Return a syntactically recognized bare ISO-style currency code."""
+    if not isinstance(unit, str):
+        return None
+    match = _CURRENCY_UNIT_RE.fullmatch(unit.strip())
+    return match.group(1) if match else None
 
 
 def _canonical_val(val: Any) -> Any:
@@ -57,6 +69,7 @@ class SecStatementRow:
     decimals_native: str | None = field(default=None, kw_only=True)
     period_source: str | None = field(default=None, kw_only=True)
     is_point_in_time: bool = False
+    currency: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if self.value is not None and not self.value.is_finite():
@@ -65,6 +78,7 @@ class SecStatementRow:
             raise ValueError("reversed financial period")
         if self.period_type == "instant" and self.period_start is not None:
             raise ValueError("instant financial fact cannot have duration start")
+        object.__setattr__(self, "currency", _normalized_currency(self.unit))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +89,7 @@ class SecStatementRow:
             "value": self.value,
             "value_native": self.value_native,
             "unit": self.unit,
+            "currency": self.currency,
             "decimals": self.decimals,
             "period_start": self.period_start,
             "period_end": self.period_end,
@@ -155,7 +170,7 @@ class SecCompanyFinancialVintage:
             "availability_policy": self.availability_policy,
             "availability_lag_days": self.availability_lag_days,
             "availability_anchor": self.availability_anchor,
-            "schema_version": "sec-company-financials-v2",
+            "schema_version": FINANCIALS_DATASET_SCHEMA,
         }
         h = hashlib.sha256(
             json.dumps(_canonical_val(payload), sort_keys=True, separators=(",", ":")).encode()

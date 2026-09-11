@@ -113,6 +113,59 @@ def test_vintage_point_in_time_anchor_and_identity() -> None:
     assert len(vintage.filter_statement("balance_sheet")) == 0
 
 
+@pytest.mark.parametrize(
+    ("unit", "currency"),
+    [
+        ("USD", "USD"),
+        (" iso4217:USD ", "USD"),
+        ("EUR", "EUR"),
+        (None, None),
+        ("usd", None),
+        ("shares", None),
+        ("USD/shares", None),
+        ('{"USD": "shares"}', None),
+        ("foo:USD", None),
+    ],
+)
+def test_statement_currency_is_syntactically_derived_without_changing_native_unit(
+    unit: str | None, currency: str | None
+) -> None:
+    row = SecStatementRow(
+        "income_statement", "Revenue", "fake:Revenue", "Revenue", Decimal(1), "1", unit
+    )
+    assert row.currency == currency
+    assert row.unit == unit
+    assert row.to_dict()["currency"] == currency
+
+
+def test_statement_currency_recomputes_when_unit_is_replaced() -> None:
+    from dataclasses import replace
+
+    row = SecStatementRow(
+        "income_statement", "Revenue", "fake:Revenue", "Revenue", Decimal(1), "1", "USD"
+    )
+    assert replace(row, unit="EUR").currency == "EUR"
+
+
+def test_native_units_remain_distinct_in_vintage_identity() -> None:
+    common = ("income_statement", "Revenue", "fake:Revenue", "Revenue", Decimal(1), "1")
+    bare = SecStatementRow(*common, "USD")
+    prefixed = SecStatementRow(*common, "iso4217:USD")
+    assert bare.currency == prefixed.currency == "USD"
+    assert bare.to_dict()["unit"] != prefixed.to_dict()["unit"]
+    kwargs = {
+        "symbol": "FAKE",
+        "cik": "0000000001",
+        "company_name": "Synthetic",
+        "form": "10-Q",
+        "accession_number": "fake-quarter",
+        "filing_date": date(2024, 8, 1),
+    }
+    assert SecCompanyFinancialVintage(rows=(bare,), **kwargs).vintage_identity != (
+        SecCompanyFinancialVintage(rows=(prefixed,), **kwargs).vintage_identity
+    )
+
+
 def test_vintage_requires_timezone_aware_accepted_at() -> None:
     naive_dt = datetime(2024, 2, 1, 21, 30, 0)  # noqa: DTZ001
     with pytest.raises(ValueError, match="accepted_at must be timezone-aware"):

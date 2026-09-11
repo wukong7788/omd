@@ -1,5 +1,6 @@
 """Synthetic native Edgar 5.56 boundaries and period/vintage roundtrip regressions."""
 
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -270,7 +271,8 @@ def test_unknown_and_mixed_unknown_columns_are_errors():
             )
 
 
-def test_v2_parquet_roundtrip_identity_and_old_schema_rejection(tmp_path):
+@pytest.mark.parametrize("legacy_version", ["v1", "v2"])
+def test_v3_parquet_roundtrip_identity_and_old_schema_rejection(tmp_path, legacy_version):
     statement, _ = native_statement()
     rows = tuple(parse_statement_rows(statement, "income_statement", include_dimensions=True))
     vintage = SecCompanyFinancialVintage(
@@ -285,7 +287,7 @@ def test_v2_parquet_roundtrip_identity_and_old_schema_rejection(tmp_path):
         quality_flags=("BALANCE_SHEET_MISSING",),
     )
     manifest = write_financials_partition(tmp_path, "FAKE", [vintage])
-    assert manifest["dataset_schema"] == "sec-company-financials-v2"
+    assert manifest["dataset_schema"] == "sec-company-financials-v3"
     partition = tmp_path / "symbol=FAKE"
     data = pq.ParquetFile(partition / "financial_statements.parquet").read().to_pylist()
     by_context = {r["context_ref"]: r for r in data}
@@ -302,10 +304,36 @@ def test_v2_parquet_roundtrip_identity_and_old_schema_rejection(tmp_path):
         replace(vintage, rows=(replace(rows[0], period_start=date(2024, 1, 1)),)).vintage_identity
         != vintage.vintage_identity
     )
-    manifest["dataset_schema"] = "sec-company-financials-v1"
+    manifest["dataset_schema"] = f"sec-company-financials-{legacy_version}"
+    manifest["writer_profile"] = f"sec-financials-parquet-{legacy_version}"
     (partition / "manifest.json").write_text(json.dumps(manifest))
+    before = {path.name: path.read_bytes() for path in partition.iterdir()}
     with pytest.raises(ValueError, match="incompatible"):
         write_financials_partition(tmp_path, "FAKE", [vintage])
+    assert {path.name: path.read_bytes() for path in partition.iterdir()} == before
+
+
+def test_currency_column_is_required_by_actual_parquet_schema(tmp_path):
+    row = SecStatementRow(
+        "income_statement", "Revenue", "fake:Revenue", "Revenue", Decimal(1), "1", "USD"
+    )
+    vintage = SecCompanyFinancialVintage(
+        "FAKE", "0000000001", "Synthetic", "10-Q", "fake-quarter", date(2024, 8, 1), rows=(row,)
+    )
+    write_financials_partition(tmp_path, "FAKE", [vintage])
+    partition = tmp_path / "symbol=FAKE"
+    table_path = partition / "financial_statements.parquet"
+    table = pq.ParquetFile(table_path).read().drop(["currency"])
+    pq.write_table(table, table_path)
+    manifest_path = partition / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"]["financial_statements.parquet"] = {
+        "sha256": hashlib.sha256(table_path.read_bytes()).hexdigest(),
+        "bytes": table_path.stat().st_size,
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="table schema"):
+        validate_financials_partition(partition)
 
 
 def test_old_positional_row_constructor_remains_compatible():

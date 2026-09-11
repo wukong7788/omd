@@ -10,10 +10,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from .financials import SecCompanyFinancialVintage
+from .financials import FINANCIALS_DATASET_SCHEMA, SecCompanyFinancialVintage
 
-DATASET_SCHEMA = "sec-company-financials-v2"
-WRITER_PROFILE = "sec-financials-parquet-v2"
+DATASET_SCHEMA = FINANCIALS_DATASET_SCHEMA
+WRITER_PROFILE = "sec-financials-parquet-v3"
 
 
 import importlib
@@ -68,6 +68,7 @@ def _statement_schema(pa: Any) -> Any:
         pa.field("value", pa.string(), nullable=True),
         pa.field("value_native", pa.string(), nullable=True),
         pa.field("unit", pa.string(), nullable=True),
+        pa.field("currency", pa.string(), nullable=True),
         pa.field("decimals", pa.int32(), nullable=True),
         pa.field("period_start", pa.date32(), nullable=True),
         pa.field("period_end", pa.date32(), nullable=True),
@@ -218,6 +219,7 @@ def write_financials_partition(
                         "value": str(r.value) if r.value is not None else None,
                         "value_native": r.value_native,
                         "unit": r.unit,
+                        "currency": r.currency,
                         "decimals": r.decimals,
                         "period_start": r.period_start,
                         "period_end": r.period_end,
