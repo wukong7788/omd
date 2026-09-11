@@ -50,11 +50,13 @@ acceptance rather than an exact publication timestamp for that extracted
 artifact. No qualifying package publication evidence was established. Fetch
 time was not substituted for source time, and no PIT projection was written.
 
-Next: establish auditable source-availability evidence for the separately
-extracted package before attempting complete package/PIT production. If that
-evidence cannot be established, retain the explicit qualification gap. Do not
-mark the P1 real-source gate complete or expand to the remaining pilot filings
-on the strength of parsing success alone.
+Follow-up investigation is complete: the SEC does not provide a timestamp for
+first website availability, so the inspected public metadata cannot close this
+exact-time gap. The [evidence decision](sec-availability-evidence-decision.md)
+records the sources and an additional acceptance-proxy gap in the existing SGML
+producer. Next, protect the market-known query boundary, then define explicit
+known-by evidence. These runtime changes remain pending. Do not mark the P1
+real-source gate complete or expand the pilot on parsing success alone.
 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns

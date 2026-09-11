@@ -6,6 +6,12 @@ not parse inline XBRL.  A caller must retain one separately captured,
 SEC-extracted traditional component package and explicitly attest its source
 availability.  The existing traditional embedded-component path is unchanged.
 
+The [availability evidence investigation](sec-availability-evidence-decision.md)
+found no qualifying exact publication evidence for the first retained sample.
+This API's caller declaration must not be filled from acceptance, fetch time,
+or file-modification metadata merely to make production succeed. A separate
+known-by production path is pending; the wrapper has not been relaxed.
+
 ## Package envelope
 
 `serialize_sec_xbrl_package` produces canonical UTF-8 JSON bytes with schema

@@ -51,8 +51,12 @@ company name.
 Acceptance wall time is interpreted in America/New_York, as in the existing
 financial adapter, and converted to UTC. Reject nonexistent and ambiguous DST
 times. The N-PORT compact timestamp parser has a different UTC contract and must
-not be reused. Acceptance is the exact source_available_at; no lag, date-only
-fallback or caller override. Require acceptance <= raw observation fetched_at
+not be reused. The v1 implementation writes acceptance to source_available_at;
+this is an acceptance proxy, not proof of exact public availability. The
+[availability evidence decision](sec-availability-evidence-decision.md) supersedes
+the original exact-publication claim and records the pending query restriction.
+The current API has no lag, date-only fallback or caller override.
+Require acceptance <= raw observation fetched_at
 <= produced_at, with an injected aware produced_at normalized to UTC. The
 projection observation and normalized recorded_at use produced_at. This binds
 the local byte-derived statement; it does not prove actual consumer publication.

@@ -520,6 +520,13 @@ builds the same typed projection from one offline raw observation. The source
 must use this exact request shape and serialization; the call accepts no URL,
 path, credential, or caller-supplied publication time:
 
+The current SGML producer uses filing acceptance as an availability proxy. SEC
+acceptance does not prove first website publication, and the current
+`MARKET_KNOWN` query does not reject these proxy versions. Do not use them as
+exact-publication evidence for market backtests. The
+[availability decision](docs/plans/sec-availability-evidence-decision.md) records
+the pending query restriction and migration; this restriction is not yet enforced.
+
 ```python
 from ohmydata.core import RequestSpec
 from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
