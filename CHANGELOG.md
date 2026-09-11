@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+- Add bounded, offline SEC structural quality findings for supplied
+  replay-bound normalized rows. The fixed checks only annotate absent identity
+  fields, incomplete or unknown periods, and exact duplicate-value candidates;
+  they do not correct values, establish source correctness, or alter PIT
+  selection or quality-policy outcomes.
 - Add immutable, caller-authored SEC quality findings with bounded as-of
   adjudication-history lookup and v2 immutable PIT bundle persistence. Finding
   evidence is replay-verified by identity, including cross-provider snapshots;
-  this does not add automatic checks or financial corrections.
+  this does not add automatic accounting checks or financial corrections.
 - Add an offline-only SEC typed-row projection and explicit PIT selector.
   Market-known reconstruction requires caller-attested precise source evidence;
   system replay additionally requires replay-verified observation, production,

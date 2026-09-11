@@ -504,10 +504,16 @@ they do not prove source correctness. Passing a non-empty `quality_findings`
 to `write_sec_pit_bundle` writes a v2 bundle and requires the same injected
 source store and observation resolver used at replay; every referenced
 observation is replay-verified without persisting payload bytes or paths.
-Automatic accounting checks and financial-value corrections are intentionally
-not implemented by this API. The [quality-finding contract](docs/plans/sec-quality-findings-slice.md)
-and [v2 bundle contract](docs/plans/sec-pit-bundle-findings-v2.md) define the
-history, evidence, and closure requirements.
+`evaluate_sec_structural_quality` can create bounded OPEN findings for absent
+row identity fields, incomplete or unknown periods, and exact duplicate-row
+value disagreements in supplied replay-bound normalized versions. Its report
+records the exact versions and fixed rules checked; it does not prove a filing
+or value is correct, establish availability, or change a PIT/quality-policy
+decision. Automatic accounting checks and financial-value corrections are not
+implemented. The [quality-finding contract](docs/plans/sec-quality-findings-slice.md),
+[structural-rule contract](docs/plans/sec-structural-quality-rules.md), and
+[v2 bundle contract](docs/plans/sec-pit-bundle-findings-v2.md) define the
+history, assertions, and closure requirements.
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves
@@ -521,7 +527,9 @@ from datetime import UTC, datetime
 from ohmydata.core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision, RequestSpec
 from ohmydata.providers.sec import (
     SecNormalizedFinancialFactVersion,
+    evaluate_sec_structural_quality,
     serialize_sec_typed_rows_projection,
+    write_sec_pit_bundle,
 )
 
 # ``vintage`` and the source artifact digest are caller-supplied and retained with its source evidence.
@@ -547,6 +555,20 @@ version = SecNormalizedFinancialFactVersion.from_projection(
     row_ordinal=0, schema_version="sec-financial-normalized-v1", adapter_version="adapter-v1",
     normalization_version="normalization-v1", configuration_identity=config_sha256,
     recorded_at=datetime.now(UTC),
+)
+report = evaluate_sec_structural_quality(
+    [version], detected_at=datetime.now(UTC), recorded_at=datetime.now(UTC)
+)
+# ``bundle_store`` is caller-provided; source evidence remains in ``store``.
+bundle_ref = write_sec_pit_bundle(
+    store=bundle_store,
+    batch_identity="structural-1",
+    versions=[version],
+    quality_records=[],
+    quality_findings=report.findings,
+    source_store=store,
+    resolve_observation=lambda identity: observation,
+    captured_at=datetime.now(UTC),
 )
 ```
 

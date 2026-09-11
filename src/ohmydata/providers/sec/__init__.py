@@ -78,14 +78,6 @@ from .pit import (
     serialize_sec_typed_rows_projection,
 )
 from .pit_bundle import SecPitBundle, load_sec_pit_bundle, write_sec_pit_bundle
-from .quality_findings import (
-    SecMissingDataReason,
-    SecQualityEvidenceRef,
-    SecQualityFinding,
-    SecQualityFindingStatus,
-    SecQualityIssueClass,
-    select_sec_quality_findings,
-)
 from .qualification import (
     Deadline,
     QualificationProgress,
@@ -96,6 +88,15 @@ from .qualification import (
     qualify_sec_nport,
     select_exact_partitions,
 )
+from .quality_findings import (
+    SecMissingDataReason,
+    SecQualityEvidenceRef,
+    SecQualityFinding,
+    SecQualityFindingStatus,
+    SecQualityIssueClass,
+    select_sec_quality_findings,
+)
+from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
 
 __all__ = [
     "AdvisoryLock",
@@ -119,8 +120,8 @@ __all__ = [
     "SecHoldingVintageSet",
     "SecHttpClient",
     "SecHttpResponse",
-    "SecNormalizedFinancialFactVersion",
     "SecMissingDataReason",
+    "SecNormalizedFinancialFactVersion",
     "SecNportBatch",
     "SecNportPartitionSet",
     "SecNportPartitionSetEntry",
@@ -135,16 +136,17 @@ __all__ = [
     "SecPitMode",
     "SecPitPolicy",
     "SecPitResult",
-    "SecQualityRecord",
     "SecQualityEvidenceRef",
     "SecQualityFinding",
     "SecQualityFindingStatus",
     "SecQualityIssueClass",
+    "SecQualityRecord",
     "SecQualityStatus",
     "SecReplaySession",
     "SecScheduledFundSelector",
     "SecStatementParseError",
     "SecStatementRow",
+    "SecStructuralQualityReport",
     "SecTransportEvidence",
     "SecUnavailableResult",
     "StatementType",
@@ -154,6 +156,7 @@ __all__ = [
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
+    "evaluate_sec_structural_quality",
     "extract_from_artifact",
     "historical_basenames",
     "historical_submission_url",

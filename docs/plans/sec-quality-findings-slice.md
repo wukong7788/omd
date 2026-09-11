@@ -52,6 +52,9 @@ or automatically quarantine all financial fields. Integrating findings with
 quality-policy evaluation is later work. Persistence integration is specified
 separately by the [bundle v2 extension](sec-pit-bundle-findings-v2.md); the
 standalone finding API and its identities remain unchanged there.
+The separate [structural evaluator](sec-structural-quality-rules.md) produces
+OPEN findings for its explicitly documented checks. This record/history API
+continues to accept caller-authored assertions without executing those checks.
 
 ## Acceptance
 
@@ -61,7 +64,8 @@ version binding, naive/invalid time rejection, initial/revised judgments and
 retraction before/after cutoff, missing predecessors, same-time conflicts,
 forks, duplicate/order-independent queries, future bad references not changing
 past lookup, and stopping an unbounded generator at the configured limit.
-Public docs must state that evidence references are caller-authored assertions
-and that automatic checks, persistence integration and financial corrections
-remain unimplemented. Independent review is required for the time/history
+Public docs must distinguish evidence identity from proof of source correctness
+and distinguish this record API from the separately specified structural
+evaluator and bundle persistence. Financial corrections remain unimplemented.
+Independent review is required for the time/history
 semantics before marking this slice complete.
