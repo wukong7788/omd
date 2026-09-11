@@ -158,8 +158,8 @@ paths retain the old unit behavior; the [live v2 follow-up](sec-live-unit-eviden
 also preserves complete raw units while keeping explicit live v1 compatible. Any consumer adopting
 v2 or relying on old unit assumptions requires an impact assessment and rerun
 before corrected downstream comparisons can be claimed.
-Selected accounting relationships are corroborated below; period bridges,
-visible-report comparison, publication evidence and the broader P1 gate remain
+Selected accounting relationships and HTML display text are corroborated below; period bridges,
+full rendered-report comparison, publication evidence and the broader P1 gate remain
 unverified. This filing receives no PASS.
 
 ## Selected same-filing accounting equalities
@@ -195,3 +195,36 @@ consumer commit, source first-publication claim or pilot expansion follows from 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns
 the exact availability and provenance requirements.
+
+## Selected primary HTML display text
+
+A bounded offline diagnostic extracts the single primary `10-Q` document from
+the retained 5,946,811-byte SGML and compares 46 explicitly selected cells with
+the raw instance and corrected observed-v2 rows. The selected cells comprise
+32 income-statement values, including eight EPS and eight share-count values,
+eight balance-sheet totals and six cash-flow activity totals. All 46 match
+exactly after applying the printed scale; tolerance is zero.
+
+The report retains statement headings, scale text, ordered date and duration
+headers, table/row/cell positions, displayed tokens, manual taxonomy bindings,
+raw-fact ordinals, corrected-row references and source hashes. Column spans are
+respected; unsupported row spans, ambiguous labels, absent evidence and
+unexpected numeric tokens fail explicitly. Parenthesized amounts retain their
+signs. Money in millions, shares in thousands and unscaled EPS are checked
+separately against complete raw units. No inline-XBRL numeric, context or scale
+attributes serve as the displayed-value oracle.
+
+This is selected HTML display text, not browser-rendered visibility or all
+statement rows/notes. Known hidden containers and inline visibility styles are
+excluded, but external CSS is not rendered. Quarter/YTD interpretation and
+taxonomy mappings are explicit diagnostic declarations. The primary filename
+is checked against the retained SGML and selected filing date identity, without
+an independently retained directory-index receipt. No full source-authenticity,
+first-publication, financial PASS, consumer commit or expansion claim follows.
+
+The ignored harness is `run_html_qualification.py`; its report is retained at
+`artifacts/sec-pit-qualification-20260911/html-qualification/20260911T155745865579Z/report.json`.
+The report binds the harness and primary-document hashes and the existing
+instance/package/corrected-output observation receipts. Network connections and
+SnapshotStore writes were disabled during the probe. Independent Astra review
+accepted this limited scope and inspected representative headers and cells.
