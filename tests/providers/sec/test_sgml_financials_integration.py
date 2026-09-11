@@ -110,17 +110,25 @@ def test_raw_restart_findings_bundle_and_pit_modes_remain_bound(tmp_path):
         quality.quality_policy_version,
         CAPTURED,
     )
-    for mode in (SecPitMode.MARKET_KNOWN, SecPitMode.SYSTEM_REPLAY):
-        results = select_sec_financial_versions(
+    with pytest.raises(ValueError, match="automatic SGML acceptance-proxy"):
+        select_sec_financial_versions(
             loaded.versions,
-            mode=mode,
-            knowledge_cutoff=CAPTURED,
+            mode=SecPitMode.MARKET_KNOWN,
+            knowledge_cutoff=datetime(2024, 5, 1, 21, 30, tzinfo=UTC),
             policy=policy,
             quality_records=loaded.quality_records,
             consumer_commits=loaded.consumer_commits,
         )
-        assert len(results) == 1
-        assert results[0].version == version
+    results = select_sec_financial_versions(
+        loaded.versions,
+        mode=SecPitMode.SYSTEM_REPLAY,
+        knowledge_cutoff=CAPTURED,
+        policy=policy,
+        quality_records=loaded.quality_records,
+        consumer_commits=loaded.consumer_commits,
+    )
+    assert len(results) == 1
+    assert results[0].version == version
 
 
 def test_invalid_raw_does_not_publish_or_change_existing_projection(tmp_path):

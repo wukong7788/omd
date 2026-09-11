@@ -17,9 +17,14 @@ from ohmydata.core import (
     SnapshotStore,
 )
 from ohmydata.providers.sec import (
+    SecPitMode,
+    SecPitPolicy,
+    SecQualityRecord,
+    SecQualityStatus,
     SecXbrlPackageAvailability,
     SecXbrlPackageComponents,
     produce_sec_financials_from_xbrl_package,
+    select_sec_financial_versions,
     serialize_sec_xbrl_package,
 )
 from ohmydata.providers.sec.sgml_financials import _documents
@@ -122,6 +127,28 @@ def test_retained_xbrl_package_reuses_real_parser_and_binds_availability(tmp_pat
     assert production.vintage.rows[0].unit == "iso4217:USD"
     assert production.vintage.rows[0].currency == "USD"
     assert production.vintage.rows[0].decimals_native == "0"
+    version = production.versions[0]
+    quality = SecQualityRecord(
+        version.normalized_version_id,
+        "quality-v1",
+        SecQualityStatus.PASS,
+        datetime(2024, 5, 2, tzinfo=UTC),
+    )
+    selected = select_sec_financial_versions(
+        production.versions,
+        mode=SecPitMode.MARKET_KNOWN,
+        knowledge_cutoff=datetime(2024, 5, 2, tzinfo=UTC),
+        policy=SecPitPolicy(
+            version.schema_version,
+            version.adapter_version,
+            version.normalization_version,
+            version.configuration_identity,
+            quality.quality_policy_version,
+            quality.recorded_at,
+        ),
+        quality_records=[quality],
+    )
+    assert selected[0].version == version
 
 
 def test_package_evidence_manifest_mismatch_fails_before_projection(tmp_path):

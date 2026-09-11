@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make `MARKET_KNOWN` explicitly reject supplied automatic SEC SGML
+  acceptance-proxy versions (`sec-sgml-financial-adapter-v1`) before policy,
+  cutoff, or quality filtering. `SYSTEM_REPLAY`, persisted snapshots, and
+  version identities retain their existing behavior.
+
 - Accept one exact SGML `<XBRL>…</XBRL>` wrapper around retained embedded
   traditional-XBRL component text before the existing local XML checks. Bare
   XML and retained snapshot bytes remain unchanged; malformed wrappers fail.

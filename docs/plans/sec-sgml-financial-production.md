@@ -54,7 +54,9 @@ times. The N-PORT compact timestamp parser has a different UTC contract and must
 not be reused. The v1 implementation writes acceptance to source_available_at;
 this is an acceptance proxy, not proof of exact public availability. The
 [availability evidence decision](sec-availability-evidence-decision.md) supersedes
-the original exact-publication claim and records the pending query restriction.
+the original exact-publication claim: `MARKET_KNOWN` explicitly rejects versions
+with this producer's exact adapter provenance, while `SYSTEM_REPLAY` retains its
+existing causal gates.
 The current API has no lag, date-only fallback or caller override.
 Require acceptance <= raw observation fetched_at
 <= produced_at, with an injected aware produced_at normalized to UTC. The

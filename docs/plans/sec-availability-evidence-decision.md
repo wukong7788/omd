@@ -1,7 +1,7 @@
 # SEC availability evidence: decision and required migration
 
-Date: 2026-09-11. Evidence investigation complete. Runtime remediation is not
-implemented by this documentation change; the real-source P1 gate remains open.
+Date: 2026-09-11. Evidence investigation and the query-boundary remediation are
+complete; the real-source P1 gate remains open.
 
 ## Source evidence
 
@@ -29,12 +29,12 @@ ever exist; none qualifying for this retained package has been established.
 
 ## Existing implementation gap
 
-The automatic SGML producer currently writes header acceptance into
-`source_available_at`. Its versions can enter `MARKET_KNOWN` queries using that
-time, although it is only an acceptance proxy. A cutoff between acceptance and
-actual website availability can therefore admit a fact too early. Existing
-offline test success does not resolve this gap. The code does not yet enforce
-the restriction described below.
+The automatic SGML producer writes header acceptance into
+`source_available_at`. That value is only an acceptance proxy. `MARKET_KNOWN`
+now explicitly rejects every supplied valid normalized version whose exact
+adapter provenance is `sec-sgml-financial-adapter-v1`, before policy, cutoff,
+or quality filtering. This deliberately fails mixed input instead of returning
+a partial or empty result. `SYSTEM_REPLAY` retains its existing causal gates.
 
 The package producer requires caller-declared exact availability. Its validation
 binds a declaration to the retained package; it does not establish the truth of
@@ -47,19 +47,19 @@ For a package, any such bound must cover all required components and their
 filing binding. Existing `SYSTEM_REPLAY` applies additional production, quality,
 and consumer-commit cutoffs; it is not a proof of first public availability.
 
-## Next implementation slice
+## Implemented query restriction and migration
 
-- Protect the query boundary first: identify automatic acceptance-proxy versions
-  through their producer/adapter provenance and explicitly reject their use in
-  `MARKET_KNOWN`; do not silently return an empty result or backfill a timestamp.
+- `MARKET_KNOWN` callers supplying legacy automatic-SGML versions must remove
+  those versions from their selected input set or use a separately qualified
+  future production path; no timestamp is backfilled and no evidence is
+  rewritten. Package-producer and caller-declared adapter versions retain their
+  existing behavior.
 - Preserve retained snapshots and identities. Do not rewrite old evidence or
   reinterpret its time field in place. Document the affected query behavior and
   require reruns of affected market backtests before claiming parity.
-- Then define a separately versioned known-by evidence and production contract,
+- Define a separately versioned known-by evidence and production contract,
   with explicit basis, exact-byte lineage, and conservative observation bounds.
   Do not merely relax the existing package wrapper's exact-time requirement.
-- Test cutoffs between acceptance and observation, explicit rejection of legacy
-  proxy evidence, system-replay causality, and unchanged persisted identities.
 
-These are pending implementation and migration requirements, not delivered API
-capabilities. No consumer migration or market-backtest rerun is claimed here.
+The query restriction is delivered. No consumer migration or market-backtest
+rerun is claimed here.

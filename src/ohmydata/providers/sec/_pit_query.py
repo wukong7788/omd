@@ -16,6 +16,8 @@ from .pit import (
     _utc,
 )
 
+_SGML_ACCEPTANCE_PROXY_ADAPTER_VERSION = "sec-sgml-financial-adapter-v1"
+
 
 def _quality_as_of(
     records: Iterable[SecQualityRecord],
@@ -104,6 +106,11 @@ def select_sec_financial_versions(
         if type(version) is not SecNormalizedFinancialFactVersion:
             raise TypeError("versions must contain SecNormalizedFinancialFactVersion values")
         version.__post_init__()
+        if (
+            mode is SecPitMode.MARKET_KNOWN
+            and version.adapter_version == _SGML_ACCEPTANCE_PROXY_ADAPTER_VERSION
+        ):
+            raise ValueError("MARKET_KNOWN rejects automatic SGML acceptance-proxy versions")
         previous = seen.get(version.normalized_version_id)
         if previous is not None and previous != version:
             raise ValueError("normalized version identity collision")

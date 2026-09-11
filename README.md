@@ -520,12 +520,17 @@ builds the same typed projection from one offline raw observation. The source
 must use this exact request shape and serialization; the call accepts no URL,
 path, credential, or caller-supplied publication time:
 
-The current SGML producer uses filing acceptance as an availability proxy. SEC
-acceptance does not prove first website publication, and the current
-`MARKET_KNOWN` query does not reject these proxy versions. Do not use them as
-exact-publication evidence for market backtests. The
-[availability decision](docs/plans/sec-availability-evidence-decision.md) records
-the pending query restriction and migration; this restriction is not yet enforced.
+The SGML producer uses filing acceptance as an availability proxy. SEC acceptance
+does not prove first website publication. `MARKET_KNOWN` raises `ValueError` if
+any supplied version uses `sec-sgml-financial-adapter-v1`, including versions
+that would otherwise be excluded by policy, cutoff, or quality. This applies to
+previously saved versions as well. `SYSTEM_REPLAY` retains its existing time,
+quality, and consumer-commit requirements; it does not establish first publication.
+Do not relabel these versions to bypass the check. Affected market backtests need
+review and reruns with qualifying evidence before their results can be relied on.
+Snapshots and identities remain unchanged. The
+[availability decision](docs/plans/sec-availability-evidence-decision.md) describes
+the migration and the separate known-by production capability still to be built.
 
 ```python
 from ohmydata.core import RequestSpec
