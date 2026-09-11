@@ -541,11 +541,65 @@ production = produce_sec_financials_from_sgml(
 )
 ```
 
-It supports only full SEC SGML with embedded traditional XBRL schema,
-presentation, label, and instance documents. The parser derives and preserves
-the header acceptance timestamp; it does not fetch filings or support inline XBRL.
+It supports full SEC SGML with embedded traditional XBRL schema, presentation,
+label, and instance documents. For inline-only submissions, retain a separate
+canonical `sec-xbrl-package-v1` observation containing SEC-extracted traditional
+components and call `produce_sec_financials_from_xbrl_package`; that entry also
+requires explicitly bound `SOURCE_DECLARED` timestamp evidence. The parser does
+not fetch filings or parse inline XBRL.
 `max_rows` bounds emitted normalized rows; it does not claim to be a hard limit
 on memory used inside the third-party XBRL parser.
+
+For a separately retained extracted package, the caller supplies the original
+component bytes and evidence of when that exact package became public:
+
+```python
+from ohmydata.core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision
+from ohmydata.providers.sec import (
+    SecXbrlPackageAvailability, SecXbrlPackageComponents,
+    produce_sec_financials_from_xbrl_package, serialize_sec_xbrl_package,
+)
+
+package_bytes = serialize_sec_xbrl_package(
+    sgml_observation=raw_observation,
+    cik=request.cik, accession_number=request.accession_number, form=request.form,
+    source_available_at=package_public_at,
+    components=SecXbrlPackageComponents(
+        schema=retained_schema_bytes, presentation=retained_presentation_bytes,
+        labels=retained_labels_bytes, instance=retained_instance_bytes,
+    ),
+)
+package_observation = package_store.observe(
+    RequestSpec("sec", "company-filing-xbrl-package", {
+        "cik": request.cik, "accession_number": request.accession_number, "form": request.form,
+    }),
+    package_bytes, package_observed_at, "sec-xbrl-package-v1",
+)
+package_availability = SecXbrlPackageAvailability(
+    package_observation,
+    AvailabilityEvidence.from_observation(
+        package_store, package_observation, source_available_at=package_public_at,
+        availability_basis=AvailabilityBasis.SOURCE_DECLARED,
+        availability_precision=AvailabilityPrecision.TIMESTAMP,
+    ),
+)
+production = produce_sec_financials_from_xbrl_package(
+    source_store=source_store, source_observation=raw_observation,
+    package_store=package_store, package_observation=package_observation,
+    package_availability=package_availability, projection_store=projection_store,
+    request=request, produced_at=produced_at,
+)
+```
+
+Here `request` is an explicit `SecSgmlFinancialsRequest` as above. The normalized
+versions and vintage availability anchor use the later of header acceptance and
+the declared package publication timestamp; `accepted_at` retains the original
+header timestamp. Fetch time cannot substitute for that declaration.
+Retain both source observations and the evidence for rebuilding: bundle replay
+alone still verifies only the typed projection. Origin and filing correspondence
+remain caller assertions checked against the retained binding and CIK; this is
+reproducible parsing, not independent cross-validation. See the
+[package contract](docs/plans/sec-xbrl-package-financial-production.md) for limits.
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves

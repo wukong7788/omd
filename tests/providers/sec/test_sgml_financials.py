@@ -6,15 +6,14 @@ from datetime import UTC, datetime
 import pytest
 
 from ohmydata.core import RequestSpec, SnapshotStore
-from ohmydata.providers.sec import (
-    SecSgmlFinancialsRequest,
-    produce_sec_financials_from_sgml,
-)
+from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
 
 pytest.importorskip("edgar")
 
 
-def _raw(*, acceptance: str = "20240501170000", components: bool = True) -> bytes:
+def _raw(
+    *, acceptance: str = "20240501170000", components: bool = True, dimension: bool = False
+) -> bytes:
     documents = (
         ""
         if not components
@@ -40,6 +39,17 @@ def _raw(*, acceptance: str = "20240501170000", components: bool = True) -> byte
 <TEXT><xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:us-gaap="http://fasb.org/us-gaap/2024" xmlns:dei="http://xbrl.sec.gov/dei/2024" xmlns:iso4217="http://www.xbrl.org/2003/iso4217"><context id="c1"><entity><identifier scheme="http://www.sec.gov/CIK">0000000001</identifier></entity><period><startDate>2024-01-01</startDate><endDate>2024-03-31</endDate></period></context><unit id="usd"><measure>iso4217:USD</measure></unit><us-gaap:Revenues contextRef="c1" unitRef="usd" decimals="0">123</us-gaap:Revenues><dei:EntityCentralIndexKey contextRef="c1">0000000001</dei:EntityCentralIndexKey></xbrl></TEXT>
 </DOCUMENT>"""
     )
+    if dimension:
+        documents = documents.replace(
+            'xmlns:iso4217="http://www.xbrl.org/2003/iso4217">',
+            'xmlns:iso4217="http://www.xbrl.org/2003/iso4217" '
+            'xmlns:xbrldi="http://xbrl.org/2006/xbrldi">',
+        ).replace(
+            "</identifier></entity>",
+            "</identifier><segment><xbrldi:explicitMember "
+            'dimension="us-gaap:ProductOrServiceAxis">us-gaap:ProductMember'
+            "</xbrldi:explicitMember></segment></entity>",
+        )
     return f"""<SEC-DOCUMENT>0000000001-24-000001.txt\n<SEC-HEADER>\nACCESSION NUMBER: 0000000001-24-000001\nCONFORMED SUBMISSION TYPE: 10-Q\nFILED AS OF DATE: 20240501\nDATE AS OF CHANGE: 20240501\n<ACCEPTANCE-DATETIME>{acceptance}\nFILER:\n\tCOMPANY DATA:\n\t\tCONFORMED NAME: Synthetic Filing Co.\n\t\tCENTRAL INDEX KEY: 0000000001\nCONFORMED PERIOD OF REPORT: 20240331\n</SEC-HEADER>\n{documents}\n""".encode()
 
 

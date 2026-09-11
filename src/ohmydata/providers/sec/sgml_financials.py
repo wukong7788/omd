@@ -144,7 +144,7 @@ def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date
     return first.astimezone(UTC), filed, period, values["CONFORMED NAME"]
 
 
-def _documents(raw: str) -> dict[str, str]:
+def _documents(raw: str, *, require_traditional: bool = True) -> dict[str, str]:
     if raw.count("<DOCUMENT>") != raw.count("</DOCUMENT>"):
         raise ValueError("unbalanced SEC document blocks")
     blocks = re.findall(r"<DOCUMENT>\s*(.*?)</DOCUMENT>", raw, flags=re.DOTALL)
@@ -170,7 +170,7 @@ def _documents(raw: str) -> dict[str, str]:
                 raise ValueError("duplicate required XBRL component")
             found[name] = text.strip()
     missing = _COMPONENTS - set(found)
-    if missing:
+    if require_traditional and missing:
         raise ValueError("missing required traditional XBRL component")
     return found
 
@@ -226,8 +226,8 @@ def _validate_instance_identity(text: str, cik: str) -> None:
             raise ValueError("DEI EntityCentralIndexKey does not match SEC header")
 
 
-def _rows(
-    raw: str, request: SecSgmlFinancialsRequest, max_rows: int
+def _rows_from_documents(
+    raw: str, documents: dict[str, str], request: SecSgmlFinancialsRequest, max_rows: int
 ) -> tuple[SecStatementRow, ...]:
     ensure_edgar_available()
     try:
@@ -240,7 +240,6 @@ def _rows(
     from edgar.sgml.sgml_common import FilingSGML
     from edgar.xbrl import XBRL
 
-    documents = _documents(raw)
     if sum(_validate_xml(text) for text in documents.values()) > 200_000:
         raise ValueError("embedded XBRL XML aggregate element limit exceeded")
     _validate_instance_identity(documents["EX-101.INS"], request.cik)
@@ -278,6 +277,12 @@ def _rows(
             raise ValueError("SEC financial row limit exceeded")
         rows.extend(parsed)
     return tuple(rows)
+
+
+def _rows(
+    raw: str, request: SecSgmlFinancialsRequest, max_rows: int
+) -> tuple[SecStatementRow, ...]:
+    return _rows_from_documents(raw, _documents(raw), request, max_rows)
 
 
 def produce_sec_financials_from_sgml(

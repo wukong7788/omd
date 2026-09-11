@@ -102,6 +102,17 @@ from .sgml_financials import (
     produce_sec_financials_from_sgml,
 )
 from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
+from .xbrl_package import (
+    SecXbrlPackage,
+    SecXbrlPackageAvailability,
+    SecXbrlPackageComponents,
+    decode_sec_xbrl_package,
+    serialize_sec_xbrl_package,
+)
+from .xbrl_package_financials import (
+    SecXbrlPackageFinancialProduction,
+    produce_sec_financials_from_xbrl_package,
+)
 
 __all__ = [
     "AdvisoryLock",
@@ -156,10 +167,15 @@ __all__ = [
     "SecStructuralQualityReport",
     "SecTransportEvidence",
     "SecUnavailableResult",
+    "SecXbrlPackage",
+    "SecXbrlPackageAvailability",
+    "SecXbrlPackageComponents",
+    "SecXbrlPackageFinancialProduction",
     "StatementType",
     "atomic_json",
     "canonical_hash",
     "canonical_json",
+    "decode_sec_xbrl_package",
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
@@ -176,6 +192,7 @@ __all__ = [
     "parse_submissions",
     "partition_identity",
     "produce_sec_financials_from_sgml",
+    "produce_sec_financials_from_xbrl_package",
     "publish_directory",
     "qualify_sec_nport",
     "quarter_range",
@@ -186,6 +203,7 @@ __all__ = [
     "select_sec_financial_versions",
     "select_sec_quality_findings",
     "serialize_sec_typed_rows_projection",
+    "serialize_sec_xbrl_package",
     "store_immutable_payload",
     "validate_sec_url",
     "validate_tables",

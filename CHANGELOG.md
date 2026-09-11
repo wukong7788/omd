@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add offline replay from a separately retained, receipt-bound SEC extracted
+  traditional-XBRL package for inline-only filings. Package availability remains
+  caller-declared and timestamp-bound; the library neither fetches nor parses
+  inline XBRL.
+
 - Add an offline SEC full-SGML traditional-XBRL production path. It replay-binds
   retained filing bytes, header acceptance time, parsed native rows, typed-row
   projections, and normalized versions; inline-only or incomplete filings fail
