@@ -482,3 +482,8 @@ provider/代码/交易所别名使用必需的半开有效日期区间，按记�
 SDK的22条诊断与独立原始事实核验一致：20 MATCH、2 MISSING，零质量PASS/消费者提交。
 报告保留于`artifacts/sec-pit-qualification-20260911/sdk-accounting/20260911T162410100708Z/report.json`。
 仍未完成跨申报期间/异常/完整质量策略、真实名单与消费者shadow门禁。
+
+已执行[八候选代表样本的有界探测](sec-representative-pilot.md)：六份SEC公司根元数据留存成功，
+但MSFT诊断正文确认超过8MiB；NVDA在source_read阶段触发资源保护，未保留细分证据，其余两份未尝试。
+TSM的外国发行人路径尚不支持；ETF/指数按类型记录不适用。原失败、诊断请求偏差及停止结果均保留。
+这轮代表样本门禁未通过，不勾选真实来源验收或整批性能项，不扩抓其余名单。
