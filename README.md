@@ -953,6 +953,48 @@ separate raw-instance evidence contract described above.
 See the
 [versioned repair contract](docs/plans/sec-compound-unit-repair.md).
 
+`evaluate_sec_observed_accounting` checks explicitly selected equalities within
+one observed production. It returns immutable MATCH/MISMATCH/MISSING/INCOMPARABLE
+diagnostics with row evidence, exact residuals and an explicit tolerance policy.
+It does not create normalized findings, financial PASS or consumer commits.
+Selectors, accounting completeness and cash-change definitions are caller
+declarations; absent FX never becomes zero. Example for caller-verified selectors:
+
+```python
+from ohmydata.providers.sec import (
+    SecAccountingApplicability,
+    SecAccountingRule,
+    SecAccountingTerm,
+    SecAccountingTolerance,
+    evaluate_sec_observed_accounting,
+)
+
+equation = SecAccountingRule(
+    "assets-reported-total",
+    SecAccountingApplicability.SAME_CONTEXT,
+    (
+        SecAccountingTerm("balance_sheet", "us-gaap_Assets", "c1", 1),
+        SecAccountingTerm("balance_sheet", "us-gaap_LiabilitiesAndStockholdersEquity", "c1", -1),
+    ),
+    "iso4217:USD",
+    SecAccountingTolerance.EXACT,
+    "evidence:caller-verified-same-consolidated-scope",
+)
+accounting = evaluate_sec_observed_accounting(
+    observed_production,
+    [equation],
+    detected_at=produced_at,
+    recorded_at=produced_at,
+)
+```
+
+Exact tolerance is zero. `ASSUME_NEAREST_REPORTED_DECIMALS` instead explicitly
+assumes nearest rounding for every term and derives the summed half-unit bound;
+missing or invalid native precision makes the comparison INCOMPARABLE. This is
+not SEC-certified rounding. Rules also support explicit three-term cash
+rollforwards. Limits and applicability are in the
+[accounting contract](docs/plans/sec-observed-accounting.md).
+
 The separate in-memory observed system selector requires caller-attested quality
 and consumer-commit records. A production alone is insufficient. A later
 quarantine or revocation blocks selection from that time onward; a later PASS

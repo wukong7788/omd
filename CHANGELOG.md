@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add bounded accounting diagnostics for one retained observed SEC production:
+  explicit same-context equalities and cash rollforwards, exact or explicitly
+  assumed nearest-rounding tolerances, complete selected row evidence and
+  distinct missing/incomparable outcomes. No automatic quality approval or
+  consumer publication is created.
+
 - Add bounded, immutable caller-declared issuer/security/provider-alias catalogs
   with explicit effective intervals and recording cutoffs. Exact-key indexed
   resolution preserves stable binding evidence for metric declarations and
