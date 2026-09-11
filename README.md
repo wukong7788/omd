@@ -496,6 +496,15 @@ observation-ID resolver and source store, without persisting source bytes or pat
 Both functions default to at most 10,000 input receipts and 8 MiB per bundle or
 replayed source payload; `max_records` and `max_bytes` accept stricter positive
 integer limits. See the [bundle replay contract](docs/plans/sec-pit-bundle-replay-slice.md).
+
+`SecQualityFinding` and `select_sec_quality_findings` additionally provide a
+separate, bounded history of caller-authored normalized-row quality assertions.
+Their evidence references are only caller-supplied observation/fact identities:
+they do not prove source correctness. Automatic accounting checks, persistent
+bundle integration, and financial-value corrections are intentionally not
+implemented by this API. The [quality-finding contract](docs/plans/sec-quality-findings-slice.md)
+defines classifications, time ordering and revision-chain requirements.
+
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves
 unlimited payload reads; exceeding an explicit limit raises

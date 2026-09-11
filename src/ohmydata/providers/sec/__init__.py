@@ -78,6 +78,14 @@ from .pit import (
     serialize_sec_typed_rows_projection,
 )
 from .pit_bundle import SecPitBundle, load_sec_pit_bundle, write_sec_pit_bundle
+from .quality_findings import (
+    SecMissingDataReason,
+    SecQualityEvidenceRef,
+    SecQualityFinding,
+    SecQualityFindingStatus,
+    SecQualityIssueClass,
+    select_sec_quality_findings,
+)
 from .qualification import (
     Deadline,
     QualificationProgress,
@@ -112,6 +120,7 @@ __all__ = [
     "SecHttpClient",
     "SecHttpResponse",
     "SecNormalizedFinancialFactVersion",
+    "SecMissingDataReason",
     "SecNportBatch",
     "SecNportPartitionSet",
     "SecNportPartitionSetEntry",
@@ -127,6 +136,10 @@ __all__ = [
     "SecPitPolicy",
     "SecPitResult",
     "SecQualityRecord",
+    "SecQualityEvidenceRef",
+    "SecQualityFinding",
+    "SecQualityFindingStatus",
+    "SecQualityIssueClass",
     "SecQualityStatus",
     "SecReplaySession",
     "SecScheduledFundSelector",
@@ -160,6 +173,7 @@ __all__ = [
     "rows_from_result",
     "select_exact_partitions",
     "select_sec_financial_versions",
+    "select_sec_quality_findings",
     "serialize_sec_typed_rows_projection",
     "store_immutable_payload",
     "validate_sec_url",
