@@ -60,8 +60,10 @@ and consumer-commit cutoffs; it is not a proof of first public availability.
 - The separate [observed-package production contract](sec-known-by-production.md)
   preserves exact-byte lineage and conservative local observation bounds without
   relaxing the existing package wrapper's exact-time requirement. Its new row
-  product is separate from legacy PIT versions; quality, consumer-commit and
-  historical query integration remain follow-up work.
+  product is separate from legacy PIT versions. The follow-up
+  [in-memory system replay contract](sec-observed-system-replay.md) requires
+  explicit quality and consumer-commit evidence; it does not establish public
+  availability or add durable lifecycle replay.
 
 The query restriction is delivered. No consumer migration or market-backtest
 rerun is claimed here.

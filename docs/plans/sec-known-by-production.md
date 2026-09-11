@@ -6,6 +6,11 @@ SYSTEM_REPLAY eligibility and does not introduce a selector or consumer commit.
 The retained first-filing qualification probe and prospective system-replay
 integration are its concrete callers.
 
+The follow-up [in-memory system replay contract](sec-observed-system-replay.md)
+adds a separate selector requiring explicit quality and consumer-commit evidence.
+The production receipt alone still does not establish eligibility, and the
+original persisted observed-row schema remains unchanged.
+
 ## Inputs and package
 
 Add `serialize_sec_observed_xbrl_package`, `decode_sec_observed_xbrl_package`,

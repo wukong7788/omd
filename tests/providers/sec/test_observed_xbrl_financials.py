@@ -13,6 +13,7 @@ import pytest
 from ohmydata.core import RequestSpec, SnapshotIntegrityError, SnapshotMode, SnapshotStore
 from ohmydata.providers.sec import (
     SecCompanyFinancialVintage,
+    SecObservedFinancialReplayPolicy,
     SecPitMode,
     SecPitPolicy,
     SecXbrlPackageComponents,
@@ -95,6 +96,18 @@ def _produce(
         **kwargs,
     )
     return result, source, source_ref, packages, package_ref, package_bytes, output
+
+
+def _replay_policy(result, cutoff):
+    return SecObservedFinancialReplayPolicy(
+        result.output_schema_version,
+        result.parser_version,
+        result.configuration_version,
+        result.configuration_identity,
+        "observed-quality-v1",
+        "a" * 64,
+        cutoff,
+    )
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from ...core import RequestSpec, SnapshotObservationRef, SnapshotStore
+from ._observed_financial_receipts import receipt_binding
 from .financials import SecStatementRow
 from .observed_xbrl_package import decode_sec_observed_xbrl_package
 from .pit import _row_payload
@@ -84,33 +85,12 @@ def _evidence_binding(
 ) -> str:
     return _identity(
         {
-            "source_receipt": _receipt_binding(source),
-            "package_receipt": _receipt_binding(package),
+            "source_receipt": receipt_binding(source),
+            "package_receipt": receipt_binding(package),
             "accepted_at": _stamp(accepted),
             "known_by_at": _stamp(known),
         }
     )
-
-
-def _receipt_binding(receipt: SnapshotObservationRef) -> dict[str, str]:
-    """Return all receipt fields for a private evidence-binding digest.
-
-    The path is deliberately limited to this private integrity digest and is
-    never emitted in the persisted observed-financial result.
-    """
-    return {
-        "path": str(receipt.path),
-        "observation_identity": receipt.observation_identity,
-        "snapshot_identity": receipt.snapshot_identity,
-        "fact_version": receipt.fact_version,
-        "mode": receipt.mode.value,
-        "provider": receipt.provider,
-        "endpoint": receipt.endpoint,
-        "request_identity": receipt.request_identity,
-        "response_sha256": receipt.response_sha256,
-        "serialization_identifier": receipt.serialization_identifier,
-        "snapshot_fetched_at": _stamp(receipt.snapshot_fetched_at),
-    }
 
 
 @dataclass(frozen=True)
@@ -173,6 +153,124 @@ class SecObservedFinancialProduction:
     output_observation: SnapshotObservationRef
     vintage: SecObservedFinancialVintage
     produced_at: datetime
+    _capability: object = field(repr=False, compare=False)
+    _binding_identity: str = field(repr=False, compare=False)
+    production_identity: str = field(init=False)
+
+    @property
+    def output_schema_version(self) -> str:
+        return _OUTPUT_SERIALIZATION
+
+    @property
+    def parser_version(self) -> str:
+        return _PARSER_VERSION
+
+    @property
+    def configuration_version(self) -> str:
+        return _CONFIG_VERSION
+
+    @property
+    def configuration_identity(self) -> str:
+        return _configuration_identity(self.request)
+
+    def __post_init__(self) -> None:
+        if self._capability is not _FACTORY:
+            raise ValueError("SEC observed financial production is created by production only")
+        # Revalidate nested seals: frozen dataclasses can still be illicitly
+        # changed with object.__setattr__ after producer construction.
+        self.evidence.__post_init__()
+        self.vintage.__post_init__()
+        produced = _utc(self.produced_at, "produced_at")
+        _validate_output_observation(
+            self.output_observation,
+            self.request,
+            self.evidence,
+            self.vintage,
+            produced,
+        )
+        binding = _production_binding(
+            self.request, self.evidence, self.output_observation, self.vintage, produced
+        )
+        if self._binding_identity != binding:
+            raise ValueError("SEC observed financial production binding mismatch")
+        object.__setattr__(self, "produced_at", produced)
+        object.__setattr__(
+            self,
+            "production_identity",
+            _identity(
+                {
+                    "domain": "sec-observed-financial-production-v1",
+                    "canonical_output_identity": self.output_observation.response_sha256,
+                    "output_observation_identity": self.output_observation.observation_identity,
+                }
+            ),
+        )
+
+
+def _validate_output_observation(
+    output: SnapshotObservationRef,
+    request: SecSgmlFinancialsRequest,
+    evidence: SecObservedFinancialEvidence,
+    vintage: SecObservedFinancialVintage,
+    produced: datetime,
+) -> None:
+    expected = RequestSpec(
+        "sec",
+        "financial-observed-rows",
+        {"cik": request.cik, "accession_number": request.accession_number, "form": request.form},
+    )
+    if (
+        output.provider != expected.provider
+        or output.endpoint != expected.endpoint
+        or output.request_identity != expected.request_identity
+        or output.serialization_identifier != _OUTPUT_SERIALIZATION
+        or output.snapshot_fetched_at != produced
+    ):
+        raise ValueError("SEC observed financial output receipt does not match production")
+    if (
+        output.response_sha256
+        != hashlib.sha256(
+            _serialize_result(
+                request=request,
+                evidence=evidence,
+                vintage=vintage,
+                produced_at=produced,
+                configuration_identity=_configuration_identity(request),
+            )
+        ).hexdigest()
+    ):
+        raise ValueError("SEC observed financial output receipt does not bind result bytes")
+    if (
+        vintage.accepted_at != evidence.accepted_at
+        or vintage.known_by_at != evidence.known_by_at
+        or evidence.accepted_at > evidence.source_observation.snapshot_fetched_at
+        or evidence.known_by_at > produced
+    ):
+        raise ValueError("SEC observed financial production identities or times are invalid")
+
+
+def _production_binding(
+    request: SecSgmlFinancialsRequest,
+    evidence: SecObservedFinancialEvidence,
+    output: SnapshotObservationRef,
+    vintage: SecObservedFinancialVintage,
+    produced: datetime,
+) -> str:
+    return _identity(
+        {
+            "domain": "sec-observed-financial-production-binding-v1",
+            "request": _request_payload(request),
+            "evidence": evidence._binding_identity,
+            "output_receipt": receipt_binding(output),
+            "vintage": {
+                "identity": vintage.vintage_identity,
+                "accepted_at": _stamp(vintage.accepted_at),
+                "known_by_at": _stamp(vintage.known_by_at),
+                "rows": [_row_payload(row) for row in vintage.rows],
+            },
+            "produced_at": _stamp(produced),
+        }
+    )
 
 
 def _request_payload(request: SecSgmlFinancialsRequest) -> dict[str, Any]:
@@ -184,6 +282,17 @@ def _request_payload(request: SecSgmlFinancialsRequest) -> dict[str, Any]:
         "statement_types": list(request.statement_types),
         "include_dimensions": request.include_dimensions,
     }
+
+
+def _configuration_identity(request: SecSgmlFinancialsRequest) -> str:
+    return _identity(
+        {
+            "parser_version": _PARSER_VERSION,
+            "configuration_version": _CONFIG_VERSION,
+            "statement_types": request.statement_types,
+            "include_dimensions": request.include_dimensions,
+        }
+    )
 
 
 def _serialize_result(
@@ -339,14 +448,7 @@ def produce_sec_financials_from_observed_xbrl_package(
         request.form.endswith("/A"),
         rows,
     )
-    configuration_identity = _identity(
-        {
-            "parser_version": _PARSER_VERSION,
-            "configuration_version": _CONFIG_VERSION,
-            "statement_types": request.statement_types,
-            "include_dimensions": request.include_dimensions,
-        }
-    )
+    configuration_identity = _configuration_identity(request)
     payload = _serialize_result(
         request=request,
         evidence=evidence,
@@ -370,7 +472,15 @@ def produce_sec_financials_from_observed_xbrl_package(
         produced,
         _OUTPUT_SERIALIZATION,
     )
-    return SecObservedFinancialProduction(request, evidence, output, vintage, produced)
+    return SecObservedFinancialProduction(
+        request,
+        evidence,
+        output,
+        vintage,
+        produced,
+        _FACTORY,
+        _production_binding(request, evidence, output, vintage, produced),
+    )
 
 
 __all__ = [

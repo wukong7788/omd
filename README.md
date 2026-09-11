@@ -650,9 +650,62 @@ envelope. `known_by_at` is the later of that receipt and the selected SGML recei
 both must be no later than production. The new vintage and output serialization
 keep this time separate from acceptance. Retain all three observations and
 rerun the producer with the same inputs to reproduce the result. These results
-are not inputs to the existing PIT selector or bundles; quality and consumer
-commit integration remain pending. See the
-[known-by contract](docs/plans/sec-known-by-production.md).
+are not inputs to the legacy PIT selector or bundles. Only the producer creates
+validated production objects; direct construction and substitutions of their
+bound fields are rejected. Persisted observed-row bytes retain their existing
+schema. See the [known-by contract](docs/plans/sec-known-by-production.md).
+Callers that previously constructed production objects directly must now use
+`produce_sec_financials_from_observed_xbrl_package` with their retained inputs.
+There is no snapshot migration or promotion of old PIT evidence.
+
+The separate in-memory observed system selector requires caller-attested quality
+and consumer-commit records. A production alone is insufficient. A later
+quarantine or revocation blocks selection from that time onward; a later PASS
+needs a commit referencing that exact quality record. Future records cannot
+change an earlier cutoff. This records the caller's decisions, without checking
+the truth of a financial assessment or performing a consumer publication.
+
+```python
+from ohmydata.providers.sec import (
+    SecObservedFinancialConsumerCommit,
+    SecObservedFinancialQualityRecord,
+    SecObservedFinancialReplayPolicy,
+    SecQualityStatus,
+    select_sec_observed_financial_productions,
+)
+
+# These records represent a PASS assessment and a commit already made by the caller.
+quality = SecObservedFinancialQualityRecord(
+    observed_production.production_identity, "example-quality-v1",
+    SecQualityStatus.PASS, quality_recorded_at,
+)
+commit = SecObservedFinancialConsumerCommit(
+    observed_production.production_identity, quality.quality_record_id,
+    consumer_dataset_identity, committed_at,
+)
+replay_policy = SecObservedFinancialReplayPolicy(
+    output_schema_version="sec-financial-observed-rows-v1",
+    parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0",
+    configuration_version="sec-observed-xbrl-financial-config-v1",
+    configuration_identity=expected_configuration_identity,
+    quality_policy_version="example-quality-v1",
+    consumer_dataset_identity=consumer_dataset_identity,
+    knowledge_cutoff=knowledge_cutoff,
+)
+selected = select_sec_observed_financial_productions(
+    [observed_production], [quality], [commit], replay_policy,
+)
+```
+
+Selection uses explicit schema/parser/configuration, quality policy and consumer
+dataset identities, and returns all eligible complete packages. It has no
+MARKET_KNOWN mode and performs no network, snapshot reads or parsing. Retain and
+reproduce source productions and supply lifecycle records yourself; durable
+observed lifecycle loading/bundles are not provided. See the
+[system replay contract](docs/plans/sec-observed-system-replay.md).
+Queries are bounded to 100 production inputs, 10,000 quality records, 10,000
+commits and 100,000 aggregate rows; optional caller limits can only tighten
+these bounds. Over-limit inputs fail explicitly, including iterators.
 
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves

@@ -68,7 +68,9 @@ identity. Raw responses, package/output receipts and the probe report remain
 ignored local artifacts.
 
 This result uses a new observed-row serialization, not a legacy PIT projection.
-Quality, consumer-commit and historical query integration remain pending.
+The separate [system replay contract](sec-observed-system-replay.md) requires
+quality and consumer-commit evidence in addition to this production result.
+No such evidence is attested for this real filing by the parsing probe.
 Do not mark the P1 real-source gate complete or expand the pilot on this result.
 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot

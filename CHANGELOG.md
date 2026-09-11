@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add bounded in-memory known-by replay for sealed SEC observed financial
+  productions. Selection requires explicit producer versions, system cutoff,
+  quality history, and consumer dataset commits; it does not invoke parsers,
+  read snapshots, or establish public availability.
+
 - Add a bounded, offline SEC observed-package financial production path.  It
   records only caller-observed receipt times and preserves the separate filing
   acceptance timestamp; it neither asserts first public availability nor

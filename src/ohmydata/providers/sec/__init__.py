@@ -66,6 +66,13 @@ from .nport import (
     parse_sec_date,
     read_member,
 )
+from .observed_financial_replay import (
+    SecObservedFinancialConsumerCommit,
+    SecObservedFinancialQualityRecord,
+    SecObservedFinancialReplayPolicy,
+    SecObservedFinancialReplayResult,
+    select_sec_observed_financial_productions,
+)
 from .observed_xbrl_financials import (
     SecObservedFinancialEvidence,
     SecObservedFinancialProduction,
@@ -158,8 +165,12 @@ __all__ = [
     "SecNportQuarterRequest",
     "SecNportQuarterResult",
     "SecNportScanCounts",
+    "SecObservedFinancialConsumerCommit",
     "SecObservedFinancialEvidence",
     "SecObservedFinancialProduction",
+    "SecObservedFinancialQualityRecord",
+    "SecObservedFinancialReplayPolicy",
+    "SecObservedFinancialReplayResult",
     "SecObservedFinancialVintage",
     "SecObservedXbrlPackage",
     "SecPayloadReceipt",
@@ -218,6 +229,7 @@ __all__ = [
     "rows_from_result",
     "select_exact_partitions",
     "select_sec_financial_versions",
+    "select_sec_observed_financial_productions",
     "select_sec_quality_findings",
     "serialize_sec_observed_xbrl_package",
     "serialize_sec_typed_rows_projection",
