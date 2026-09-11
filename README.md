@@ -430,7 +430,7 @@ ETFs.
 ### SEC Company Financials (10-K & 10-Q PIT via EdgarTools)
 
 The `sec-financials` extra wraps `edgartools` with strict credential injection,
-zero-runtime core isolation, and anti-lookahead Point-in-Time (PIT) lineage for
+core isolation, and explicit filing and availability metadata for
 the three core financial statements (**Balance Sheet**, **Income Statement**, and
 **Cash Flow Statement**):
 
@@ -453,11 +453,13 @@ Python SDK example with injected credentials:
 from ohmydata.providers.sec import (
     SecFinancialsClient,
     SecFinancialsRequest,
+    SecHttpClient,
     write_financials_partition,
 )
 
 # Injected client reading identity strictly from contact info (no .env):
-client = SecFinancialsClient("MyResearchApp/1.0 (contact@example.com)")
+user_agent = "MyResearchApp/1.0 (contact@example.com)"
+client = SecFinancialsClient(user_agent, http_client=SecHttpClient(user_agent))
 
 request = SecFinancialsRequest(
     symbols=("AAPL", "MSFT"),
@@ -481,6 +483,30 @@ The native presentation-tree path currently sets `standard_concept` to the
 native concept; this field does not establish a cross-company taxonomy mapping.
 Compatibility inputs may supply a separate `standard_concept`, whose semantics
 still require explicit validation before quantitative comparisons.
+
+Live requests default to
+`parser_version="sec-live-financial-parser-v2-edgartools-5.56.0"`. This mode
+requires the selected filing's bounded raw XML instance, corroborates native
+facts against it, and preserves complete units. Missing, ambiguous or mismatched
+unit evidence raises `SecUnitEvidenceError`; the call does not return a partial
+batch or silently switch versions. The raw instance download has its own byte
+budget; this is not a hard deadline on edgartools' other filing requests.
+
+Evidenced vintages carry `SecFinancialUnitEvidence` and use v4 identities and
+Parquet partitions. Statement rows in v4 explicitly identify their vintage,
+including mixed old/new results for the same accession. V3-only writes and old
+vintage identities remain unchanged. Existing immutable roots must be retained;
+write changed data to a new root. Older SDK validators may reject v4, so consumers
+must adopt a compatible pinned version and validate their reruns before switching.
+Evidence records the original instance identity, without retaining its bytes or
+claiming authenticated origin, financial quality, publication time, or live replay.
+
+For explicit legacy behavior, select
+`sec-live-financial-parser-v1-edgartools-5.56.0` in the request or the financials
+CLI's `--parser-version` option. V1 retains its known compound-unit limitations.
+Standalone `parse_statement_rows` retains its legacy default; explicit v2 also
+requires `raw_instance` and a native statement. See the
+[live unit evidence contract](docs/plans/sec-live-unit-evidence.md).
 
 For offline, explicitly versioned PIT research, the SEC package also exposes
 `serialize_sec_typed_rows_projection`, `SecNormalizedFinancialFactVersion`,
@@ -540,16 +566,29 @@ from ohmydata.core import RequestSpec
 from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
 
 raw_observation = source_store.observe(
-    RequestSpec("sec", "company-filing-sgml", {
-        "cik": "0000320193", "accession_number": "0000320193-24-000006", "form": "10-Q",
-    }),
-    retained_full_sgml_bytes, observed_at, "sec-filing-sgml-v1",
+    RequestSpec(
+        "sec",
+        "company-filing-sgml",
+        {
+            "cik": "0000320193",
+            "accession_number": "0000320193-24-000006",
+            "form": "10-Q",
+        },
+    ),
+    retained_full_sgml_bytes,
+    observed_at,
+    "sec-filing-sgml-v1",
 )
 production = produce_sec_financials_from_sgml(
-    source_store=source_store, source_observation=raw_observation,
+    source_store=source_store,
+    source_observation=raw_observation,
     projection_store=projection_store,
     request=SecSgmlFinancialsRequest(
-        "AAPL", "0000320193", "0000320193-24-000006", "10-Q", ("income_statement",),
+        "AAPL",
+        "0000320193",
+        "0000320193-24-000006",
+        "10-Q",
+        ("income_statement",),
         include_dimensions=False,
     ),
     produced_at=produced_at,
@@ -571,38 +610,58 @@ component bytes and evidence of when that exact package became public:
 ```python
 from ohmydata.core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision
 from ohmydata.providers.sec import (
-    SecXbrlPackageAvailability, SecXbrlPackageComponents,
-    produce_sec_financials_from_xbrl_package, serialize_sec_xbrl_package,
+    SecXbrlPackageAvailability,
+    SecXbrlPackageComponents,
+    produce_sec_financials_from_xbrl_package,
+    serialize_sec_xbrl_package,
 )
 
 package_bytes = serialize_sec_xbrl_package(
     sgml_observation=raw_observation,
-    cik=request.cik, accession_number=request.accession_number, form=request.form,
+    cik=request.cik,
+    accession_number=request.accession_number,
+    form=request.form,
     source_available_at=package_public_at,
     components=SecXbrlPackageComponents(
-        schema=retained_schema_bytes, presentation=retained_presentation_bytes,
-        labels=retained_labels_bytes, instance=retained_instance_bytes,
+        schema=retained_schema_bytes,
+        presentation=retained_presentation_bytes,
+        labels=retained_labels_bytes,
+        instance=retained_instance_bytes,
     ),
 )
 package_observation = package_store.observe(
-    RequestSpec("sec", "company-filing-xbrl-package", {
-        "cik": request.cik, "accession_number": request.accession_number, "form": request.form,
-    }),
-    package_bytes, package_observed_at, "sec-xbrl-package-v1",
+    RequestSpec(
+        "sec",
+        "company-filing-xbrl-package",
+        {
+            "cik": request.cik,
+            "accession_number": request.accession_number,
+            "form": request.form,
+        },
+    ),
+    package_bytes,
+    package_observed_at,
+    "sec-xbrl-package-v1",
 )
 package_availability = SecXbrlPackageAvailability(
     package_observation,
     AvailabilityEvidence.from_observation(
-        package_store, package_observation, source_available_at=package_public_at,
+        package_store,
+        package_observation,
+        source_available_at=package_public_at,
         availability_basis=AvailabilityBasis.SOURCE_DECLARED,
         availability_precision=AvailabilityPrecision.TIMESTAMP,
     ),
 )
 production = produce_sec_financials_from_xbrl_package(
-    source_store=source_store, source_observation=raw_observation,
-    package_store=package_store, package_observation=package_observation,
-    package_availability=package_availability, projection_store=projection_store,
-    request=request, produced_at=produced_at,
+    source_store=source_store,
+    source_observation=raw_observation,
+    package_store=package_store,
+    package_observation=package_observation,
+    package_availability=package_availability,
+    projection_store=projection_store,
+    request=request,
+    produced_at=produced_at,
 )
 ```
 
@@ -639,22 +698,38 @@ from ohmydata.providers.sec import (
 
 observed_package_bytes = serialize_sec_observed_xbrl_package(
     sgml_observation=raw_observation,
-    cik=request.cik, accession_number=request.accession_number, form=request.form,
+    cik=request.cik,
+    accession_number=request.accession_number,
+    form=request.form,
     components=SecXbrlPackageComponents(
-        schema=retained_schema_bytes, presentation=retained_presentation_bytes,
-        labels=retained_labels_bytes, instance=retained_instance_bytes,
+        schema=retained_schema_bytes,
+        presentation=retained_presentation_bytes,
+        labels=retained_labels_bytes,
+        instance=retained_instance_bytes,
     ),
 )
 observed_package = package_store.observe(
-    RequestSpec("sec", "company-filing-observed-xbrl-package", {
-        "cik": request.cik, "accession_number": request.accession_number, "form": request.form,
-    }),
-    observed_package_bytes, package_observed_at, "sec-observed-xbrl-package-v1",
+    RequestSpec(
+        "sec",
+        "company-filing-observed-xbrl-package",
+        {
+            "cik": request.cik,
+            "accession_number": request.accession_number,
+            "form": request.form,
+        },
+    ),
+    observed_package_bytes,
+    package_observed_at,
+    "sec-observed-xbrl-package-v1",
 )
 observed_production = produce_sec_financials_from_observed_xbrl_package(
-    source_store=source_store, source_observation=raw_observation,
-    package_store=package_store, package_observation=observed_package,
-    output_store=output_store, request=request, produced_at=produced_at,
+    source_store=source_store,
+    source_observation=raw_observation,
+    package_store=package_store,
+    package_observation=observed_package,
+    output_store=output_store,
+    request=request,
+    produced_at=produced_at,
 )
 known_by_at = observed_production.evidence.known_by_at
 ```
@@ -685,7 +760,8 @@ and rebuilds that complete source chain. V1 retains its known compound-unit
 defect for historical reconstruction. V2 has a distinct configuration and
 production identity and requires its own quality assessment and consumer commit.
 The SGML and declared-availability package v2 paths use the same correction;
-their explicit v1 paths and the live provider still require separate validation.
+their explicit v1 paths retain the known unit limitations. Live v2 uses the
+separate raw-instance evidence contract described above.
 See the
 [versioned repair contract](docs/plans/sec-compound-unit-repair.md).
 
@@ -707,12 +783,16 @@ from ohmydata.providers.sec import (
 
 # These records represent a PASS assessment and a commit already made by the caller.
 quality = SecObservedFinancialQualityRecord(
-    observed_production.production_identity, "example-quality-v1",
-    SecQualityStatus.PASS, quality_recorded_at,
+    observed_production.production_identity,
+    "example-quality-v1",
+    SecQualityStatus.PASS,
+    quality_recorded_at,
 )
 commit = SecObservedFinancialConsumerCommit(
-    observed_production.production_identity, quality.quality_record_id,
-    consumer_dataset_identity, committed_at,
+    observed_production.production_identity,
+    quality.quality_record_id,
+    consumer_dataset_identity,
+    committed_at,
 )
 replay_policy = SecObservedFinancialReplayPolicy(
     output_schema_version="sec-financial-observed-rows-v1",
@@ -724,7 +804,10 @@ replay_policy = SecObservedFinancialReplayPolicy(
     knowledge_cutoff=knowledge_cutoff,
 )
 selected = select_sec_observed_financial_productions(
-    [observed_production], [quality], [commit], replay_policy,
+    [observed_production],
+    [quality],
+    [commit],
+    replay_policy,
 )
 ```
 
@@ -758,22 +841,29 @@ observations = {
     raw_observation.observation_identity: (source_store, raw_observation),
     observed_package.observation_identity: (package_store, observed_package),
     observed_production.output_observation.observation_identity: (
-        output_store, observed_production.output_observation,
+        output_store,
+        observed_production.output_observation,
     ),
 }
 bundle_ref = write_sec_observed_financial_bundle(
-    store=bundle_store, batch_identity="example-observed-batch-v1",
-    productions=[observed_production], quality_records=[quality],
-    consumer_commits=[commit], captured_at=captured_at,
+    store=bundle_store,
+    batch_identity="example-observed-batch-v1",
+    productions=[observed_production],
+    quality_records=[quality],
+    consumer_commits=[commit],
+    captured_at=captured_at,
     resolve_observation=observations.__getitem__,
 )
 restored = load_sec_observed_financial_bundle(
-    store=bundle_store, bundle_ref=bundle_ref,
+    store=bundle_store,
+    bundle_ref=bundle_ref,
     resolve_observation=observations.__getitem__,
 )
 replayed = select_sec_observed_financial_productions(
-    restored.productions, restored.quality_records,
-    restored.consumer_commits, replay_policy,
+    restored.productions,
+    restored.quality_records,
+    restored.consumer_commits,
+    replay_policy,
 )
 ```
 
@@ -797,7 +887,12 @@ metadata. Retain source snapshots and observation receipts alongside bundles.
 ```python
 from datetime import UTC, datetime
 
-from ohmydata.core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision, RequestSpec
+from ohmydata.core import (
+    AvailabilityBasis,
+    AvailabilityEvidence,
+    AvailabilityPrecision,
+    RequestSpec,
+)
 from ohmydata.providers.sec import (
     SecNormalizedFinancialFactVersion,
     evaluate_sec_structural_quality,
@@ -824,9 +919,15 @@ evidence = AvailabilityEvidence.from_observation(
     availability_precision=AvailabilityPrecision.TIMESTAMP,
 )
 version = SecNormalizedFinancialFactVersion.from_projection(
-    store=store, observation=observation, availability=evidence, vintage=vintage,
-    row_ordinal=0, schema_version="sec-financial-normalized-v1", adapter_version="adapter-v1",
-    normalization_version="normalization-v1", configuration_identity=config_sha256,
+    store=store,
+    observation=observation,
+    availability=evidence,
+    vintage=vintage,
+    row_ordinal=0,
+    schema_version="sec-financial-normalized-v1",
+    adapter_version="adapter-v1",
+    normalization_version="normalization-v1",
+    configuration_identity=config_sha256,
     recorded_at=datetime.now(UTC),
 )
 report = evaluate_sec_structural_quality(

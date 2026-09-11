@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from typing import Any
 
 from .financials import SecStatementRow, StatementType
+
+_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-5.56.0"
+_LIVE_PARSER_V2 = "sec-live-financial-parser-v2-edgartools-5.56.0"
+_RAW_UNIT_MAX_ELEMENTS = 200_000
+_RAW_UNIT_MAX_DEPTH = 128
 
 _DISPLAY_PERIOD = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\((FY|Q[1-4]|YTD)\))?$")
 _STRUCTURED_PERIOD = re.compile(
@@ -21,6 +27,10 @@ _MAX_FACT_ARITHMETIC_DIGITS = 10_000
 
 class SecStatementParseError(ValueError):
     """A supplied financial statement could not be interpreted without losing identity."""
+
+
+class SecUnitEvidenceError(SecStatementParseError):
+    """Raw filing-instance evidence cannot safely bind native statement facts."""
 
 
 def _missing(value: Any) -> bool:
@@ -465,15 +475,62 @@ def _display_rows(statement: Any, kind: StatementType, dimensions: bool) -> list
     return rows
 
 
+def _corroborate_raw_instance(
+    raw_instance: bytes, rows: list[SecStatementRow], *, expected_cik: str | None = None
+) -> dict[str, str]:
+    """Compatibility wrapper for standalone v2 parsing."""
+    from ._live_unit_corroboration import SecUnitEvidenceError as _RawUnitEvidenceError
+    from ._live_unit_corroboration import corroborate_rows, prepare_raw_instance
+
+    try:
+        return corroborate_rows(prepare_raw_instance(raw_instance, expected_cik=expected_cik), rows)
+    except _RawUnitEvidenceError as exc:
+        raise SecUnitEvidenceError(str(exc)) from exc
+
+
 def parse_statement_rows(
-    statement: Any, statement_type: StatementType, *, include_dimensions: bool = False
+    statement: Any,
+    statement_type: StatementType,
+    *,
+    include_dimensions: bool = False,
+    parser_version: str = _LIVE_PARSER_V1,
+    raw_instance: bytes | None = None,
+    _prepared_evidence: Any | None = None,
 ) -> list[SecStatementRow]:
     """Preserve native fact identity; never infer duration starts from display suffixes."""
+    if parser_version not in {_LIVE_PARSER_V1, _LIVE_PARSER_V2}:
+        raise SecStatementParseError("unsupported SEC live financial parser version")
+    if parser_version == _LIVE_PARSER_V1 and raw_instance is not None:
+        raise SecStatementParseError("raw XBRL instance requires parser v2")
+    if parser_version == _LIVE_PARSER_V1 and _prepared_evidence is not None:
+        raise SecStatementParseError("raw XBRL evidence requires parser v2")
+    if parser_version == _LIVE_PARSER_V2 and type(raw_instance) is not bytes:
+        raise SecUnitEvidenceError("parser v2 requires raw XBRL instance bytes")
     if statement is None:
+        if parser_version == _LIVE_PARSER_V2:
+            raise SecUnitEvidenceError("parser v2 requires a native edgartools Statement")
         return []
     from edgar.xbrl.statements import Statement
 
     try:
+        if parser_version == _LIVE_PARSER_V2:
+            assert raw_instance is not None
+            if not isinstance(statement, Statement):
+                raise SecUnitEvidenceError("parser v2 requires a native edgartools Statement")
+            from ._live_unit_corroboration import SecUnitEvidenceError as _RawUnitEvidenceError
+            from ._live_unit_corroboration import corroborate_rows, prepare_raw_instance
+
+            try:
+                evidence = _prepared_evidence or prepare_raw_instance(raw_instance)
+                units = corroborate_rows(evidence, [])
+            except _RawUnitEvidenceError as exc:
+                raise SecUnitEvidenceError(str(exc)) from exc
+            rows = _native_statement_rows(statement, statement_type, include_dimensions)
+            try:
+                units = corroborate_rows(evidence, rows)
+            except _RawUnitEvidenceError as exc:
+                raise SecUnitEvidenceError(str(exc)) from exc
+            return [replace(row, unit=units[row.unit_ref or ""]) for row in rows]
         if isinstance(statement, Statement):
             return _native_statement_rows(statement, statement_type, include_dimensions)
         getter = getattr(statement, "get_raw_data", None)

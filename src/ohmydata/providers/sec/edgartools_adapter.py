@@ -2,19 +2,197 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import logging
+import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ._statement_parser import SecStatementParseError, parse_statement_rows
+from ._statement_parser import (
+    SecStatementParseError,
+    SecUnitEvidenceError,
+    parse_statement_rows,
+)
 from .financials import SecCompanyFinancialVintage, SecFinancialsRequest, SecStatementRow
+from .http import SecHttpClient, validate_sec_url
+from .unit_evidence import SEC_LIVE_FINANCIAL_PARSER_V2, SecFinancialUnitEvidence
 
 logger = logging.getLogger(__name__)
 _EASTERN_TZ = ZoneInfo("America/New_York")
+_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-5.56.0"
+_SAFE_DOCUMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+_RAW_INSTANCE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _filing_archive_prefix(filing: Any) -> str:
+    """Return the one SEC archive directory that may supply this filing's instance."""
+    try:
+        cik = str(int(str(filing.cik)))
+        accession = str(filing.accession_number)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SecUnitEvidenceError("filing identity is unavailable for raw XBRL evidence") from exc
+    if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
+        raise SecUnitEvidenceError("filing accession is invalid for raw XBRL evidence")
+    return f"https://www.sec.gov:443/Archives/edgar/data/{cik}/{accession.replace('-', '')}/"
+
+
+def _attachment_document(item: Any) -> str:
+    document = getattr(item, "document", None)
+    if not isinstance(document, str) or not _SAFE_DOCUMENT.fullmatch(document):
+        raise SecUnitEvidenceError("classified XBRL instance has an unsafe document name")
+    return document
+
+
+def _attachment_sources(container: Any) -> list[Any]:
+    """Return the pinned classifier's source set without inspecting names or content."""
+    if container is None:
+        return []
+    data_files = getattr(container, "data_files", None)
+    if data_files is None:
+        data_files = getattr(container, "datafiles", None)
+    if data_files is None:
+        return []
+    if not isinstance(data_files, list):
+        raise SecUnitEvidenceError("filing XBRL attachment source list is invalid")
+    return data_files
+
+
+def _classifier_eligible(attachment: Any) -> bool:
+    """Mirror the pinned classifier's pre-content filter exactly."""
+    document_type = getattr(attachment, "document_type", None)
+    extension = getattr(attachment, "extension", None)
+    return (
+        document_type in {"XML", "EX-101.INS"}
+        and isinstance(extension, str)
+        and extension.endswith((".xml", ".XML"))
+    )
+
+
+def _materialize_attachment(
+    filing: Any, attachment: Any, client: SecHttpClient | None
+) -> tuple[str, bytes, str]:
+    document = _attachment_document(attachment)
+    supplied_url = getattr(attachment, "url", None)
+    if supplied_url is not None and not isinstance(supplied_url, str):
+        raise SecUnitEvidenceError("classified XBRL instance URL is invalid")
+    url, validator = _instance_url(filing, document, supplied_url)
+    sgml = getattr(attachment, "sgml_document", None)
+    content = getattr(sgml, "content", None) if sgml is not None else None
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if content is not None and type(content) is not bytes:
+        raise SecUnitEvidenceError("classified XBRL instance content is not bytes")
+    if content is None:
+        if client is None:
+            raise SecUnitEvidenceError("v2 raw XBRL evidence requires an injected SecHttpClient")
+        content = _read_instance(client, url, validator)
+    if len(content) > _RAW_INSTANCE_MAX_BYTES:
+        raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
+    return document, content, url
+
+
+def _classify_instance(document: str, attachment: Any, raw: bytes) -> bool:
+    """Run edgartools' exact classifier over an in-memory one-document proxy."""
+    try:
+        from edgar.xbrl.xbrl import XBRLAttachments
+    except ImportError as exc:
+        raise SecUnitEvidenceError("pinned edgartools XBRL classifier is unavailable") from exc
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    proxy = type(
+        "_BoundedAttachment",
+        (),
+        {
+            "document": document,
+            "document_type": getattr(attachment, "document_type", None),
+            "extension": getattr(attachment, "extension", Path(document).suffix),
+            "content": content,
+        },
+    )()
+    attachments: Any = type("_OneAttachment", (), {"data_files": [proxy]})()
+    return XBRLAttachments(attachments).get("instance") is not None
+
+
+def _instance_attachment(filing: Any, client: SecHttpClient | None) -> tuple[str, bytes, str]:
+    """Classify every original candidate separately, then one same-filing homepage set."""
+    original = _attachment_sources(getattr(filing, "attachments", None))
+    if not original:
+        original = _attachment_sources(getattr(filing, "xbrl_attachments", None))
+    sources = original
+    homepage_used = False
+    while True:
+        found: dict[tuple[str, str], bytes] = {}
+        for attachment in sources:
+            if not _classifier_eligible(attachment):
+                continue
+            document, raw, url = _materialize_attachment(filing, attachment, client)
+            if _classify_instance(document, attachment, raw):
+                key = (document, url)
+                existing = found.get(key)
+                if existing is not None and existing != raw:
+                    raise SecUnitEvidenceError(
+                        "classified XBRL instance source has conflicting duplicate bytes"
+                    )
+                found[key] = raw
+        if found or homepage_used:
+            break
+        homepage_used = True
+        homepage = getattr(filing, "homepage", None)
+        sources = _attachment_sources(getattr(homepage, "attachments", homepage))
+    if len(found) != 1:
+        raise SecUnitEvidenceError("filing must have exactly one classified original XBRL instance")
+    (document, url), raw = next(iter(found.items()))
+    return document, raw, url
+
+
+def _instance_url(
+    filing: Any, document: str, supplied_url: str | None = None
+) -> tuple[str, Callable[[str], str]]:
+    prefix = _filing_archive_prefix(filing)
+    url = prefix + document
+
+    def _same_directory(candidate: str) -> str:
+        normalized = validate_sec_url(candidate)
+        if not normalized.startswith(prefix):
+            raise SecUnitEvidenceError("XBRL instance URL does not match filing archive directory")
+        tail = normalized.removeprefix(prefix)
+        if not _SAFE_DOCUMENT.fullmatch(tail):
+            raise SecUnitEvidenceError("XBRL instance URL is not a safe filing attachment")
+        return normalized
+
+    selected = _same_directory(url if supplied_url is None else supplied_url)
+    if not selected.endswith("/" + document):
+        raise SecUnitEvidenceError("XBRL instance URL does not match classified attachment")
+    return selected, _same_directory
+
+
+def _read_instance(client: SecHttpClient, url: str, validator: Callable[[str], str]) -> bytes:
+    response = client.open(
+        url,
+        accept="application/xml, text/xml, application/octet-stream",
+        max_bytes=2 * 1024 * 1024,
+        redirect_validator=validator,
+    )
+    try:
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = response.body.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 2 * 1024 * 1024:
+                raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        response.body.close()
 
 
 class SecFinancialsParseError(SecStatementParseError):
@@ -60,9 +238,11 @@ class SecFinancialsClient:
         user_agent: str,
         *,
         runner: Callable[..., Any] | None = None,
+        http_client: SecHttpClient | None = None,
     ) -> None:
         self.user_agent = validate_user_agent(user_agent)
         self.runner = runner
+        self.http_client = http_client
 
         # Set identity in edgartools if not using a custom runner
         if self.runner is None:
@@ -118,6 +298,14 @@ class SecFinancialsClient:
         """Fetch and parse financial statement vintages according to request."""
         if self.runner is not None:
             res: list[SecCompanyFinancialVintage] = self.runner(request)
+            if request.parser_version == SEC_LIVE_FINANCIAL_PARSER_V2 and any(
+                item.unit_evidence is None
+                or item.unit_evidence.parser_version != SEC_LIVE_FINANCIAL_PARSER_V2
+                for item in res
+            ):
+                raise SecUnitEvidenceError(
+                    "custom v2 runner returned a vintage without unit evidence"
+                )
             return res
 
         ensure_edgar_available()
@@ -175,6 +363,31 @@ class SecFinancialsClient:
                     f_date = date.fromisoformat(f_date_str)
                 except ValueError as err:
                     raise ValueError(f"invalid filing date for {symbol}: {f_date_str!r}") from err
+
+                raw_instance: bytes | None = None
+                evidence: SecFinancialUnitEvidence | None = None
+                prepared_evidence: Any | None = None
+                if request.parser_version == SEC_LIVE_FINANCIAL_PARSER_V2:
+                    document, raw_instance, _ = _instance_attachment(filing, self.http_client)
+                    from ._live_unit_corroboration import (
+                        SecUnitEvidenceError as _RawUnitEvidenceError,
+                    )
+                    from ._live_unit_corroboration import prepare_raw_instance
+
+                    try:
+                        # Validate the complete unit table before native extraction, once per filing.
+                        prepared_evidence = prepare_raw_instance(
+                            raw_instance, expected_cik=str(int(str(filing.cik)))
+                        )
+                    except _RawUnitEvidenceError as exc:
+                        raise SecUnitEvidenceError(str(exc)) from exc
+                    evidence = SecFinancialUnitEvidence(
+                        parser_version=request.parser_version,
+                        cik=str(int(str(filing.cik))),
+                        accession_number=str(filing.accession_number),
+                        instance_document=document,
+                        instance_sha256=hashlib.sha256(raw_instance).hexdigest(),
+                    )
 
                 # Obtain acceptance timestamp
                 accepted_at: datetime | None = None
@@ -235,10 +448,15 @@ class SecFinancialsClient:
                                     statement,
                                     statement_type,
                                     include_dimensions=request.include_dimensions,
+                                    parser_version=request.parser_version,
+                                    raw_instance=raw_instance,
+                                    _prepared_evidence=prepared_evidence,
                                 )
                                 rows.extend(statement_rows)
                                 if not statement_rows:
                                     quality_flags.append(f"{flag}_EMPTY")
+                        except SecUnitEvidenceError:
+                            raise
                         except (AttributeError, KeyError, ValueError, TypeError) as err:
                             logger.debug(
                                 "Could not extract %s: %s", statement_type, type(err).__name__
@@ -275,6 +493,7 @@ class SecFinancialsClient:
                     is_amendment=is_amend,
                     quality_flags=tuple(quality_flags),
                     rows=tuple(rows),
+                    unit_evidence=evidence,
                 )
                 if not rows and parse_failures:
                     raise SecFinancialsParseError(vintage) from parse_failures[0]

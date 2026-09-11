@@ -11,6 +11,13 @@ import pytest
 from ohmydata.providers.sec.edgartools_adapter import SecFinancialsClient, SecFinancialsParseError
 from ohmydata.providers.sec.financials import SecFinancialsRequest
 
+
+def _legacy_request(*args, **kwargs):
+    return SecFinancialsRequest(
+        *args, parser_version="sec-live-financial-parser-v1-edgartools-5.56.0", **kwargs
+    )
+
+
 Filings = pytest.importorskip("edgar._filings").Filings
 Filing = pytest.importorskip("edgar._filings").Filing
 
@@ -72,7 +79,7 @@ def install_company(monkeypatch, entries, reports=None):
 def test_client_enumerates_real_filings_without_treating_collection_as_filing(monkeypatch, count):
     entries = [("10-K", f"2024-0{i + 1}-01", f"fake-{i}") for i in range(count)]
     client, _ = install_company(monkeypatch, entries)
-    result = client.fetch_company_financials(SecFinancialsRequest(("FAKE",), limit=2))
+    result = client.fetch_company_financials(_legacy_request(("FAKE",), limit=2))
     assert len(result) == min(count, 2)
     assert all("NO_FINANCIAL_STATEMENTS" in v.quality_flags for v in result)
     assert all(not any("PARSE_FAILED" in flag for flag in v.quality_flags) for v in result)
@@ -93,7 +100,7 @@ def test_governance_amendment_never_hides_or_substitutes_original(
     entries = [("10-K/A", "2024-08-02", "governance"), ("10-K", "2024-08-01", "original")]
     client, calls = install_company(monkeypatch, entries)
     result = client.fetch_company_financials(
-        SecFinancialsRequest(("FAKE",), forms=forms, include_amendments=amendments, limit=1)
+        _legacy_request(("FAKE",), forms=forms, include_amendments=amendments, limit=1)
     )
     assert [v.accession_number for v in result] == ([expected] if expected else [])
     assert calls[0]["amendments"] is amendments
@@ -120,7 +127,7 @@ def test_year_bounds_and_multiple_forms_before_limit(
     ]
     client, calls = install_company(monkeypatch, entries)
     result = client.fetch_company_financials(
-        SecFinancialsRequest(("FAKE",), start_year=start, end_year=end, limit=1)
+        _legacy_request(("FAKE",), start_year=start, end_year=end, limit=1)
     )
     assert [v.accession_number for v in result] == [expected]
     assert calls[0]["filing_date"] == date_filter
@@ -140,7 +147,7 @@ def test_missing_empty_and_parse_failed_statements_are_distinguishable(monkeypat
         {"quarter": SimpleNamespace(financials=fin)},
     )
     with pytest.raises(SecFinancialsParseError) as caught:
-        client.fetch_company_financials(SecFinancialsRequest(("FAKE",)))
+        client.fetch_company_financials(_legacy_request(("FAKE",)))
     result = caught.value.vintage
     assert caught.value.__cause__ is not None
     assert "unrecognized structured period key" in str(caught.value.__cause__)
@@ -177,7 +184,7 @@ def test_client_dimension_policy_is_explicit(monkeypatch, include_dimensions):
         {"quarter": SimpleNamespace(financials=fin)},
     )
     result = client.fetch_company_financials(
-        SecFinancialsRequest(("FAKE",), include_dimensions=include_dimensions)
+        _legacy_request(("FAKE",), include_dimensions=include_dimensions)
     )[0]
     assert len(result.rows) == int(include_dimensions)
     assert ("DIMENSIONS_EXCLUDED_BY_REQUEST" in result.quality_flags) is not include_dimensions
@@ -185,7 +192,7 @@ def test_client_dimension_policy_is_explicit(monkeypatch, include_dimensions):
 
 def test_lowercase_client_symbol_returns_canonical_vintage(monkeypatch):
     client, _ = install_company(monkeypatch, [("10-Q", "2024-08-01", "quarter")])
-    result = client.fetch_company_financials(SecFinancialsRequest(("fake",)))[0]
+    result = client.fetch_company_financials(_legacy_request(("fake",)))[0]
     assert result.symbol == "FAKE"
 
 
@@ -205,7 +212,7 @@ def test_partial_rows_keep_explicit_failure_coverage(monkeypatch):
         [("10-Q", "2024-08-01", "quarter")],
         {"quarter": SimpleNamespace(financials=fin)},
     )
-    result = client.fetch_company_financials(SecFinancialsRequest(("FAKE",)))[0]
+    result = client.fetch_company_financials(_legacy_request(("FAKE",)))[0]
     assert len(result.rows) == 1
     assert "INCOME_STATEMENT_PARSE_FAILED" in result.quality_flags
 
@@ -223,7 +230,7 @@ def test_all_statement_failures_raise_with_original_cause_and_selected_vintage(m
         {"selected": SimpleNamespace(financials=fin)},
     )
     with pytest.raises(SecFinancialsParseError) as caught:
-        client.fetch_company_financials(SecFinancialsRequest(("FAKE",), limit=1))
+        client.fetch_company_financials(_legacy_request(("FAKE",), limit=1))
     assert caught.value.__cause__ is original
     assert caught.value.vintage.accession_number == "selected"
     assert not caught.value.vintage.rows

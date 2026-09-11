@@ -120,6 +120,23 @@ def test_actual_statement_shape_preserves_native_precision_and_periods():
     assert quarter.period_source == "xbrl-context"
 
 
+def test_v2_actual_statement_uses_raw_units_without_changing_other_native_fields():
+    statement, _ = native_statement()
+    raw = b"""<xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:us-gaap="http://fasb.org" xmlns:iso4217="http://www.xbrl.org/2003/iso4217"><context id="q"><entity><identifier scheme="http://www.sec.gov/CIK">1</identifier></entity><period><startDate>2024-04-01</startDate><endDate>2024-06-30</endDate></period></context><context id="y"><entity><identifier scheme="http://www.sec.gov/CIK">1</identifier></entity><period><startDate>2024-01-01</startDate><endDate>2024-06-30</endDate></period></context><unit id="u1"><measure>iso4217:USD</measure></unit><unit id="u2"><measure>iso4217:EUR</measure></unit><us-gaap:OperatingIncomeLoss contextRef="q" unitRef="u1" decimals="4">1234567890123456.1234</us-gaap:OperatingIncomeLoss><us-gaap:OperatingIncomeLoss contextRef="y" unitRef="u2" decimals="INF">2000000000000000.5678</us-gaap:OperatingIncomeLoss></xbrl>"""
+    v1 = parse_statement_rows(statement, "income_statement")
+    v2 = parse_statement_rows(
+        statement,
+        "income_statement",
+        parser_version="sec-live-financial-parser-v2-edgartools-5.56.0",
+        raw_instance=raw,
+    )
+    assert [(r.unit_ref, r.unit) for r in v2] == [("u2", "iso4217:EUR"), ("u1", "iso4217:USD")]
+    assert v2 == [
+        replace(row, unit=unit)
+        for row, unit in zip(v1, ("iso4217:EUR", "iso4217:USD"), strict=True)
+    ]
+
+
 def test_factsview_enriched_api_is_not_used_for_native_facts(monkeypatch):
     statement, xbrl = native_statement()
     assert isinstance(xbrl, XBRL)
@@ -184,7 +201,13 @@ def test_client_returns_all_three_statements_from_real_xbrl_factsview(monkeypatc
     )
     monkeypatch.setattr("edgar.set_identity", lambda value: None)
     result = SecFinancialsClient("Synthetic test@example.invalid").fetch_company_financials(
-        SecFinancialsRequest(("FAKE",), limit=1, include_amendments=False, include_dimensions=False)
+        SecFinancialsRequest(
+            ("FAKE",),
+            limit=1,
+            include_amendments=False,
+            include_dimensions=False,
+            parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+        )
     )[0]
     assert {row.statement_type for row in result.rows} == {
         "balance_sheet",

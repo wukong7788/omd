@@ -1,5 +1,6 @@
 """Offline-testable SEC N-PORT provider primitives."""
 
+from ._statement_parser import SecUnitEvidenceError
 from .artifacts import SecArtifactRef, SecArtifactStore, SecReplaySession
 from .batch import (
     AdvisoryLock,
@@ -125,6 +126,7 @@ from .sgml_financials import (
     produce_sec_financials_from_sgml,
 )
 from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
+from .unit_evidence import SecFinancialUnitEvidence
 from .xbrl_package import (
     SecXbrlPackage,
     SecXbrlPackageAvailability,
@@ -151,6 +153,7 @@ __all__ = [
     "SecEdgarSubmissionsRequest",
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
+    "SecFinancialUnitEvidence",
     "SecFinancialsClient",
     "SecFinancialsParseError",
     "SecFinancialsRequest",
@@ -199,6 +202,7 @@ __all__ = [
     "SecStructuralQualityReport",
     "SecTransportEvidence",
     "SecUnavailableResult",
+    "SecUnitEvidenceError",
     "SecXbrlPackage",
     "SecXbrlPackageAvailability",
     "SecXbrlPackageComponents",

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add explicit live financial parser v2 with bounded raw-instance unit evidence,
+  failure without partial results on invalid evidence, and v4 Parquet vintage
+  links. Explicit live v1, standalone legacy parsing, and v3-only dataset bytes
+  retain their original behavior and identities. New evidence does not establish
+  publication time or financial quality; consumer adoption requires validation.
+
 - Default retained SGML and declared-availability XBRL package production to
   their own parser/adapter v2, preserving complete raw units. Explicit v1
   retains historical output and identities. Both automatic SGML adapter versions

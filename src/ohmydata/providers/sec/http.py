@@ -167,14 +167,19 @@ class SecHttpClient:
         deadline: float | None = None,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[str, int], None] | None = None,
+        redirect_validator: Callable[[str], str] | None = None,
     ) -> SecHttpResponse:
         max_bytes = (
             self.max_body_bytes if max_bytes is None else min(max_bytes, self.max_body_bytes)
         )
         current = validate_sec_url(url)
+        if redirect_validator is not None:
+            current = validate_sec_url(redirect_validator(current))
         allowed = (
             {"application/zip", "application/octet-stream"}
             if "zip" in accept.lower()
+            else {"application/xml", "text/xml", "application/octet-stream"}
+            if "xml" in accept.lower()
             else {"application/json"}
         )
         total_delay = 0.0
@@ -182,6 +187,8 @@ class SecHttpClient:
         redirects = 0
         records: list[SecAttemptRecord] = []
         for attempt in range(1, self.max_attempts + 1):
+            response = None
+            handed_off = False
             try:
                 if cancelled is not None and cancelled():
                     raise TransientProviderError("SEC request cancelled")
@@ -207,6 +214,8 @@ class SecHttpClient:
                     if not location:
                         raise PermanentProviderError("SEC redirect missing location")
                     current = validate_sec_url(urljoin(current, location))
+                    if redirect_validator is not None:
+                        current = validate_sec_url(redirect_validator(current))
                     continue
                 if status != 200:
                     raise PermanentProviderError(f"SEC HTTP status {status}")
@@ -232,8 +241,10 @@ class SecHttpClient:
                     progress("response_headers", 0)
                 records.append(SecAttemptRecord(attempt, None, 0.0))
                 self.attempts = tuple(records)
+                handed_off = True
                 return SecHttpResponse(status, headers, body, current, tuple(records))
             except HTTPError as exc:
+                exc.close()
                 last = exc
                 if exc.code in {301, 302, 303, 307, 308}:
                     redirects += 1
@@ -243,6 +254,8 @@ class SecHttpClient:
                     if not location:
                         raise PermanentProviderError("SEC redirect missing location") from None
                     current = validate_sec_url(urljoin(current, location))
+                    if redirect_validator is not None:
+                        current = validate_sec_url(redirect_validator(current))
                     continue
                 if exc.code not in {429, 500, 502, 503, 504}:
                     raise PermanentProviderError(f"SEC HTTP status {exc.code}") from None
@@ -255,6 +268,9 @@ class SecHttpClient:
                 delay = min(60.0, 2.0 ** (attempt - 1))
             else:
                 continue
+            finally:
+                if response is not None and not handed_off:
+                    response.close()
             if attempt >= self.max_attempts:
                 break
             delay = min(delay, max(0.0, self.max_total_delay - total_delay))

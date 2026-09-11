@@ -1,6 +1,6 @@
 # PIT 数据制作、校验与事件驱动增量更新
 
-状态：IN_PROGRESS。十二个SEC基础切片已通过离线验收；P0/P1部分完成，P2–P4未启动。
+状态：IN_PROGRESS。十三个SEC基础切片已通过离线验收；P0/P1部分完成，P2–P4未启动。
 日期：2026-09-11。两类使用者：Stock Notify 的页面/报告与未来量化因子研究。
 
 ## 1. 职责与复用
@@ -148,11 +148,11 @@ OMD输出自包含immutable批次与manifest接口；消费者掌握真实路径
 
 ### 当前进度（2026-09-11）
 
-已完成十二个代码切片：SEC财务版本/PIT查询、SEC PIT bundle持久化与严格重放、
+已完成十三个代码切片：SEC财务版本/PIT查询、SEC PIT bundle持久化与严格重放、
 质量发现分类与裁决历史查询、bundle v2质量发现及证据身份持久化、SEC结构质量规则、
 传统XBRL完整SGML的离线制作链、独立留存XBRL文件包的离线制作链、
 仅以本地观察为known-by证据的独立文件包制作链、known-by质量/提交截点的内存系统回放、
-observed生命周期不可变bundle与完整源链重建，以及observed、SGML/声明文件包的复合单位版本化修复。
+observed生命周期不可变bundle与完整源链重建，以及observed、SGML/声明文件包和live路径的复合单位版本化修复。
 P0和P1均为部分完成；五个阶段尚无一个通过该阶段的全部门禁。
 下列勾选表示对应范围已有证据，不把已有provider能力或设计说明当成本计划全部实现，
 也不把粒度不同的检查项数换算为工时完成百分比。详细证据见第9节。
@@ -172,7 +172,7 @@ P0和P1均为部分完成；五个阶段尚无一个通过该阶段的全部门�
 - [x] SEC typed-row投影绑定源观察，保留Decimal、单位、期间、维度和版本身份。
 - [x] 制作版本追加及显式MARKET_KNOWN/SYSTEM_REPLAY按cutoff查询机制。
 - [x] 查询边界拒绝自动SGML制作的acceptance代理：`MARKET_KNOWN` 对输入中
-  `sec-sgml-financial-adapter-v1` 版本显式失败，不会因policy、cutoff或质量过滤静默变空；
+  `sec-sgml-financial-adapter-v1` 或 `v2` 版本显式失败，不会因policy、cutoff或质量过滤静默变空；
   `SYSTEM_REPLAY` 保持既有因果门禁，旧快照和版本身份不改写。受影响市场回测仍需重跑后才能声明一致性。
 - [x] 版本化质量状态、撤销和消费者提交记录关联；未来质量变化不改写过去系统回放。
 - [x] 不可变bundle保存/重放，完整依赖图、身份与时间校验，重复幂等及读取资源上限。
@@ -187,6 +187,7 @@ P0和P1均为部分完成；五个阶段尚无一个通过该阶段的全部门�
   加载时重建完整源链并核对输出字节，恢复制作对象及历史记录；不证明来源或质量判断真实性。
 - [x] observed解析v2修复复合单位；明确保留v1旧字节重建，新旧制作/质量/提交身份隔离。
 - [x] SGML与声明文件包默认v2保留完整单位，显式v1重建不变；SGML两版均拒绝MARKET_KNOWN。
+- [x] live默认v2核验有界原始实例并保留单位证据；v4数据集关联精确vintage，显式v1/v3兼容字节不变。
 - [ ] 完成真实SEC源artifact、公开时间证据与投影制作链验收（含真实代表样本）。
   已接通保留SGML及独立传统XBRL文件包的解析子集；首份真实样本通过本地known-by制作与确定性重建，
   不自行解析inline XBRL，
@@ -370,8 +371,8 @@ wheel/sdist仍为0.2.5，独立Astra审查ACCEPTED。调用方手工构造produc
 v1字节和fact/vintage/production身份黄金比对不变。真实AAPL禁网重建修正8行单位及派生currency，
 其他行字段不变，混合v1/v2 bundle禁写加载通过；零质量/消费者提交记录，不授予财务PASS。
 独立Astra审查ACCEPTED；Ruff、format、ty、文档链接/示例语法与构建产物源码一致性检查通过，版本保持0.2.5。
-遗留live-provider、SGML及声明公开时间package路径的复合单位缺陷尚未修复；下一步明确其安全处理与版本边界，
-再继续会计关系及报表原文核验。P0/P1仍部分完成，P2–P4尚未启动。
+该切片未覆盖的SGML、声明文件包及live路径，由后续第十二、十三切片补齐版本化单位修复。
+会计关系及报表原文核验仍待完成。P0/P1仍部分完成，P2–P4尚未启动。
 
 
 第十二切片实现[SGML与声明文件包单位v2](sec-legacy-unit-safety.md)：分别选择parser/adapter v2，
@@ -381,5 +382,17 @@ SGML v1/v2均在策略和截点过滤前拒绝MARKET_KNOWN，包公开时间证�
 独立v1黄金比对确认两族投影字节、vintage及content identity不变；Ruff、format、ty、文档检查和
 0.2.5构建源码一致性检查通过。未把无内嵌实例/无公开时间证据的真实AAPL样本伪装成这两条路径的成功验收。
 独立Astra审查ACCEPTED，当前可用时间证据说明同步列出两版SGML代理限制。
-下一步处理live provider的原始单位证据：默认新制作使用有界原始实例核验，保留旧数据集身份和显式兼容路径；
-不通过关闭整个财务接口来规避缺陷。P0/P1仍部分完成，整体计划未完成。
+live原始单位证据见第十三切片。P0/P1仍部分完成，整体计划未完成。
+
+第十三切片实现[live原始单位证据v2](sec-live-unit-evidence.md)：默认请求从同一申报目录获取有界实例，
+逐候选复用固定edgartools分类器，拒绝含糊或冲突附件；每份申报只建立一次原始事实索引，
+核对保留事实的CIK、数值、期间、维度及单位，证据失败不返回部分批次。实例读取上限2MiB、每次64KiB，
+重定向和响应头拒绝均关闭响应；该上限不等于上游全流程截止时间。
+v4数据集保留原生行序、逐行vintage身份和单位证据，拒绝重新计算文件hash后的语义篡改；
+显式live v1及独立解析旧默认保持兼容，原v3身份、两份Parquet及manifest黄金字节不变。
+632项SEC回归通过；随后新增的附件边界、索引次数、复合单位/维度、部分失败和持久化用例亦通过。
+Ruff、format、ty、包测试、构建和9个受影响模块的wheel/sdist源码一致性检查通过，独立Astra审查ACCEPTED。
+最终禁网AAPL实例对照180行与observed v2完全一致，含8行EPS完整单位；本地报告保留于
+`artifacts/sec-pit-qualification-20260911/live-unit-standalone/20260911T142725248195Z/report.json`，不提交原始数据。
+此证据不代表真实live下载、财务PASS或消费者接入；消费者仍需不可变SDK pin及重跑验收。
+下一步按已冻结的四个独立季度TTM契约推进离线指标子集；完整数据契约、会计校验、事件层和消费者门禁仍未完成。

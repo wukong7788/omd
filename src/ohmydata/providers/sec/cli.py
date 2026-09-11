@@ -164,6 +164,13 @@ def add_nport_commands(subparsers: Any) -> None:
         p_fin.add_argument("--end-year", type=int)
         p_fin.add_argument("--availability-policy")
         p_fin.add_argument("--lag-days", type=int)
+        p_fin.add_argument(
+            "--parser-version",
+            choices=(
+                "sec-live-financial-parser-v1-edgartools-5.56.0",
+                "sec-live-financial-parser-v2-edgartools-5.56.0",
+            ),
+        )
         p_fin.add_argument("--limit", type=int)
         p_fin.add_argument("--latest", action="store_true")
         p_fin.add_argument("--json", action="store_true")
@@ -572,8 +579,10 @@ def run_financials(args: Any) -> int:
         client = (
             SecFinancialsClient.from_config(args.config)
             if getattr(args, "config", None) and not user_agent
-            else SecFinancialsClient(user_agent)
+            else SecFinancialsClient(user_agent, http_client=SecHttpClient(user_agent))
         )
+        if client.http_client is None:
+            client.http_client = SecHttpClient(client.user_agent)
 
         limit_val = getattr(args, "limit", None)
         if getattr(args, "latest", False):
@@ -590,6 +599,8 @@ def run_financials(args: Any) -> int:
             if getattr(args, "lag_days", None) is not None
             else 0,
             limit=limit_val,
+            parser_version=getattr(args, "parser_version", None)
+            or "sec-live-financial-parser-v2-edgartools-5.56.0",
         )
 
         _log_progress(f"fetching company financials for {len(symbols)} symbol(s)...", quiet)

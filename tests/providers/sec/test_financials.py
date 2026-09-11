@@ -301,7 +301,13 @@ def test_client_filters_before_limit_and_keeps_financialless_amendment(
 
     monkeypatch.setattr(edgar, "Company", Company)
     result = SecFinancialsClient("Synthetic synthetic@example.invalid").fetch_company_financials(
-        SecFinancialsRequest(symbols=("SYN",), forms=("10-K",), include_amendments=False, limit=1)
+        SecFinancialsRequest(
+            symbols=("SYN",),
+            forms=("10-K",),
+            include_amendments=False,
+            limit=1,
+            parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+        )
     )
     assert [v.accession_number for v in result] == ["orig"]
     assert "NO_FINANCIAL_STATEMENTS" in result[0].quality_flags
@@ -337,7 +343,11 @@ def test_client_from_config_and_runner_offline() -> None:
             return [mock_vintage] if "AAPL" in req.symbols else []
 
         mock_client = SecFinancialsClient("Test (test@example.com)", runner=offline_runner)
-        res = mock_client.fetch_company_financials(SecFinancialsRequest(symbols=("AAPL",)))
+        res = mock_client.fetch_company_financials(
+            SecFinancialsRequest(
+                symbols=("AAPL",), parser_version="sec-live-financial-parser-v1-edgartools-5.56.0"
+            )
+        )
         assert len(res) == 1
         assert res[0].accession_number == "0000320193-23-000106"
 
@@ -483,7 +493,11 @@ def test_client_fetch_company_financials_with_mocked_edgar_objects(
     monkeypatch.setattr("edgar.Company", mock_company_cls)
 
     client = SecFinancialsClient("TestAgent test@example.com")
-    req = SecFinancialsRequest(symbols=("AAPL",), forms=("10-K",))
+    req = SecFinancialsRequest(
+        symbols=("AAPL",),
+        forms=("10-K",),
+        parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+    )
     vintages = client.fetch_company_financials(req)
 
     assert len(vintages) == 1

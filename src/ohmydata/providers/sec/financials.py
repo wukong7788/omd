@@ -11,9 +11,12 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
+from .unit_evidence import SecFinancialUnitEvidence
+
 STATEMENT_TYPES = ("balance_sheet", "income_statement", "cash_flow")
 StatementType = Literal["balance_sheet", "income_statement", "cash_flow"]
 FINANCIALS_DATASET_SCHEMA = "sec-company-financials-v3"
+FINANCIALS_DATASET_SCHEMA_V4 = "sec-company-financials-v4"
 
 _CURRENCY_UNIT_RE = re.compile(r"(?:iso4217:)?([A-Z]{3})\Z")
 
@@ -126,11 +129,22 @@ class SecCompanyFinancialVintage:
     is_amendment: bool = False
     quality_flags: tuple[str, ...] = ()
     rows: tuple[SecStatementRow, ...] = ()
+    unit_evidence: SecFinancialUnitEvidence | None = field(default=None, kw_only=True)
     _cached_vintage_identity: str | None = field(
         default=None, repr=False, compare=False, init=False
     )
 
     def __post_init__(self) -> None:
+        if self.unit_evidence is not None:
+            if not isinstance(self.cik, str) or not self.cik.isascii() or not self.cik.isdecimal():
+                raise ValueError("vintage cik must be decimal when binding unit evidence")
+            canonical_cik = str(int(self.cik))
+            if canonical_cik != self.unit_evidence.cik:
+                raise ValueError("unit evidence cik must match the vintage cik")
+            if self.accession_number != self.unit_evidence.accession_number:
+                raise ValueError(
+                    "unit evidence accession_number must match the vintage accession_number"
+                )
         if self.accepted_at is not None:
             if self.accepted_at.tzinfo is None:
                 raise ValueError("accepted_at must be timezone-aware")
@@ -172,6 +186,10 @@ class SecCompanyFinancialVintage:
             "availability_anchor": self.availability_anchor,
             "schema_version": FINANCIALS_DATASET_SCHEMA,
         }
+        if self.unit_evidence is not None:
+            payload["schema_version"] = FINANCIALS_DATASET_SCHEMA_V4
+            payload["unit_evidence"] = self.unit_evidence.canonical_payload
+            payload["unit_evidence_identity"] = self.unit_evidence.evidence_identity
         h = hashlib.sha256(
             json.dumps(_canonical_val(payload), sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -195,8 +213,16 @@ class SecFinancialsRequest:
     include_amendments: bool = True
     limit: int | None = None
     include_dimensions: bool = field(default=True, kw_only=True)
+    parser_version: str = field(
+        default="sec-live-financial-parser-v2-edgartools-5.56.0", kw_only=True
+    )
 
     def __post_init__(self) -> None:
+        if self.parser_version not in {
+            "sec-live-financial-parser-v1-edgartools-5.56.0",
+            "sec-live-financial-parser-v2-edgartools-5.56.0",
+        }:
+            raise ValueError(f"unsupported parser_version: {self.parser_version}")
         if not self.symbols:
             raise ValueError("symbols cannot be empty")
         for sym in self.symbols:
