@@ -5,6 +5,17 @@
 Build a reusable, provider-aware market-data SDK shared by `funmoney_backtest`
 and `stock_notify`.
 
+The authorized 2026-09-11 scope extension is described in
+[`PIT data production and event refresh`](docs/plans/pit-data-production-and-event-refresh.md).
+OMD may additionally own reusable normalized schemas, versioned quality and
+correction records, neutral offline metric recipes, and incremental dependency
+calculation. This supersedes the original ingestion-only restriction for those
+capabilities; project-specific features and schemas, calendars, cutoffs,
+scheduling, storage locations, publication, and strategy remain consumer-owned.
+Implementation begins with the bounded SEC financial-version/PIT query slice;
+the broader roadmap below remains historical context and does not establish
+completion of the extension or waive consumer migration gates.
+
 The first release implements Tushare only. The repository and core contracts
 must allow future yfinance and FMP providers without forcing their different
 request, adjustment, timezone, quota, and error semantics into a false common

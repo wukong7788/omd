@@ -480,6 +480,52 @@ preserve native line item labels and concepts (`concept`, `label`, `value_native
 beside standardized XBRL categories (`standard_concept`) for cross-company
 quantitative comparisons.
 
+For offline, explicitly versioned PIT research, the SEC package also exposes
+`serialize_sec_typed_rows_projection`, `SecNormalizedFinancialFactVersion`,
+`SecPitPolicy`, and `select_sec_financial_versions`. The caller writes the
+canonical typed-row projection into its `SnapshotStore`, supplies exact
+`SOURCE_DECLARED` timestamp evidence, then explicitly selects
+`MARKET_KNOWN` or `SYSTEM_REPLAY`. This projection binds an accession, typed
+row and caller-attested source-artifact identity, but is not original SEC
+XBRL/SGML validation. `SYSTEM_REPLAY` additionally requires an exact PASS
+quality record and consumer commit before the requested cutoff. See the
+[SEC financial production PIT contract](docs/plans/sec-financial-production-pit-slice.md).
+
+```python
+from datetime import UTC, datetime
+
+from ohmydata.core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision, RequestSpec
+from ohmydata.providers.sec import (
+    SecNormalizedFinancialFactVersion,
+    serialize_sec_typed_rows_projection,
+)
+
+# ``vintage`` and the source artifact digest are caller-supplied and retained with its source evidence.
+source_at = datetime(2024, 5, 1, 21, tzinfo=UTC)
+payload = serialize_sec_typed_rows_projection(
+    vintage, source_artifact_identity=artifact_sha256, source_available_at=source_at
+)
+observation = store.observe(
+    RequestSpec("sec", "financial-typed-rows", {"accession": vintage.accession_number}, ()),
+    payload,
+    datetime.now(UTC),
+    "sec-financial-typed-rows-projection-v1",
+)
+evidence = AvailabilityEvidence.from_observation(
+    store,
+    observation,
+    source_available_at=source_at,
+    availability_basis=AvailabilityBasis.SOURCE_DECLARED,
+    availability_precision=AvailabilityPrecision.TIMESTAMP,
+)
+version = SecNormalizedFinancialFactVersion.from_projection(
+    store=store, observation=observation, availability=evidence, vintage=vintage,
+    row_ordinal=0, schema_version="sec-financial-normalized-v1", adapter_version="adapter-v1",
+    normalization_version="normalization-v1", configuration_identity=config_sha256,
+    recorded_at=datetime.now(UTC),
+)
+```
+
 The SEC extra supports `edgartools==5.56.0`. See the
 [financial period contract and v2 migration](docs/financial-period-integrity.md)
 before rebuilding existing financial datasets.

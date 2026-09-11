@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This repository provides reusable market-data ingestion infrastructure for
-multiple applications, with Tushare, yfinance, and SEC providers. FMP remains
-out of scope unless explicitly requested.
+This repository provides reusable market-data ingestion and deterministic
+data-production infrastructure for multiple applications, with Tushare,
+yfinance, and SEC providers. FMP remains out of scope unless explicitly requested.
 
 `PLAN.md` is the canonical architecture and migration plan until `v0.1.0`.
 
@@ -65,15 +65,27 @@ The SDK may own:
 - provider clients and endpoint contracts;
 - retry, rate limiting, error classification, request identity;
 - provenance, snapshots, replay, and integrity validation;
-- provider-semantic reusable recipes.
+- reusable data schemas, explicit versioned normalization, and quality/correction
+  records that preserve provider-native facts;
+- provider-semantic and neutral offline metric recipes with explicit input,
+  unit, period, availability, and missing-data contracts;
+- event deduplication and incremental dependency calculation as injected library
+  operations, without owning a background service.
+
+The authorized data-production scope and phased gates are defined in
+[`docs/plans/pit-data-production-and-event-refresh.md`](docs/plans/pit-data-production-and-event-refresh.md).
+Each implemented slice must document its actual coverage; this boundary does
+not imply that every planned recipe or event service already exists.
 
 Consumers own:
 
 - universe selection;
-- business features and investment calculations;
+- business features, investment judgments, ratings, and strategy-specific calculations;
 - storage locations and publication workflows;
 - strategy, backtest, signal, live execution, notifications, and UI;
-- project-specific normalized schemas and operational schedules.
+- project-specific normalized schemas and operational schedules;
+- market calendars, decision cutoffs, and publication/commit evidence supplied
+  to OMD's explicit query modes.
 
 ## API Design Rules
 

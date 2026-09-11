@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add an offline-only SEC typed-row projection and explicit PIT selector.
+  Market-known reconstruction requires caller-attested precise source evidence;
+  system replay additionally requires replay-verified observation, production,
+  quality, and consumer-commit evidence at the cutoff. This API neither fetches
+  SEC data nor treats `accepted_at` as source-availability proof.
+
 ## 0.2.5 — 2026-09-11
 
 - Add a nullable, syntactically derived SEC statement `currency` field and move
