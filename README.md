@@ -613,6 +613,47 @@ remain caller assertions checked against the retained binding and CIK; this is
 reproducible parsing, not independent cross-validation. See the
 [package contract](docs/plans/sec-xbrl-package-financial-production.md) for limits.
 
+When first publication is unknown, use the separate observed-package path. It
+records when the complete local inputs were known, without requiring a claimed
+publication timestamp:
+
+```python
+from ohmydata.providers.sec import (
+    produce_sec_financials_from_observed_xbrl_package,
+    serialize_sec_observed_xbrl_package,
+)
+
+observed_package_bytes = serialize_sec_observed_xbrl_package(
+    sgml_observation=raw_observation,
+    cik=request.cik, accession_number=request.accession_number, form=request.form,
+    components=SecXbrlPackageComponents(
+        schema=retained_schema_bytes, presentation=retained_presentation_bytes,
+        labels=retained_labels_bytes, instance=retained_instance_bytes,
+    ),
+)
+observed_package = package_store.observe(
+    RequestSpec("sec", "company-filing-observed-xbrl-package", {
+        "cik": request.cik, "accession_number": request.accession_number, "form": request.form,
+    }),
+    observed_package_bytes, package_observed_at, "sec-observed-xbrl-package-v1",
+)
+observed_production = produce_sec_financials_from_observed_xbrl_package(
+    source_store=source_store, source_observation=raw_observation,
+    package_store=package_store, package_observation=observed_package,
+    output_store=output_store, request=request, produced_at=produced_at,
+)
+known_by_at = observed_production.evidence.known_by_at
+```
+
+`package_observed_at` records local observation of the complete assembled
+envelope. `known_by_at` is the later of that receipt and the selected SGML receipt;
+both must be no later than production. The new vintage and output serialization
+keep this time separate from acceptance. Retain all three observations and
+rerun the producer with the same inputs to reproduce the result. These results
+are not inputs to the existing PIT selector or bundles; quality and consumer
+commit integration remain pending. See the
+[known-by contract](docs/plans/sec-known-by-production.md).
+
 `SnapshotStore.replay` and `replay_observation` also accept optional
 `max_payload_bytes` (a non-negative integer). Their default `None` preserves
 unlimited payload reads; exceeding an explicit limit raises

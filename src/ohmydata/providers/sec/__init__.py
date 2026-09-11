@@ -66,6 +66,17 @@ from .nport import (
     parse_sec_date,
     read_member,
 )
+from .observed_xbrl_financials import (
+    SecObservedFinancialEvidence,
+    SecObservedFinancialProduction,
+    SecObservedFinancialVintage,
+    produce_sec_financials_from_observed_xbrl_package,
+)
+from .observed_xbrl_package import (
+    SecObservedXbrlPackage,
+    decode_sec_observed_xbrl_package,
+    serialize_sec_observed_xbrl_package,
+)
 from .pit import (
     SecConsumerCommit,
     SecNormalizedFinancialFactVersion,
@@ -147,6 +158,10 @@ __all__ = [
     "SecNportQuarterRequest",
     "SecNportQuarterResult",
     "SecNportScanCounts",
+    "SecObservedFinancialEvidence",
+    "SecObservedFinancialProduction",
+    "SecObservedFinancialVintage",
+    "SecObservedXbrlPackage",
     "SecPayloadReceipt",
     "SecPitBundle",
     "SecPitMode",
@@ -175,6 +190,7 @@ __all__ = [
     "atomic_json",
     "canonical_hash",
     "canonical_json",
+    "decode_sec_observed_xbrl_package",
     "decode_sec_xbrl_package",
     "enrich_vintages",
     "ensure_edgar_available",
@@ -191,6 +207,7 @@ __all__ = [
     "parse_statement_rows",
     "parse_submissions",
     "partition_identity",
+    "produce_sec_financials_from_observed_xbrl_package",
     "produce_sec_financials_from_sgml",
     "produce_sec_financials_from_xbrl_package",
     "publish_directory",
@@ -202,6 +219,7 @@ __all__ = [
     "select_exact_partitions",
     "select_sec_financial_versions",
     "select_sec_quality_findings",
+    "serialize_sec_observed_xbrl_package",
     "serialize_sec_typed_rows_projection",
     "serialize_sec_xbrl_package",
     "store_immutable_payload",

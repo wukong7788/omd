@@ -57,9 +57,11 @@ and consumer-commit cutoffs; it is not a proof of first public availability.
 - Preserve retained snapshots and identities. Do not rewrite old evidence or
   reinterpret its time field in place. Document the affected query behavior and
   require reruns of affected market backtests before claiming parity.
-- Define a separately versioned known-by evidence and production contract,
-  with explicit basis, exact-byte lineage, and conservative observation bounds.
-  Do not merely relax the existing package wrapper's exact-time requirement.
+- The separate [observed-package production contract](sec-known-by-production.md)
+  preserves exact-byte lineage and conservative local observation bounds without
+  relaxing the existing package wrapper's exact-time requirement. Its new row
+  product is separate from legacy PIT versions; quality, consumer-commit and
+  historical query integration remain follow-up work.
 
 The query restriction is delivered. No consumer migration or market-backtest
 rerun is claimed here.

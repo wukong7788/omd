@@ -55,9 +55,21 @@ first website availability, so the inspected public metadata cannot close this
 exact-time gap. The [evidence decision](sec-availability-evidence-decision.md)
 records the sources and an additional acceptance-proxy gap in the existing SGML
 producer. The market-known query now explicitly rejects automatic SGML proxy
-versions, including retained versions. Explicit known-by evidence and production
-remain pending. Do not mark the P1
-real-source gate complete or expand the pilot on parsing success alone.
+versions, including retained versions.
+
+A separate [observed-package path](sec-known-by-production.md) now reproduces
+the retained filing's 180 rows without declaring a publication time. In the
+network-denied follow-up, the complete assembled package was observed at
+2026-09-11T10:12:10.254416Z and production was recorded at
+2026-09-11T10:12:10.260221Z. The local known-by bound is that package observation,
+later than the selected SGML receipt; header acceptance stays separate at
+2026-07-31T10:01:02Z. Fresh output storage reproduced identical bytes and vintage
+identity. Raw responses, package/output receipts and the probe report remain
+ignored local artifacts.
+
+This result uses a new observed-row serialization, not a legacy PIT projection.
+Quality, consumer-commit and historical query integration remain pending.
+Do not mark the P1 real-source gate complete or expand the pilot on this result.
 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns

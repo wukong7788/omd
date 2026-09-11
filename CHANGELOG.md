@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a bounded, offline SEC observed-package financial production path.  It
+  records only caller-observed receipt times and preserves the separate filing
+  acceptance timestamp; it neither asserts first public availability nor
+  creates PIT-selectable normalized versions.
+
 - Make `MARKET_KNOWN` explicitly reject supplied automatic SEC SGML
   acceptance-proxy versions (`sec-sgml-financial-adapter-v1`) before policy,
   cutoff, or quality filtering. `SYSTEM_REPLAY`, persisted snapshots, and
