@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add SEC document-source closure production and strict read-only restoration:
+  bind retained submissions, directory, primary and XBRL components by exact
+  filing-local references and observation times, without requiring full SGML
+  or claiming financial quality or first-publication evidence.
+
 - Reduce SGML validation memory by scanning document spans and validating unused
   XBRL wrappers without copying their payloads. Existing source and dependency
   limits, parser identities, and financial output semantics remain unchanged.

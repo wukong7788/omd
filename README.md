@@ -1326,3 +1326,49 @@ The public-contract changes and consumer-owned migration boundaries are summariz
 [`docs/v0.1.1-migration.md`](docs/v0.1.1-migration.md),
 [`docs/v0.1.2-lookthrough-migration.md`](docs/v0.1.2-lookthrough-migration.md), and
 [`docs/v0.1.3-vintage-plane-migration.md`](docs/v0.1.3-vintage-plane-migration.md).
+
+
+### SEC document-source closure
+
+`produce_sec_document_source_package` validates and retains one explicit filing's
+submissions/index/primary/XBRL source graph. `SecDocumentSource` binds each role,
+filename (null for metadata), `SnapshotStore` and original observation receipt.
+The seven required roles are `submissions`, `index`, `primary`, `schema`,
+`presentation`, `labels`, `instance`; declared `calculation`/`definition` links
+require corresponding retained sources. All filenames and reference targets must
+agree within one CIK/accession directory. Missing, ambiguous or cross-filing
+sources and base URI overrides fail before package retention.
+
+```python
+from ohmydata.providers.sec import (
+    produce_sec_document_source_package,
+    restore_sec_document_source_package,
+)
+
+source_package = produce_sec_document_source_package(
+    store=package_store,
+    cik="0000000001",
+    accession_number="0000000001-24-000001",
+    form="10-Q",
+    sources=source_items,  # Caller-retained SecDocumentSource objects.
+    captured_at=captured_at,
+)
+restored_package = restore_sec_document_source_package(
+    store=package_store,
+    observation=source_package.observation,
+    resolve_observation=resolve_observation,  # identity -> (store, observation)
+)
+assert restored_package.package_identity == source_package.package_identity
+```
+
+The immutable canonical manifest uses a separate source schema; it does not
+claim to be full SGML. `known_by_at` includes the package observation and all
+required sources. It does not establish first market publication or financial
+quality. This API closes and restores provenance only: financial production,
+financial-bundle replay and consumer quality integration are separate work.
+Fixed source limits are 2 MiB each for metadata/XML, 4 MiB for primary HTML,
+16 MiB in aggregate and 256 KiB for the manifest. Invalid source contracts raise
+`ValueError`/`SchemaMismatchError`; snapshot corruption or request mismatch raises
+`SnapshotIntegrityError`. No network calls or credential lookup occur here.
+See the [exact source contract](docs/plans/sec-document-source-production.md)
+for request endpoints, serialization identifiers, reference grammar and limits.

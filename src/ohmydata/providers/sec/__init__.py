@@ -28,6 +28,12 @@ from .core_dataset import (
     write_partition,
     write_tables,
 )
+from .document_source import (
+    SecDocumentSource,
+    SecDocumentSourcePackage,
+    produce_sec_document_source_package,
+    restore_sec_document_source_package,
+)
 from .edgar import (
     SecPayloadReceipt,
     historical_basenames,
@@ -247,6 +253,8 @@ __all__ = [
     "SecDiscoveryMode",
     "SecDiscoveryPolicy",
     "SecDiscoverySource",
+    "SecDocumentSource",
+    "SecDocumentSourcePackage",
     "SecEdgarSubmissionsRequest",
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
@@ -373,6 +381,7 @@ __all__ = [
     "parse_submissions",
     "partition_identity",
     "plan_sec_event_invalidation",
+    "produce_sec_document_source_package",
     "produce_sec_financials_from_observed_xbrl_package",
     "produce_sec_financials_from_sgml",
     "produce_sec_financials_from_xbrl_package",
@@ -381,6 +390,7 @@ __all__ = [
     "quarter_range",
     "read_member",
     "resolve_submissions",
+    "restore_sec_document_source_package",
     "retain_sec_execution_outputs",
     "retain_sec_execution_validation",
     "rows_from_result",
