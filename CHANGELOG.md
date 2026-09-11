@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Default retained SGML and declared-availability XBRL package production to
+  their own parser/adapter v2, preserving complete raw units. Explicit v1
+  retains historical output and identities. Both automatic SGML adapter versions
+  remain rejected by MARKET_KNOWN; unit repair does not establish publication.
+
 - Default observed SEC financial production to parser v2, preserving compound
   unit numerators and denominators from retained XML. Explicit parser v1 and
   historical bundle reconstruction retain their original bytes. Existing quality

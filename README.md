@@ -524,7 +524,8 @@ path, credential, or caller-supplied publication time:
 
 The SGML producer uses filing acceptance as an availability proxy. SEC acceptance
 does not prove first website publication. `MARKET_KNOWN` raises `ValueError` if
-any supplied version uses `sec-sgml-financial-adapter-v1`, including versions
+any supplied version uses `sec-sgml-financial-adapter-v1` or
+`sec-sgml-financial-adapter-v2`, including versions
 that would otherwise be excluded by policy, cutoff, or quality. This applies to
 previously saved versions as well. `SYSTEM_REPLAY` retains its existing time,
 quality, and consumer-commit requirements; it does not establish first publication.
@@ -532,7 +533,7 @@ Do not relabel these versions to bypass the check. Affected market backtests nee
 review and reruns with qualifying evidence before their results can be relied on.
 Snapshots and identities remain unchanged. The
 [availability decision](docs/plans/sec-availability-evidence-decision.md) describes
-the migration and the separate known-by production capability still to be built.
+the migration and the separate known-by production capability described below.
 
 ```python
 from ohmydata.core import RequestSpec
@@ -615,6 +616,17 @@ remain caller assertions checked against the retained binding and CIK; this is
 reproducible parsing, not independent cross-validation. See the
 [package contract](docs/plans/sec-xbrl-package-financial-production.md) for limits.
 
+Both offline producers now default to their own parser v2, preserving complete
+raw unit definitions before building projections. For exact historical source
+reconstruction, explicitly pass the corresponding v1 `parser_version`:
+`sec-sgml-financial-parser-v1-edgartools-5.56.0` or
+`sec-xbrl-package-financial-parser-v1-edgartools-5.56.0`. Their v2 names replace
+`parser-v1` with `parser-v2`; the returned production exposes the selected version.
+V2 has new adapter/configuration identities even when simple-unit projection
+bytes are unchanged. Old bundles retain their recorded versions, and old quality
+or commit records do not qualify corrected versions. SGML v2 remains an
+acceptance proxy. See the [offline unit repair contract](docs/plans/sec-legacy-unit-safety.md).
+
 When first publication is unknown, use the separate observed-package path. It
 records when the complete local inputs were known, without requiring a claimed
 publication timestamp:
@@ -672,8 +684,9 @@ Observed bundle loading selects the version recorded in the retained output
 and rebuilds that complete source chain. V1 retains its known compound-unit
 defect for historical reconstruction. V2 has a distinct configuration and
 production identity and requires its own quality assessment and consumer commit.
-This repair does not change the legacy live-provider, SGML or declared-availability
-package paths, whose compound-unit results still require validation. See the
+The SGML and declared-availability package v2 paths use the same correction;
+their explicit v1 paths and the live provider still require separate validation.
+See the
 [versioned repair contract](docs/plans/sec-compound-unit-repair.md).
 
 The separate in-memory observed system selector requires caller-attested quality

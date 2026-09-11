@@ -1,5 +1,9 @@
 # Offline SEC SGML financial production v1
 
+This original v1 contract remains the historical reconstruction path. The
+[offline unit repair](sec-legacy-unit-safety.md) defines v2 defaults and identities;
+both adapter versions remain acceptance proxies rejected by MARKET_KNOWN.
+
 This slice connects retained original full-submission bytes to the existing SEC
 typed-row projection and normalized versions. It supports an explicit traditional
 XBRL subset, not every SEC filing. The current manual projection producer and

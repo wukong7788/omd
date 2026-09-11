@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import cast
@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from ...core import RequestSpec
 from ...core.snapshot import SnapshotObservationRef, SnapshotStore
+from ._observed_xbrl_units import decode_raw_units
 from ._pit_projection import _decode_projection
 from .edgartools_adapter import ensure_edgar_available, parse_statement_rows
 from .financials import SecCompanyFinancialVintage, SecStatementRow, StatementType
@@ -24,8 +25,13 @@ _CIK = re.compile(r"^[0-9]{10}$")
 _FORMS = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
 _STATEMENTS = frozenset({"balance_sheet", "income_statement", "cash_flow"})
 _COMPONENTS = frozenset({"EX-101.SCH", "EX-101.PRE", "EX-101.LAB", "EX-101.INS"})
-_PARSER_VERSION = "sec-sgml-financial-parser-v1-edgartools-5.56.0"
-_ADAPTER_VERSION = "sec-sgml-financial-adapter-v1"
+_PARSER_VERSION_V1 = "sec-sgml-financial-parser-v1-edgartools-5.56.0"
+_PARSER_VERSION_V2 = "sec-sgml-financial-parser-v2-edgartools-5.56.0"
+_PARSER_VERSIONS = frozenset({_PARSER_VERSION_V1, _PARSER_VERSION_V2})
+_ADAPTER_VERSIONS = {
+    _PARSER_VERSION_V1: "sec-sgml-financial-adapter-v1",
+    _PARSER_VERSION_V2: "sec-sgml-financial-adapter-v2",
+}
 _NORMALIZATION_VERSION = "sec-financial-normalized-v1"
 _PROJECTION_SERIALIZATION = "sec-financial-typed-rows-projection-v1"
 _NORMALIZED_SCHEMA_VERSION = "sec-financial-normalized-v1"
@@ -90,6 +96,7 @@ class SecSgmlFinancialProduction:
     projection_observation: SnapshotObservationRef
     vintage: SecCompanyFinancialVintage
     versions: tuple[SecNormalizedFinancialFactVersion, ...]
+    parser_version: str = field(default=_PARSER_VERSION_V1, kw_only=True)
 
 
 def _header(raw: str, request: SecSgmlFinancialsRequest) -> tuple[datetime, date, date, str]:
@@ -328,10 +335,13 @@ def produce_sec_financials_from_sgml(
     produced_at: datetime,
     max_raw_bytes: int = 8 * 1024 * 1024,
     max_rows: int = 10_000,
+    parser_version: str = _PARSER_VERSION_V2,
 ) -> SecSgmlFinancialProduction:
     """Build replay-bound rows from one retained full SEC SGML submission."""
     _positive(max_raw_bytes, "max_raw_bytes", 8 * 1024 * 1024)
     _positive(max_rows, "max_rows", 10_000)
+    if type(parser_version) is not str or parser_version not in _PARSER_VERSIONS:
+        raise ValueError("unsupported SEC SGML financial parser version")
     produced = _utc(produced_at, "produced_at")
     expected = RequestSpec(
         "sec",
@@ -348,7 +358,23 @@ def produce_sec_financials_from_sgml(
     accepted, filed, period, company_name = _header(raw, request)
     if not accepted <= source_observation.snapshot_fetched_at <= produced:
         raise ValueError("SEC acceptance and production times are not causal")
-    rows = _rows(raw, request, max_rows)
+    if parser_version == _PARSER_VERSION_V1:
+        rows = _rows(raw, request, max_rows)
+    else:
+        documents = _documents(raw)
+        units = decode_raw_units(
+            documents["EX-101.INS"].encode("utf-8"), max_elements=200_000, max_depth=128
+        )
+        native_rows = _rows_from_documents(raw, documents, request, max_rows)
+        rows_: list[SecStatementRow] = []
+        for row in native_rows:
+            if row.unit_ref is None:
+                raise ValueError("selected raw XBRL unit reference is missing")
+            try:
+                rows_.append(replace(row, unit=units[row.unit_ref]))
+            except KeyError as exc:
+                raise ValueError("selected raw XBRL unit reference is missing") from exc
+        rows = tuple(rows_)
     vintage = SecCompanyFinancialVintage(
         symbol=request.symbol,
         cik=request.cik,
@@ -365,7 +391,7 @@ def produce_sec_financials_from_sgml(
     )
     config = _hash(
         {
-            "parser_version": _PARSER_VERSION,
+            "parser_version": parser_version,
             "statement_types": request.statement_types,
             "include_dimensions": request.include_dimensions,
         }
@@ -396,14 +422,16 @@ def produce_sec_financials_from_sgml(
             row_ordinal=index,
             expected_row=row,
             schema_version=_NORMALIZED_SCHEMA_VERSION,
-            adapter_version=_ADAPTER_VERSION,
+            adapter_version=_ADAPTER_VERSIONS[parser_version],
             normalization_version=_NORMALIZATION_VERSION,
             configuration_identity=config,
             recorded_at=produced,
         )
         for index, row in enumerate(rows)
     )
-    return SecSgmlFinancialProduction(request, source_observation, projection, vintage, versions)
+    return SecSgmlFinancialProduction(
+        request, source_observation, projection, vintage, versions, parser_version=parser_version
+    )
 
 
 __all__ = [

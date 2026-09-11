@@ -16,7 +16,9 @@ from .pit import (
     _utc,
 )
 
-_SGML_ACCEPTANCE_PROXY_ADAPTER_VERSION = "sec-sgml-financial-adapter-v1"
+_SGML_ACCEPTANCE_PROXY_ADAPTER_VERSIONS = frozenset(
+    {"sec-sgml-financial-adapter-v1", "sec-sgml-financial-adapter-v2"}
+)
 
 
 def _quality_as_of(
@@ -108,7 +110,7 @@ def select_sec_financial_versions(
         version.__post_init__()
         if (
             mode is SecPitMode.MARKET_KNOWN
-            and version.adapter_version == _SGML_ACCEPTANCE_PROXY_ADAPTER_VERSION
+            and version.adapter_version in _SGML_ACCEPTANCE_PROXY_ADAPTER_VERSIONS
         ):
             raise ValueError("MARKET_KNOWN rejects automatic SGML acceptance-proxy versions")
         previous = seen.get(version.normalized_version_id)

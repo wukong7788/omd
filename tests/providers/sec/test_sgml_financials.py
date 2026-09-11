@@ -335,7 +335,7 @@ def test_xbrl_component_elements_share_one_aggregate_budget(tmp_path):
             "malformed",
         ),
         (_raw().replace(b"<TYPE>EX-101.LAB", b"<TYPE>EX-101.PRE", 1), "duplicate"),
-        (_raw().replace(b"<xbrl ", b"<!DOCTYPE x [<!ENTITY e 'x'>]><xbrl "), "unsafe XML"),
+        (_raw().replace(b"<xbrl ", b"<!DOCTYPE x [<!ENTITY e 'x'>]><xbrl "), "unsafe"),
         (_raw().replace(b"<TYPE>EX-101.INS", b"<TYPE>EX-101.OTHER"), "missing required"),
     ],
 )

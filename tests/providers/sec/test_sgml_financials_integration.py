@@ -39,6 +39,7 @@ def _produce(source, observation, projection):
         projection_store=projection,
         request=_request(),
         produced_at=PRODUCED,
+        parser_version="sec-sgml-financial-parser-v1-edgartools-5.56.0",
     )
 
 

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from ...core import AvailabilityBasis, AvailabilityEvidence, AvailabilityPrecision, RequestSpec
 from ...core.snapshot import SnapshotObservationRef, SnapshotStore
+from ._observed_xbrl_units import decode_raw_units
 from ._pit_projection import _decode_projection
-from .financials import SecCompanyFinancialVintage
+from .financials import SecCompanyFinancialVintage, SecStatementRow
 from .pit import (
     SecNormalizedFinancialFactVersion,
     _version_from_replayed_projection,
@@ -29,8 +30,13 @@ from .sgml_financials import (
 )
 from .xbrl_package import SecXbrlPackageAvailability, decode_sec_xbrl_package
 
-_PACKAGE_PARSER_VERSION = "sec-xbrl-package-financial-parser-v1-edgartools-5.56.0"
-_PACKAGE_ADAPTER_VERSION = "sec-xbrl-package-financial-adapter-v1"
+_PACKAGE_PARSER_VERSION_V1 = "sec-xbrl-package-financial-parser-v1-edgartools-5.56.0"
+_PACKAGE_PARSER_VERSION_V2 = "sec-xbrl-package-financial-parser-v2-edgartools-5.56.0"
+_PACKAGE_PARSER_VERSIONS = frozenset({_PACKAGE_PARSER_VERSION_V1, _PACKAGE_PARSER_VERSION_V2})
+_PACKAGE_ADAPTER_VERSIONS = {
+    _PACKAGE_PARSER_VERSION_V1: "sec-xbrl-package-financial-adapter-v1",
+    _PACKAGE_PARSER_VERSION_V2: "sec-xbrl-package-financial-adapter-v2",
+}
 _PACKAGE_SERIALIZATION = "sec-xbrl-package-v1"
 
 
@@ -45,6 +51,7 @@ class SecXbrlPackageFinancialProduction:
     projection_observation: SnapshotObservationRef
     vintage: SecCompanyFinancialVintage
     versions: tuple[SecNormalizedFinancialFactVersion, ...]
+    parser_version: str = field(default=_PACKAGE_PARSER_VERSION_V1, kw_only=True)
 
 
 def produce_sec_financials_from_xbrl_package(
@@ -59,10 +66,13 @@ def produce_sec_financials_from_xbrl_package(
     produced_at: datetime,
     max_raw_bytes: int = 8 * 1024 * 1024,
     max_rows: int = 10_000,
+    parser_version: str = _PACKAGE_PARSER_VERSION_V2,
 ) -> SecXbrlPackageFinancialProduction:
     """Build replay-bound rows from full SGML and one retained XBRL package."""
     _positive(max_raw_bytes, "max_raw_bytes", 8 * 1024 * 1024)
     _positive(max_rows, "max_rows", 10_000)
+    if type(parser_version) is not str or parser_version not in _PACKAGE_PARSER_VERSIONS:
+        raise ValueError("unsupported SEC XBRL package financial parser version")
     produced = _utc(produced_at, "produced_at")
     source_expected = RequestSpec(
         "sec",
@@ -137,7 +147,20 @@ def produce_sec_financials_from_xbrl_package(
         documents["EX-101.CAL"] = component_bytes["calculation"].decode("utf-8")
     if "definition" in component_bytes:
         documents["EX-101.DEF"] = component_bytes["definition"].decode("utf-8")
-    rows = _rows_from_documents(raw, documents, request, max_rows)
+    if parser_version == _PACKAGE_PARSER_VERSION_V1:
+        rows = _rows_from_documents(raw, documents, request, max_rows)
+    else:
+        units = decode_raw_units(package.components.instance, max_elements=200_000, max_depth=128)
+        native_rows = _rows_from_documents(raw, documents, request, max_rows)
+        rows_: list[SecStatementRow] = []
+        for row in native_rows:
+            if row.unit_ref is None:
+                raise ValueError("selected raw XBRL unit reference is missing")
+            try:
+                rows_.append(replace(row, unit=units[row.unit_ref]))
+            except KeyError as exc:
+                raise ValueError("selected raw XBRL unit reference is missing") from exc
+        rows = tuple(rows_)
     vintage = SecCompanyFinancialVintage(
         symbol=request.symbol,
         cik=request.cik,
@@ -157,7 +180,7 @@ def produce_sec_financials_from_xbrl_package(
     )
     config = _hash(
         {
-            "parser_version": _PACKAGE_PARSER_VERSION,
+            "parser_version": parser_version,
             "statement_types": request.statement_types,
             "include_dimensions": request.include_dimensions,
         }
@@ -186,7 +209,7 @@ def produce_sec_financials_from_xbrl_package(
             row_ordinal=index,
             expected_row=row,
             schema_version=_NORMALIZED_SCHEMA_VERSION,
-            adapter_version=_PACKAGE_ADAPTER_VERSION,
+            adapter_version=_PACKAGE_ADAPTER_VERSIONS[parser_version],
             normalization_version=_NORMALIZATION_VERSION,
             configuration_identity=config,
             recorded_at=produced,
@@ -201,6 +224,7 @@ def produce_sec_financials_from_xbrl_package(
         projection,
         vintage,
         versions,
+        parser_version=parser_version,
     )
 
 

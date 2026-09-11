@@ -32,7 +32,8 @@ ever exist; none qualifying for this retained package has been established.
 The automatic SGML producer writes header acceptance into
 `source_available_at`. That value is only an acceptance proxy. `MARKET_KNOWN`
 now explicitly rejects every supplied valid normalized version whose exact
-adapter provenance is `sec-sgml-financial-adapter-v1`, before policy, cutoff,
+adapter provenance is `sec-sgml-financial-adapter-v1` or
+`sec-sgml-financial-adapter-v2`, before policy, cutoff,
 or quality filtering. This deliberately fails mixed input instead of returning
 a partial or empty result. `SYSTEM_REPLAY` retains its existing causal gates.
 

@@ -1,5 +1,8 @@
 # SEC observed compound-unit repair v2
 
+The follow-up [offline repair](sec-legacy-unit-safety.md) adds SGML/package v2;
+the original observed-only scope below remains the record of this slice.
+
 - Goal: correct the [eight retained EPS unit discrepancies](sec-financial-source-qualification.md#independent-raw-instance-comparison) in newly produced observed financials while retaining byte-exact v1 reconstruction. This slice does not fix legacy SGML/package/provider paths or grant financial quality/public-availability eligibility.
 - Files: `observed_xbrl_financials.py`, one focused private raw-unit decoder, necessary observed bundle restoration helpers/exports, offline synthetic tests and linked documentation/changelog. Keep shared `_statement_parser.py`, `_rows_from_documents` semantics, edgartools version, legacy PIT identities and unrelated edits unchanged; never monkeypatch upstream objects.
 - Version/API: add keyword `parser_version` to `produce_sec_financials_from_observed_xbrl_package`, default `sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0`; also accept exactly existing `sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0`. Unknown/non-string versions fail before dependency work or writes. Keep output serialization `sec-financial-observed-rows-v1` and configuration version unchanged; configuration identity includes the selected parser version, preserving the exact original v1 digest formula.

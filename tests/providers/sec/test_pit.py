@@ -225,16 +225,30 @@ def test_parser_fix_and_decimal_precision_create_distinct_explicit_versions(tmp_
 
 
 @pytest.mark.parametrize(
-    ("knowledge_cutoff", "policy_adapter", "quality_records"),
+    ("knowledge_cutoff", "policy_adapter", "proxy_adapter", "quality_records"),
     [
         (
             datetime(2024, 5, 1, 22, tzinfo=UTC),
+            "sec-sgml-financial-adapter-v2",
+            "sec-sgml-financial-adapter-v2",
+            (),
+        ),
+        (
+            datetime(2024, 5, 1, 22, tzinfo=UTC),
+            "sec-sgml-financial-adapter-v1",
             "sec-sgml-financial-adapter-v1",
             (),
         ),
         (
             datetime(2024, 6, 1, tzinfo=UTC),
             "other-adapter-v1",
+            "sec-sgml-financial-adapter-v1",
+            (),
+        ),
+        (
+            datetime(2024, 6, 1, tzinfo=UTC),
+            "other-adapter-v1",
+            "sec-sgml-financial-adapter-v2",
             (),
         ),
     ],
@@ -243,9 +257,10 @@ def test_market_known_rejects_sgml_acceptance_proxy_before_eligibility_filters(
     tmp_path: Path,
     knowledge_cutoff: datetime,
     policy_adapter: str,
+    proxy_adapter: str,
     quality_records: tuple[SecQualityRecord, ...],
 ) -> None:
-    proxy = _version(tmp_path / "proxy", adapter="sec-sgml-financial-adapter-v1")
+    proxy = _version(tmp_path / "proxy", adapter=proxy_adapter)
     normal = _version(tmp_path / "normal")
     with pytest.raises(ValueError, match="acceptance-proxy"):
         select_sec_financial_versions(
@@ -257,8 +272,13 @@ def test_market_known_rejects_sgml_acceptance_proxy_before_eligibility_filters(
         )
 
 
-def test_system_replay_retains_sgml_acceptance_proxy_causal_gates(tmp_path: Path) -> None:
-    proxy = _version(tmp_path, adapter="sec-sgml-financial-adapter-v1")
+@pytest.mark.parametrize(
+    "adapter", ["sec-sgml-financial-adapter-v1", "sec-sgml-financial-adapter-v2"]
+)
+def test_system_replay_retains_sgml_acceptance_proxy_causal_gates(
+    tmp_path: Path, adapter: str
+) -> None:
+    proxy = _version(tmp_path, adapter=adapter)
     quality = _pass(proxy, datetime(2024, 5, 2, 11, tzinfo=UTC))
     commit = SecConsumerCommit(
         proxy.normalized_version_id,

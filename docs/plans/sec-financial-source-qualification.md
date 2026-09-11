@@ -150,10 +150,13 @@ The ignored `run_compound_unit_repair_probe.py` and timestamped report under
 `compound-unit-repair/20260911T132332650128Z/` bind this follow-up. Both productions
 still have zero quality records and zero consumer commits. A corrected production
 requires new caller quality/commit evidence; v1 attestations cannot transfer.
-Legacy live-provider, SGML and declared-availability package paths remain affected
-by the compound-unit defect and are outside this observed-only repair. Any
-consumer using those paths or old unit assumptions requires a separate impact
-assessment and rerun before corrected downstream comparisons can be claimed.
+The later [offline v2 repair](sec-legacy-unit-safety.md) applies the same unit
+correction to retained SGML and declared-availability package production. Those
+paths still lack a successful real AAPL acceptance case: its SGML has no embedded
+instance, and exact package publication evidence is absent. Their explicit v1
+paths and the live provider retain the old unit behavior. Any consumer adopting
+v2 or relying on old unit assumptions requires an impact assessment and rerun
+before corrected downstream comparisons can be claimed.
 Accounting relationships, period bridges, visible-report comparison, publication
 evidence and the broader P1 gate remain unverified; this filing receives no PASS.
 

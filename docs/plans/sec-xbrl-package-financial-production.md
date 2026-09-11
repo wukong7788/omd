@@ -1,5 +1,9 @@
 # Retained SEC XBRL package financial production
 
+The [offline unit repair](sec-legacy-unit-safety.md) adds parser v2 as the default
+and explicit v1 reconstruction. Original availability requirements and retained
+projection/bundle schemas below remain unchanged.
+
 This slice extends the offline full-SGML financial producer for filings whose
 retained full submission does not embed a traditional XBRL instance.  It does
 not parse inline XBRL.  A caller must retain one separately captured,
