@@ -476,9 +476,11 @@ for symbol in ("AAPL", "MSFT"):
 
 Each vintage records EDGAR's official `accepted_at` timestamp and computes
 `availability_anchor = accepted_at + lag_days`. Financial statement rows
-preserve native line item labels and concepts (`concept`, `label`, `value_native`)
-beside standardized XBRL categories (`standard_concept`) for cross-company
-quantitative comparisons.
+preserve native line item labels and concepts (`concept`, `label`, `value_native`).
+The native presentation-tree path currently sets `standard_concept` to the
+native concept; this field does not establish a cross-company taxonomy mapping.
+Compatibility inputs may supply a separate `standard_concept`, whose semantics
+still require explicit validation before quantitative comparisons.
 
 For offline, explicitly versioned PIT research, the SEC package also exposes
 `serialize_sec_typed_rows_projection`, `SecNormalizedFinancialFactVersion`,

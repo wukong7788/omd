@@ -1,8 +1,9 @@
 # SEC financial source qualification: first probe
 
-Date: 2026-09-11. Status: parsing probe passed; complete PIT qualification remains
-open. This is a bounded first-filing probe, not acceptance of the eight-symbol
-pilot or an independent financial correctness check.
+Date: 2026-09-11. Status: parsing and reconstruction passed; independent raw-fact
+comparison found eight incorrect compound-unit fields. Complete qualification
+remains open. This is a bounded first-filing probe, not acceptance of the
+eight-symbol pilot or overall financial correctness.
 
 ## Scope and retained evidence
 
@@ -82,6 +83,63 @@ were unchanged after load. The probe includes zero quality records and zero
 consumer commits; it establishes durable reconstruction, not a financial PASS
 or historical market-availability claim. The report and all source data remain
 ignored local artifacts.
+
+## Independent raw-instance comparison
+
+A subsequent network-denied diagnostic replayed the retained instance, package,
+and output observations through SnapshotStore integrity checks. It used standard
+library XML parsing and Decimal, independently of edgartools and OMD's row parser,
+to compare the retained output to instance facts. The package's instance bytes
+equal the separately retained instance. All 161 parsed contexts identify the
+expected issuer. This validates retained evidence consistency, not authenticated
+download origin.
+
+For the 180 emitted rows, concept/context, Decimal value, unit reference, native
+decimals, period type/start/end and dimension comparisons found no discrepancy:
+123 rows match one raw fact and 57 match repeated facts with identical compared
+fields. These counts exclude the separate unit-definition comparison below;
+they do not mean 180 entirely correct rows. Non-numeric facts, nil facts and
+dimensional facts are outside the selected non-dimensional numeric output.
+
+The diagnostic separately inspected the three named presentation roles in the
+retained linkbase. Each has 60 non-dimensional numeric concept/context cells
+after identical duplicate reconciliation, and all are represented in its output.
+No emitted concept falls outside its corresponding role. This explains the
+equal row counts without claiming complete rendered-report, notes, taxonomy or
+full-filing coverage. The role selection is specific to this filing; locator
+membership is not a general presentation-arc or taxonomy validation engine.
+
+**Required finding: compound-unit denominator loss.** Eight income-statement
+rows (basic and diluted EPS, four contexts each) retain `unit_ref=usdPerShare`,
+but their `unit` is `iso4217:USD`. The raw instance defines that unit as a divide:
+numerator `iso4217:USD`, denominator `shares`. A numerator alone is an incorrect
+unit. The other 172 emitted rows' simple unit definitions match. The initial
+diagnostic skipped compound definitions; it was corrected before accepting this
+evidence. The final report records all eight discrepancies rather than treating
+unchanged numeric values as a PASS.
+
+Independent source inspection traced the loss to the pinned edgartools instance
+unit parser selecting a descendant measure before its divide branch. OMD's
+native row adapter trusts that measure. This is a parser/adapter defect, not a
+SEC disclosure error. All 180 `standard_concept` fields also equal native
+`concept`; no cross-company mapping was established, and README now states that
+limitation.
+
+The ignored `run_raw_fact_qualification.py` and
+`raw-fact-qualification-report.json` retain script hash, input hashes, observation
+identities, counts and row-level discrepancy references. They remain local with
+the original data. The final report binds instance SHA-256
+`28f986bb243c8fdd445560d381df4b57912ca290b03b8451ecd518e63cdb5d2b` and output SHA-256
+`fb269d9b6bb00343ac6a2f93ba20d937374b65ed5d4ff9ad2e2e6a3830d67fdf`.
+No original snapshot, producer result, quality record or consumer commit was
+changed. The report is diagnostic evidence, not a persisted SDK quality verdict.
+
+Next: implement an explicitly versioned compound-unit repair with synthetic
+regressions and an old-version replay policy. Changing the parser in place would
+invalidate byte-exact reconstruction of existing bundles. Consumer impact and
+rerun requirements must be assessed before claiming corrected comparisons.
+Accounting relationships, period bridges, visible-report comparison, publication
+evidence and the broader P1 gate remain unverified; this filing receives no PASS.
 
 The [production plan](pit-data-production-and-event-refresh.md) owns the pilot
 limits; the [package contract](sec-xbrl-package-financial-production.md) owns
