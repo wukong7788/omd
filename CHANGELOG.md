@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add offline four-quarter revenue/net-income TTM sums with explicit quarter and
+  scope declarations, existing PIT selection, bounded exact Decimal arithmetic,
+  and input lineage. The availability bound describes eligible inputs; caller
+  declarations do not establish issuer ownership or financial correctness.
+
 - Add explicit live financial parser v2 with bounded raw-instance unit evidence,
   failure without partial results on invalid evidence, and v4 Parquet vintage
   links. Explicit live v1, standalone legacy parsing, and v3-only dataset bytes

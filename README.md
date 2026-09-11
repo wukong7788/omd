@@ -518,6 +518,32 @@ row and caller-attested source-artifact identity, but is not original SEC
 XBRL/SGML validation. `SYSTEM_REPLAY` additionally requires an exact PASS
 quality record and consumer commit before the requested cutoff. See the
 [SEC financial production PIT contract](docs/plans/sec-financial-production-pit-slice.md).
+
+`compute_sec_four_quarter_ttm` provides offline revenue and net-income sums from
+exactly four declared independent fiscal quarters. `SecQuarterTtmConfig` binds
+their normalized version IDs, native concepts, fiscal dates, accounting scope,
+comparability cohort and declaration references to an explicit PIT mode, cutoff
+and policy. The function reruns the existing selector and returns exact Decimal
+output, input lineage and an `input_availability_bound`. That bound describes
+the selected inputs; the consumer supplies the derived result's publication and
+first usable session. Issuer ownership, quarter independence and comparability
+remain explicit caller assertions. The recipe validates structural agreement
+with the selected rows. See the [four-quarter TTM contract](docs/plans/sec-quarter-ttm-recipe.md)
+for the input, arithmetic and declaration limits.
+
+```python
+from ohmydata.providers.sec import compute_sec_four_quarter_ttm
+
+# config is a SecQuarterTtmConfig containing four caller declarations and references.
+ttm = compute_sec_four_quarter_ttm(
+    config=config,
+    versions=normalized_versions,
+    quality_records=quality_records,
+    consumer_commits=consumer_commits,
+    max_input_records=10000,
+)
+```
+
 `write_sec_pit_bundle` can freeze a caller-selected receipt closure through
 `SnapshotStore`; `load_sec_pit_bundle` rebuilds it only from an injected
 observation-ID resolver and source store, without persisting source bytes or paths.

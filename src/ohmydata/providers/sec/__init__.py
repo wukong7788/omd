@@ -120,6 +120,14 @@ from .quality_findings import (
     SecQualityIssueClass,
     select_sec_quality_findings,
 )
+from .quarter_ttm import (
+    SecQuarterDeclaration,
+    SecQuarterTtmConfig,
+    SecQuarterTtmInputEvidence,
+    SecQuarterTtmRecipe,
+    SecQuarterTtmResult,
+    compute_sec_four_quarter_ttm,
+)
 from .sgml_financials import (
     SecSgmlFinancialProduction,
     SecSgmlFinancialsRequest,
@@ -193,6 +201,11 @@ __all__ = [
     "SecQualityIssueClass",
     "SecQualityRecord",
     "SecQualityStatus",
+    "SecQuarterDeclaration",
+    "SecQuarterTtmConfig",
+    "SecQuarterTtmInputEvidence",
+    "SecQuarterTtmRecipe",
+    "SecQuarterTtmResult",
     "SecReplaySession",
     "SecScheduledFundSelector",
     "SecSgmlFinancialProduction",
@@ -211,6 +224,7 @@ __all__ = [
     "atomic_json",
     "canonical_hash",
     "canonical_json",
+    "compute_sec_four_quarter_ttm",
     "decode_sec_observed_xbrl_package",
     "decode_sec_xbrl_package",
     "enrich_vintages",
