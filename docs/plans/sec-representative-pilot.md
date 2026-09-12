@@ -140,3 +140,29 @@ roles, 40 definition roles and 610 labeled elements in 0.740 seconds, with
 Evidence: `artifacts/sec-schema-diagnostic/parser-probe.json`. This establishes
 only schema parsing compatibility; large-instance production and complete bundle
 restoration still need their own resource and correctness acceptance.
+
+### Complete retained MSFT embedded-source pilot
+
+After embedded source/financial code commit `eefc46c` and 1,806 offline tests
+passed, a new independently reviewed protocol fetched only the two remaining
+files for accession `0001193125-26-191507` (period 2026-03-31). It reused the
+exact retained submissions, directory and schema receipts. Primary and instance
+returned HTTP 200 with 7,731,948 and 9,675,172 bytes; the five raw sources total
+19,109,897 bytes. Production, bundle write and network/write-denied bundle
+restoration completed in 5.059 seconds with 432,734,208 bytes peak RSS.
+
+The output contains 257 rows: balance sheet 67, income statement 60, cash flow
+130. Production identity:
+`13e24a65b6020aad55d15f55e4add512542fe93435f8cfa7add5185434f25084`.
+A separate offline XML/Decimal comparison matched all 257 emitted rows on
+concept namespace, context/unit references, value, period and native decimals.
+Independent review accepted these limited production/restoration and raw-fact
+correspondence claims. It does not prove statement completeness, normalized
+unit correctness, financial quality, first-publication time or representative
+coverage. No quality PASS or consumer commit was created. Previous failed
+pilots remain preserved and the larger representative gate remains open.
+
+Protocol SHA-256: `5863d9ea3c4a7760f0c20b54d5ebf4f664fa6c5db6f8ca141a904ce513afa704`.
+Local evidence directory: `artifacts/sec-embedded-live-pilot/20260912T033138500251Z/`.
+`report.json` SHA-256: `ded58d35ac8da3d526976e1f0bebceffa3405d60ae2b3d8b2857c3f0e6839aa6`.
+`raw-corroboration.json` SHA-256: `8283049122149618d9b6a6a63224932c5e2e25b7b9a9794f8dd2774a8ca291a9`.
