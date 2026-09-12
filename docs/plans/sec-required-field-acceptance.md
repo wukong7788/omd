@@ -1,6 +1,6 @@
 # SEC required-field acceptance matrix (v1)
 
-Status: BOUNDED FOUR-ISSUER AUDIT COMPLETE; coverage gaps remain (no quality PASS; no global aliases; no missing-as-zero).
+Status: FINITE PRIMARY-FIELD SCOPE ACCEPTED WITH DECLARED EXCEPTIONS; see [final acceptance](sec-financial-acceptance.md). No whole-production SDK quality PASS, global aliases or missing-as-zero.
 Binds retained 10-Q accessions: AAPL `0000320193-26-000020`, MSFT `0001193125-26-191507`, TSLA `0001628280-26-049270`, GOOG `0001652044-26-000071`.
 
 ## 1. Scope, missing statuses, and query modes
@@ -185,3 +185,17 @@ results. Final run: 1.56s / 258.5 MiB RSS. Independent receipt/role/period/value
 and two cash equations passed; focused Ruff F checks passed. No SDK change or consumer
 migration requires a rerun in this step. Cross-filing periods, supplemental-note
 production, consumer shadow and overall data-quality acceptance remain open.
+
+
+## 7. Final finite-scope acceptance (2026-09-12)
+
+All 232 declared field/period positions are classified: 218 verified primary facts,
+eight GOOG note-only shares, four undisclosed GOOG native GrossProfit positions,
+and two undisclosed AAPL separate FX positions. Fifty-eight selected equalities
+were independently recomputed, including the two AAPL cash balance bridges.
+The six selected TTM basis inputs and diagnostic anomaly disposition are also
+reviewed. [The final acceptance](sec-financial-acceptance.md) owns the precise
+scope, exclusions and immutable receipt. Historical missing records above remain
+unchanged; the acceptance does not supply excluded values or qualify every row.
+The Section 5 FY2025-source absence is historical: three issuers now have annual
+sources; MSFT annual admission and other period histories remain separate.

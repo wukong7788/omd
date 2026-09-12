@@ -655,3 +655,15 @@ MSFT真实单份来源链随后通过限定验收：两次GET，五份原始来�
   见[收入口径证据](sec-known-by-ttm.md#9-referenced-annual-policies-and-selected-income-components-2026-09-12)。
 - [x] 完成限定证据到共同重述基准的离线fail-closed资格裁决评估：生成资格决策产物与精确剩余输入清单；确认原报表YTD数值匹配但年度基准审批仍然缺失，维持NOT_QUALIFIED，不制造伪PASS，见[基准资格评估与剩余输入](sec-known-by-ttm.md#10-basis-qualification-decision-and-remaining-inputs-2026-09-12)。
 - [ ] 跨申报共同重述基准的完整金融质量、无前视门禁与消费者shadow验收。
+
+
+### 2026-09-12 财务口径与必需字段验收收尾
+
+- [x] 完成 GOOG/TSLA/AAPL 六项 FY+YTD 原报表口径判定：明确目标期间、归属、
+  重分类/准则采用适用性及所留存修订清单的精确截止时间；限定口径接受，不声明未来无重述。
+- [x] 完成四家当前申报的有限必需字段质量验收：232 个位置全部分类，218 个主表事实核对，
+  14 个披露/附注范围例外明确保留；58 项选定会计等式重算通过，24 条政策引用精确核对。
+- [x] 执行六组 YTD 异常策略并裁决唯一 GOOG 净利润增长标志：保留独立 OPEN/裁决证据链，
+  不改写原值；18 项回归检查通过。详见[最终财务验收](sec-financial-acceptance.md)。
+- [ ] 完整多数据集/所有行质量、其他期间与指标历史、MARKET_KNOWN、消费者 shadow 等
+  总体门禁仍按原阶段保留；本次不创建整份制作质量 PASS 或消费者提交，不扩展 MSFT 年报准入。

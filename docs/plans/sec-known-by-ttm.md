@@ -582,3 +582,13 @@ Artifact:
 - `artifacts/sec-basis-qualification/qualification.json`, SHA-256
   `9d73300a50274e910d922d3ba74fb3f107e21836327ff20b1db75dc916c18cdd`:
   fail-closed qualification decision and remaining requirements.
+
+
+## 11. Scoped basis and required-field acceptance (2026-09-12)
+
+The six selected as-reported basis decisions now have reviewed no-recast
+rationales, exact inventory cutoffs and source/production bindings. The earlier
+assessment-only `NOT_QUALIFIED` records remain historical evidence; the new
+acceptance does not turn them into earlier knowledge or grant MARKET_KNOWN.
+The frozen four-filing required-field matrix is accepted with explicit exceptions.
+See [the final scope, quality checks and receipt](sec-financial-acceptance.md).
