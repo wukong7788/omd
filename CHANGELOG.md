@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add offline FY+YTD TTM diagnostic (`diagnose_sec_fy_ytd_ttm`) for sealed observed
+  and document financial productions, evaluating exact arithmetic and fiscal bridge
+  intervals without fabricating normalized versions or financial quality approval.
+
 - Raise separate-document XBRL instance limit from 2MiB to 4MiB to
   admit observed directory declarations (such as GOOG 3,046,086 bytes) across
   document-source admission, link validation, financial production, unit decoding,

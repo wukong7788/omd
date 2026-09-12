@@ -1507,6 +1507,10 @@ A MATCH is an arithmetic diagnostic, never financial quality PASS. Missing rows
 remain MISSING, incompatible contexts/units/precision remain INCOMPARABLE, and
 detection cannot precede production. See the [document accounting contract](docs/plans/sec-document-accounting.md).
 
+`diagnose_sec_fy_ytd_ttm` evaluates offline FY+YTD TTM arithmetic directly over
+sealed observed and document productions without fabricating normalized versions or
+claiming `MARKET_KNOWN` publication. See the [known-by TTM contract](docs/plans/sec-known-by-ttm.md).
+
 Dated invalidation uses explicit target declarations instead of inferring
 securities from an issuer. `SecDatedInvalidationIndex` accepts existing
 `SecDependencyEdge` values and `SecDatedInvalidationTarget` declarations binding

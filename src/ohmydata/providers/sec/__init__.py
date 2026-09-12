@@ -136,6 +136,12 @@ from .financials_dataset import (
     write_financials_partition,
 )
 from .http import SecHttpClient, SecHttpResponse, SecTransportEvidence, validate_sec_url
+from .known_by_ttm import (
+    SecKnownByTtmEvidence,
+    SecKnownByTtmInput,
+    SecKnownByTtmResult,
+    diagnose_sec_fy_ytd_ttm,
+)
 from .metric_graph import (
     SecMetricCapexSign,
     SecMetricDomainPolicy,
@@ -329,6 +335,9 @@ __all__ = [
     "SecHoldingVintageSet",
     "SecHttpClient",
     "SecHttpResponse",
+    "SecKnownByTtmEvidence",
+    "SecKnownByTtmInput",
+    "SecKnownByTtmResult",
     "SecMetricCapexSign",
     "SecMetricDomainPolicy",
     "SecMetricExternalInput",
@@ -400,6 +409,7 @@ __all__ = [
     "compute_sec_metric_graph",
     "decode_sec_observed_xbrl_package",
     "decode_sec_xbrl_package",
+    "diagnose_sec_fy_ytd_ttm",
     "discover_sec_filing_events",
     "enrich_vintages",
     "ensure_edgar_available",
