@@ -607,3 +607,11 @@ MSFT真实单份来源链随后通过限定验收：两次GET，五份原始来�
 制作257行并写入/重放bundle；5.059秒、RSS432,734,208字节。独立XML对照257行全部对应，
 独立审查通过。详见[真实MSFT证据](sec-representative-pilot.md#complete-retained-msft-embedded-source-pilot)。
 这不证明三表完整性、单位归一化正确性、首次公开时间或完整金融质量；代表样本门禁仍未完成。
+
+
+- [x] 四家保留申报的限定字段批量盘点：CapEx 符号/口径、净利润归属、
+  AAPL 精确期间、EPS/股数正文核对及期间缺口，见
+  [完整记录](sec-required-field-acceptance.md#5-consolidated-local-audit-2026-09-12)。
+  56 项正文数值 MATCH、8 项净利润归属 MATCH；本项只完成诊断，未授予数据质量 PASS。
+- [ ] GOOG 收入表股数输出缺口、AAPL 两个 FX 缺口的来源/角色分类与必要修复。
+- [ ] 四家跨申报 FY/YTD/季度输入及消费者 shadow 验收；NVDA 保持暂缓。
