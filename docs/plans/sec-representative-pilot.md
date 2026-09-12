@@ -1,7 +1,48 @@
 # SEC representative pilot: bounded acquisition outcome
 
-Status: INCOMPLETE / RESOURCE_LIMIT. Recorded 2026-09-12; acquisition on
-2026-09-11 UTC. This is qualification evidence, not a new code slice.
+Status: INCOMPLETE — selected evidence accepted; representative gates remain open.
+Current consolidation: 2026-09-12. The historical acquisition failures below remain
+valid records of those attempts, not the current outcome of later source paths.
+
+## Current status: representative gate consolidation
+
+| Area | Verified scope |
+| --- | --- |
+| MSFT / TSLA / GOOG source production | Complete source closure, bundle and financial replay, and raw-fact correspondence for 257 / 220 / 207 emitted rows. |
+| Units | All 684 emitted rows match raw measure definitions. |
+| Cash | Eight balance rollforwards and eight component-total checks MATCH with zero residual and tolerance. |
+| Equity | Six MATCH and five historical equity-only contexts remain MISSING. |
+| Revenue / gross profit | Four selected TSLA checks and four additional MSFT checks MATCH; GOOG does not disclose the selected gross-profit subtotal. |
+| AAPL | Separate retained evidence is reused: 180 rows, 20 MATCH / 2 MISSING selected accounting checks and 46 selected primary HTML cells. Coverage is not identical to the other issuers. |
+
+Canonical detail: [accounting diagnostics](sec-document-accounting.md) and
+[AAPL qualification](sec-financial-source-qualification.md). These observations
+are not an overall financial-quality PASS or proof of every source field.
+Historical unit limitations later in this document were resolved by the linked
+684-row audit for those emitted rows only.
+
+The representative design allows **at most eight candidates**, not eight required
+corporate issuers. NVDA remains deferred by user instruction; its original failed
+attempt remains recorded. TSM 20-F/6-K is unsupported by the current domestic
+10-K/10-Q path. SCHD (ETF) and VIX (index) do not require corporate financial
+statements under this scope. The 53-candidate universe is an upper bound, not a
+promise to produce 53 company financial datasets.
+
+Remaining gates must be distinguished:
+
+| Gate | Remaining evidence / consequence |
+| --- | --- |
+| Required financial coverage | Freeze the required statement-field and missing-data acceptance matrix, then compare existing AAPL/MSFT/TSLA/GOOG evidence. Selected equalities do not establish all required field coverage. |
+| Period and availability | Verify required Q/YTD/FY and TTM inputs and their version-specific availability. Local known-by evidence remains valid for that query mode; SEC acceptance alone does not establish first publication of every source version. |
+| Security identity | Complete applicable share-class, currency, provider-code and historical validity evidence. Current issuer associations are not security-level PIT identity. |
+| Batch performance | Complete applicable cold/warm and multi-filing budget evidence. Successful single-filing runs do not prove batch acceptance. |
+| Downstream P2/P3 | Event recovery/recomputation and representative metric replay remain separate plan gates; existing partial implementations are not reclassified as absent. |
+| Downstream P4 | Actual Stock Notify shadow and consumer comparison remain open. The actual consumer data directory has not been supplied; do not guess it. This is separate from source-parser acceptance. |
+
+The next bounded execution is to freeze the required statement-field acceptance
+matrix for the four retained issuers and inspect only uncovered requirements.
+Reuse passed source, replay, unit and accounting evidence. Do not introduce an
+unbounded all-detail-row audit or expand acquisition before the applicable gate.
 
 ## Scope and retained evidence
 
