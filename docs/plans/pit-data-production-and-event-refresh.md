@@ -177,6 +177,7 @@ P0、P1、P2、P3和P4均为部分完成；五个阶段尚无一个通过该阶�
 - [x] MSFT/TSLA/GOOG经营、投资、融资及汇率影响组成净变动的8条申报限定等式全部MATCH，正文总额及符号核验、5项离线脚本测试通过；不含各分类内部明细完整性验收。详见[现金分项总额](sec-document-accounting.md#retained-cash-component-totals)。
 - [x] MSFT/TSLA/GOOG申报限定权益勾稽完成：6条MATCH、5条历史资产负债行缺失保留MISSING；TSLA两类非控股权益分列，GOOG优先股不重复计算，5项测试通过。详见[权益核验](sec-document-accounting.md#filing-scoped-equity-reconciliation)。
 - [x] 汇总代表样本已验收证据与剩余门禁，区分来源/财务覆盖、期间及可用时间、证券身份、批次性能和下游shadow；整体门禁仍未通过。详见[现状与下一步](sec-representative-pilot.md#current-status-representative-gate-consolidation)。
+- [x] 冻结四家已留存样本的v1必要字段验收清单，区分原生披露、条件输入与下游期间桥接；仅契约完成，字段覆盖未整体验收。详见[字段清单](sec-required-field-acceptance.md)。
 - [ ] NVDA单独样本验收按用户要求暂缓，不计为通过；继续离线财务质量工作。
 - [ ] 完成独立文档来源的代表样本与完整金融质量验收。
 
