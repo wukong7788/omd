@@ -447,6 +447,9 @@ and regulatory-credit changes also require interpretation, not automatic treatme
 as a restatement. No SDK behavior, TTM values or quality PASS changed; no consumer
 rerun is required for this evidence-only update.
 
+The referenced 2024 annual policy inputs and selected revenue, tax and acquisition
+sections were subsequently retained and examined in [Section 9](#9-referenced-annual-policies-and-selected-income-components-2026-09-12).
+
 Ignored evidence (SHA-256):
 
 - `artifacts/sec-policy-basis/notes_report-20260912T122909913051Z.json`:
@@ -457,3 +460,85 @@ Ignored evidence (SHA-256):
   `18df5c9dd1c8d3fba1caaacf1567cfbe60a2f6354252d163c8a9ea30893ba750`.
 - `artifacts/sec-revision-inventory/20260912T120911868166Z/report.json`:
   `2f9b68a0e14e9e1a68e31eef40cccefe24f25b9f10cf25cf023f9ad93286eedf`.
+
+## 9. Referenced annual policies and selected income components (2026-09-12)
+
+The original interim filings' FY2024 annual references were resolved against
+retained submissions. Three primary HTML documents were retained and replayed
+in 42.8189 seconds, with one GET each and the existing 4 MiB per-document limit.
+These are policy-source observations, not new complete financial productions.
+
+| Issuer | FY2024 accession | Primary bytes | Complete policy-note characters |
+| --- | --- | ---: | ---: |
+| GOOG | 0001652044-25-000014 | 2,528,344 | 31,689 (Note 1) |
+| TSLA | 0001628280-25-003063 | 2,596,459 | 63,733 (Note 2) |
+| AAPL | 0000320193-24-000123 | 1,503,780 | 2,356 (Note 1) |
+
+AAPL Note 2 revenue disclosures were also retained for FY2024 (5,768 characters),
+FY2025 (5,582), original FY2025 Q3 (1,447) and current FY2026 Q3 (1,430).
+Actual text comparison of the bounded annual recognition-policy spans finds
+one deletion, ` the`, in the opening sentence. The subsequent 4,080 characters
+are identical. This comparison excludes the following sales tables and footers;
+it is not an assertion that the entire notes are identical.
+Most product sales transfer control at shipment; services transfer control over
+delivery. Revenue for product-related bundled services is deferred and recognized
+straight-line over the estimated service period.
+Third-party App Store revenue is the retained commission. Abbreviated interim
+disclosures alone do not establish unchanged recognition methods.
+The selected GOOG annual principal/agent policy passage also appears verbatim
+in both FY2024 and FY2025; this does not establish whole-note equivalence.
+
+Fifteen additional income-component sections were retained from the pinned
+FY2025 annual/current-quarter productions: acquisition, goodwill/intangibles,
+tax and investment notes, plus AAPL's current MD&A tax discussion. Reviewed
+observations include:
+
+- GOOG includes Wiz and Intersect results after their March 2026 acquisitions.
+  GFiber remains in Other Bets until the pending disposal closes; held-for-sale
+  classification ceased related depreciation. First-half intangible amortization
+  was USD 545 million in 2026 versus 246 million in 2025. Its current investment
+  note reports USD 135,946 million of equity-securities gains within other income
+  for the first half of 2026; this is not the entire other-income total.
+- TSLA reports a USD 274 million tax benefit associated with California valuation
+  allowance release and an immaterial Pillar Two accrual in the current quarter.
+  Its digital-asset fair-value changes and acquisition-related accounting remain
+  components of reported income, not automatically excluded adjustments.
+- AAPL's annual tax note distinguishes the FY2024 state-aid charge from FY2025
+  effects; its current MD&A explains effective-tax-rate changes. These should not
+  be silently treated as restatements or removed from reported net income.
+
+The amendment inventory now checks the selected FY2024/FY2025 annual and both
+quarter report dates across all retained recent rows. Item 4.02 screening starts
+at each FY2024 annual filing date, including 2024-11-01 for AAPL. Only TSLA's two
+annual amendments match; its [FY2024 amendment explanatory note](https://www.sec.gov/Archives/edgar/data/1318605/000110465925042659/tm252787d2_10ka.htm)
+was additionally reviewed on SEC's website and identifies Part III, cover-reference
+and certification changes, otherwise leaving original disclosures unchanged.
+No Item 4.02 metadata match was found. This remains snapshot-scoped evidence,
+not a complete-history absence proof.
+
+Thirteen revenue-harness checks and Ruff checks passed, including changed later
+policy, multi-chunk mutation, missing-anchor and exact-quote regressions. All ten
+supporting excerpts were independently checked against source offsets and hashes.
+The final revenue run took 1.0606 seconds at 212.28 MiB peak RSS. Hardcoded comparison
+results and erroneous summary/hash claims were repaired before acceptance.
+Reported TTM values remain unchanged. The accepted scope is evidence for the
+as-reported diagnostic, including consolidation, investment and tax effects;
+common-restatement-basis qualification, financial quality PASS and consumer shadow
+remain separate acceptance gates. No SDK change or consumer rerun was required.
+
+Ignored evidence (SHA-256):
+
+- `artifacts/sec-prior-annual-policy/20260912T123730498805Z/report.json`:
+  `affdb4911c0494d00d3a229840e64f59152ab46e50ce5a692e4f092166ecc715`.
+- `artifacts/sec-prior-annual-policy/notes-20260912T123959488625Z.json`:
+  `85b2212e2439069d2c5759d4264ee2e4d4d4177879a74f2e049f54be27899080`.
+- `artifacts/sec-revenue-policy/revenue_report-20260912T125307912691Z.json`:
+  `61dc522ddf123c5bb04001d24881a41a34713dfa2f5b85e50a72e9dab458dba7`.
+- `artifacts/sec-revenue-policy/conclusions.json`:
+  `41eb4c8a4530b29083fff4fdca2b39312604b6a4d4d0b964b9b439d37275c28c`.
+- `artifacts/sec-income-basis/sections-20260912T124311341706Z.json`:
+  `cc3ca7fc06f874041ae9384eeb251c5819d78c6ddac537a37833cf58d23caace`.
+- `artifacts/sec-income-basis/investment-sections-20260912T124554995052Z.json`:
+  `637ce271ff72e30d1627103bcd4afd753fe2056bc0efa09bc922de8a92f78367`.
+- `artifacts/sec-revision-inventory/selected-periods-20260912T125009585878Z.json`:
+  `72732b74fd3e99029ce5acf9b5272a92b5671f519ac37c11d2e7e8997bcebe1c`.

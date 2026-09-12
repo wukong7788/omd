@@ -650,5 +650,8 @@ MSFT真实单份来源链随后通过限定验收：两次GET，五份原始来�
   见[原始比较证据](sec-known-by-ttm.md#7-original-comparative-ytd-evidence-2026-09-12)。
 - [x] 补齐三家九份完整政策附注，消除年度附注中间截断；完成留存快照内的修订元数据盘点，
   核对TSLA FY2025年报补充件范围，15项提取回归通过，见[政策与修订证据](sec-known-by-ttm.md#8-complete-policy-notes-and-bounded-revision-inventory-2026-09-12)。
-- [ ] 年度基准口径及修订资格：继续核对原始季度引用的2024年报、详细收入/税项/收购等关联附注；
-  已完成的限定修订盘点和原始数值一致，不替代完整比较基准及无前视门禁。
+- [x] 留存并核对被引用的三家2024年报政策、AAPL四期收入附注及15个税项/收购/投资等段落；
+  AAPL年度选定确认政策除开头冠词外相同，13项收入核验回归通过，修订盘点扩展到所选报告日期，
+  见[收入口径证据](sec-known-by-ttm.md#9-referenced-annual-policies-and-selected-income-components-2026-09-12)。
+- [ ] 将限定证据映射到共同重述基准的资格验收；原报表口径诊断包含并表、投资及税项实际影响，
+  文字一致和限定修订盘点不自动授予金融质量PASS，也不替代无前视门禁与消费者shadow。
