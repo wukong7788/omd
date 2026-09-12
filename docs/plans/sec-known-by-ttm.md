@@ -251,7 +251,8 @@ for all three issuers are covered by these excerpts, including TSLA's adoption
 paragraph near the end of Note 1. Annual GOOG Note 1 still has a 7,769-character
 middle gap. TSLA annual Note 1 is Overview; its accounting policies are in Note 2,
 whose excerpts still omit a 44,567-character middle portion. This inventory is
-not a complete accounting-policy review.
+not a complete accounting-policy review. These extraction gaps were subsequently
+closed by the complete-note evidence in [Section 8](#8-complete-policy-notes-and-bounded-revision-inventory-2026-09-12).
 
 ### Qualification result and concrete missing inputs
 
@@ -390,3 +391,69 @@ All selectors use exact concepts without aliases or fallbacks:
   `artifacts/sec-prior-ytd-pilot/comparison-20260912T115918523520Z.json`, SHA-256
   `6407f885100d6813d16afdb15ab2593edc87e8bb8382980264ebc163d563103d`
   (2.3638s, 278,822,912 bytes peak RSS, strict 6 raw facts verified).
+
+## 8. Complete policy notes and bounded revision inventory (2026-09-12)
+
+Nine policy notes were restored from the pinned annual, original-quarter and
+current-quarter productions. Every selected note is retained in contiguous chunks
+of at most 6,000 characters, with per-note hashes and zero extraction gaps:
+
+| Issuer | FY2025 annual characters | Original-quarter characters | Current-quarter characters |
+| --- | ---: | ---: | ---: |
+| GOOG | 31,769 | 3,518 | 14,037 |
+| TSLA | 68,567 | 20,910 | 22,669 |
+| AAPL | 3,155 | 1,486 | 1,661 |
+
+TSLA annual policies are Note 2; the other eight selections are Note 1.
+The earlier GOOG and TSLA annual middle gaps are now closed. Extraction rejects
+ambiguous target headings, prose next-note references, missing boundaries and
+oversize notes. Fifteen focused checks and Ruff F passed. The final offline run
+took 3.6628 seconds at 297.25 MiB peak RSS; all nine note hashes and lengths
+matched the pre-fix report. Network and snapshot writes were denied during reads.
+
+Reviewed clauses support these limited distinctions:
+
+- GOOG adopted ASU 2023-09 for FY2025, updating comparative tax disclosures.
+  Its current note retains the explicit exception to the statement about no
+  material policy changes, and describes revenue and non-revenue policies.
+- TSLA's crypto-asset adoption was effective January 1, 2024. Opening adjustments
+  were +303 million digital assets, -67 million deferred tax assets and +236
+  million retained earnings. The original 2025 quarter's June 30, 2024 recast
+  adjustments were instead +538, -119 and +419 million; these dates must not be
+  conflated. The recast concerns 2024 comparative periods, not a newly revised
+  2025 YTD value. ASU 2023-09 was adopted prospectively from January 1, 2025;
+  ASU 2025-05 from January 1, 2026, with no practical expedient elected and no
+  financial-statement impact stated for that adoption.
+- AAPL adopted ASU 2023-07 retrospectively for segment disclosures in FY2025.
+  Its annual reclassification clause covers notes; the current-quarter clause
+  covers statements and accompanying notes. Note 1 alone does not establish its
+  detailed revenue-recognition policy.
+
+The revision inventory checks retained recent submissions for filing dates from
+2025-01-01 through each source snapshot. GOOG/AAPL have no 10-K/A or 10-Q/A in that
+window. TSLA has FY2025 amendment `0001104659-26-053166` and FY2024 amendment
+`0001104659-25-042659`; only the former's scope was reviewed here. Its
+[SEC explanatory note](https://www.sec.gov/Archives/edgar/data/1318605/000110465926053166/tm2611837d1_10ka.htm)
+limits the changes to Part III items 10–14, the proxy-reference cover disclosure
+and certifications, otherwise leaving original disclosures unchanged. Its
+691,471-byte primary was retained and replayed after one bounded GET.
+No Item 4.02 metadata match was found; this is not proof of no restatement.
+Advertised older submissions files end before 2025 and were not acquired.
+
+Full accounting-basis and PIT qualification remain open: the original interim
+notes refer to 2024 annual statements, while detailed revenue, tax, acquisition
+and other referenced notes are not exhaustively reviewed. TSLA's disclosed tax-law
+and regulatory-credit changes also require interpretation, not automatic treatment
+as a restatement. No SDK behavior, TTM values or quality PASS changed; no consumer
+rerun is required for this evidence-only update.
+
+Ignored evidence (SHA-256):
+
+- `artifacts/sec-policy-basis/notes_report-20260912T122909913051Z.json`:
+  `91c639434ec54dc98cfd4e95b47fb3ce7545e7d9e045827018102ccedfdca8ad`.
+- `artifacts/sec-policy-basis/supporting-claims.json` (24 exact excerpt/offset checks):
+  `fd50c61ba527bd758b985f1bf3741a88697193f02ccd00e76a98583fd029f55d`.
+- `artifacts/sec-revision-inventory/metadata-20260912T120734553432Z.json`:
+  `18df5c9dd1c8d3fba1caaacf1567cfbe60a2f6354252d163c8a9ea30893ba750`.
+- `artifacts/sec-revision-inventory/20260912T120911868166Z/report.json`:
+  `2f9b68a0e14e9e1a68e31eef40cccefe24f25b9f10cf25cf023f9ad93286eedf`.
