@@ -85,3 +85,50 @@ directory: `artifacts/sec-real-accounting-checks/`.
 Review accepts selected arithmetic diagnostics only. Complete financial quality,
 explicit additional concept variants, raw normalized-unit verification and cash
 rollforward completeness remain separate work.
+
+## Filing-scoped revenue and gross-profit evidence
+
+The 2026-09-12 follow-up compared retained raw instance QNames, emitted concepts,
+context references and primary-statement text for the exact GOOG and MSFT
+productions above. Network and snapshot writes were denied. No global concept
+alias, normalized value, financial PASS or parser change was introduced.
+
+For GOOG accession `0001652044-26-000071`, the original income statement lists
+revenues, cost of revenues and operating expenses without a gross-profit
+subtotal. The retained instance contains zero `us-gaap:GrossProfit` facts, as
+does the output. Thus this missing selected check is not evidence of a parser
+omission. `us-gaap:Revenues` supplies the four emitted consolidated revenue
+facts. All 60 raw `RevenueFromContractWithCustomerExcludingAssessedTax` facts
+carry explicit product/service or business-segment dimensions; none uses the
+four consolidated revenue contexts. They must not substitute for consolidated
+revenue. Revenue less cost may support a separately identified derived amount,
+but is not a disclosed gross-profit fact or an independent equality check.
+
+For MSFT accession `0001193125-26-191507`, primary-statement total revenue maps
+to the retained `RevenueFromContractWithCustomerExcludingAssessedTax` facts,
+total cost of revenue to `CostOfGoodsAndServicesSold`, and the monetary subtotal
+labeled “Gross margin” to `GrossProfit`. Here “Gross margin” is an amount, not a
+percentage. The four consolidated income contexts have matching periods and
+USD units. A new rule scoped to this exact production and accession evaluates
+GrossProfit minus RevenueFromContractWithCustomerExcludingAssessedTax plus
+CostOfGoodsAndServicesSold. All four checks are MATCH with zero residual and
+EXACT zero tolerance. The existing generic checks and their missing results
+remain preserved; these are four additional checks, not replacements.
+
+This establishes a filing-specific relationship, not universal equivalence of
+`Revenues` with customer-contract revenue, or `CostOfRevenue` with
+`CostOfGoodsAndServicesSold`. Any broader mapping requires evidence for period,
+consolidation scope, recognition/tax basis and units. Numerical agreement alone
+does not establish those semantics.
+
+Local evidence directory: `artifacts/sec-concept-semantic-audit/`.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `audit-report.json` | `2ee7fb859fb78aa538cbe3116713a9bc3ee04c2497c8ec670a57a1c793f41614` |
+| `goog-revenue-contexts.json` | `c13627be96315e4598b3bc1a058b36d19eb762155b0bef1d84f40fa1fd8fdd8b` |
+| `msft-accounting-check-20260912T055903220595Z.json` | `5880a2fd0ccdf1767bf09eb177244d12b53065b7a23382a823f7924a2cdf5eba` |
+
+The extraction smoke check and static undefined-name checks passed locally;
+the scoped SDK evaluation restored the exact production and retained full term
+evidence with current diagnostic times. Review accepted these bounded findings.
