@@ -185,3 +185,113 @@ cohort remains `AS_REPORTED_CROSS_FILING_NOT_RESTATEMENT_QUALIFIED`; overlapping
 revision/restatement bases have not been qualified. MSFT annual admission,
 cross-filing comparability, full financial quality, MARKET_KNOWN evidence and
 consumer shadow remain open. NVDA remains deferred.
+
+## 6. Cross-filing comparability inventory (2026-09-12)
+
+The next offline audit restored the same six productions and retained all 1,231
+rows. Comparison keys include statement role, exact concept, unit/currency,
+dimension, period type and both dates. Different periods are not matched, nulls
+are not equal-value evidence, and multiple contexts are reported as ambiguous
+rather than arbitrarily selected. Production/output hashes remain pinned to
+Sections 4–5; the report also retains production and observation times.
+
+| Issuer | Same-period overlapping keys | Equal values | Different values | Income-statement overlaps |
+| --- | ---: | ---: | ---: | ---: |
+| GOOG | 33 | 30 | 3 | 0 |
+| TSLA | 33 | 33 | 0 | 0 |
+| AAPL | 30 | 29 | 1 | 0 |
+
+All 96 overlapping keys are balance-sheet or cash-flow instant facts; no
+overlapping group has missing values or ambiguous contexts. The 92 equal-value
+comparisons do not establish comparability of income-statement duration facts.
+Rows present in only one filing remain explicitly inventoried; differences in
+period coverage do not become missing-data errors or zero values.
+
+### Four presentation bridges
+
+All four differences have exact arithmetic bridges to lines separately presented
+in the current filing's comparative balance sheet. Both original primary
+statements were inspected for the date columns, labels, amounts and USD-million
+scale. The following values are USD millions:
+
+| Comparative date / issuer | Annual presentation | Current comparative presentation | Delta |
+| --- | --- | --- | ---: |
+| 2025-12-31 / GOOG | Other current assets 16,309 | Other current assets 13,870 + inventory 2,439 | 0 |
+| 2025-12-31 / GOOG | Other non-current assets 16,245 | Other non-current assets 14,962 + intangible assets 1,283 | 0 |
+| 2025-12-31 / GOOG | Other long-term liabilities 8,449 | Other long-term liabilities 7,530 + deferred income taxes 919 | 0 |
+| 2025-09-27 / AAPL | Other non-current assets 83,727 | Other non-current assets 72,634 + intangible assets 11,093 | 0 |
+
+The bridge evidence preserves exact native concepts, selected contexts, precision
+and values. These are `ARITHMETIC_PRESENTATION_BRIDGE` results, not concept aliases
+or proof of a particular accounting cause. The originally observed values remain
+unchanged; no SDK correction, synthetic replacement fact or financial PASS was
+introduced. In particular, the four unequal values must not be silently treated
+as the same normalized field across filings.
+
+### Disclosure evidence and limits
+
+The retained GOOG and AAPL current filings explicitly discuss prior-period
+reclassifications. GOOG's accounting-policy statement includes an exception for
+the descriptions that follow; it must not be reduced to an unconditional
+“no changes” assertion. TSLA's current Note 1 states that ASU 2025-05 was adopted
+prospectively on January 1, 2026, without electing its practical expedient, and
+reports no financial-statement impact from that adoption. This is evidence about
+that specific adoption, not a blanket comparability qualification.
+
+Keyword search records separate restatement, reclassification, discontinued
+operations and accounting-policy categories, at most 20 snippets per category.
+GOOG annual/current reclassification hits and TSLA annual restatement hits exceed
+that limit and are explicitly marked truncated. References to restated bylaws or
+stock plans are not financial-statement restatements; no keyword hit is not proof
+that no restatement occurred.
+
+Heading-validated policy excerpts retain up to 18,000 leading characters and,
+when longer, a separately located 6,000-character tail. The current policy notes
+for all three issuers are covered by these excerpts, including TSLA's adoption
+paragraph near the end of Note 1. Annual GOOG Note 1 still has a 7,769-character
+middle gap. TSLA annual Note 1 is Overview; its accounting policies are in Note 2,
+whose excerpts still omit a 44,567-character middle portion. This inventory is
+not a complete accounting-policy review.
+
+### Qualification result and concrete missing inputs
+
+All six revenue/net-income selectors remain `NO_OVERLAP`: annual FY2025 and
+the current filing's FY2026/FY2025 YTD periods do not provide the same duration
+in both productions. Therefore neither unchanged balance-sheet totals nor the
+four presentation bridges qualify the FY+YTD inputs as a common restatement
+basis. The cohort remains
+`AS_REPORTED_CROSS_FILING_NOT_RESTATEMENT_QUALIFIED`.
+
+The retained submissions identify the original FY2025 comparative-quarter
+filings needed for the next direct comparison:
+
+| Issuer | Original comparative filing | Period end | Primary document |
+| --- | --- | --- | --- |
+| GOOG | 0001652044-25-000062 | 2025-06-30 | goog-20250630.htm |
+| TSLA | 0001628280-25-035806 | 2025-06-30 | tsla-20250630.htm |
+| AAPL | 0000320193-25-000073 | 2025-06-28 | aapl-20250628.htm |
+
+Those payloads have not been acquired by this slice. Next, retain them under
+bounded admission and compare the six original revenue/net-income YTD values
+with the comparative YTD values in the current filings. Any difference needs an
+explicit revision/reclassification bridge; equality alone still does not replace
+review of the annual-period basis and relevant accounting disclosures. Candidate
+selection covers retained recent submissions only, not complete amendment history.
+
+### Validation evidence
+
+The inventory and bridge runs completed within 60 seconds and 512 MiB, with
+network and snapshot writes denied. Peak RSS was respectively 288,047,104 and
+283,721,728 bytes; each completed in about three seconds. Five synthetic inventory
+checks, six independent selector/separation/snippet checks and two synthetic
+bridge checks passed. Relevant Ruff checks passed. No consumer rerun or migration
+is required for these evidence-only changes; consumer shadow remains a later gate.
+
+Ignored local reports:
+
+- `artifacts/sec-fy2025-ttm/comparability-20260912T100717468926Z.json`, SHA-256
+  `0e274a7c84c70e40774f55ac6a137387fe6c629a6f15ab2c704e712732a06d6d`.
+- `artifacts/sec-fy2025-ttm/comparability_bridges-20260912T101104189907Z.json`, SHA-256
+  `aeb426d4896ad79fdff86baa67f2809c8b3c0cdd1891721ddd35dfebec7fd586`.
+- `artifacts/sec-fy2025-ttm/prior-ytd-candidates-20260912T101233083993Z.json`, SHA-256
+  `97eeea1da6ab61e382fa7dcc72cd9054d49487c51bd757edd81ed41dcc8f838b`.
