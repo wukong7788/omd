@@ -168,6 +168,7 @@ P0、P1、P2、P3和P4均为部分完成；五个阶段尚无一个通过该阶�
 - [x] 内嵌链接表的五文件来源包、显式财务制作及混合生命周期重放通过离线验收。
 - [x] 单份MSFT内嵌文档来源完成真实制作、bundle重放及257个输出行的原始事实对应核验。
 - [x] GOOG、TSLA下一批目录发现及原始receipt离线重放完成；仅目录证据，未完成财务制作。详见[目录验收](sec-representative-pilot.md#goog-and-tsla-directory-discovery)。
+- [x] TSLA独立链接表来源完成真实制作、bundle及财务重放，220行原始事实对应核验通过。详见[TSLA验收](sec-representative-pilot.md#complete-retained-tsla-separate-document-pilot)。
 - [ ] 完成独立文档来源的代表样本与完整金融质量验收。
 
 ### P0：契约与已有实现审计 — 部分完成

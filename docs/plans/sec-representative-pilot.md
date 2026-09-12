@@ -196,3 +196,38 @@ Protocol: `artifacts/sec-next-directory-pilot/protocol.json`, SHA-256
 `0529bffff6198d1a6ff36d0fe061cf08cdc3ea83129fd81e707846a4239ae771`.
 Report: `artifacts/sec-next-directory-pilot/20260912T035930911974Z/report.json`,
 SHA-256 `ab8251e5a09ff229b24e34a8fe7ca5b0eacc874a16ecd9dabf7894c3ce73ebd8`.
+
+### Complete retained TSLA separate-document pilot
+
+On 2026-09-12 UTC, a reviewed single-filing protocol reused the exact TSLA
+submissions and directory receipts above. Nine local `uv` offline tests passed
+for receipt preflight, protocol tampering, transport failure/size/length handling,
+redirect rejection and exception redaction. These tests did not constitute a
+synthetic end-to-end parser probe; the following real run supplies that evidence.
+
+Seven serial GETs returned HTTP 200 for the primary, schema, instance and four
+separate linkbases. Reference selection and the existing source producer
+validated the closure without changing SDK admission limits. The nine retained
+sources total 4,832,407 bytes. Production and bundle restoration completed in
+14.418 seconds with 190,906,368 bytes peak RSS, within the 60-second/512MiB
+sampled resource budget. Network was denied during production; network and
+snapshot writes were denied during restoration. Both bundle and standalone
+financial restoration preserved production identity and standalone row parity.
+
+The result contains 220 rows: balance sheet 62, income statement 80, cash flow
+78. A separate network/write-denied XML/Decimal comparison matched all 220
+emitted rows on concept namespace, context/unit references, value, period and
+native decimals. Review accepted these limited production/restoration and
+raw-fact correspondence claims. Statement completeness, normalized unit quality,
+financial-quality PASS and first-publication time remain unproven. No consumer
+commit, publication or broader-universe expansion occurred; representative
+acceptance remains open, including the GOOG admission issue above.
+
+Production identity:
+`85e3cf97a01cdf8d147b0467334430e2dd555f8dcac74b8bf6d1b7900b8be391`.
+Protocol SHA-256:
+`32da123aaa597671cb6caa0e7c3f4e825105095f6da0774e8d1d326df0686b15`.
+Local evidence: `artifacts/sec-tsla-document-pilot/20260912T041356599937Z/`.
+Report SHA-256: `68f3193bef68a9d7b4a1ce5ff98d4a17804dd14946ac6c83d5df6a362ef91bb8`.
+Raw correspondence SHA-256:
+`03f3e802a869a44e20bd0649162eae11f14b0961e5ea08273d3ceab89b8542d3`.
