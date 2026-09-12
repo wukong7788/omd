@@ -132,3 +132,53 @@ Local evidence directory: `artifacts/sec-concept-semantic-audit/`.
 The extraction smoke check and static undefined-name checks passed locally;
 the scoped SDK evaluation restored the exact production and retained full term
 evidence with current diagnostic times. Review accepted these bounded findings.
+
+## Retained-source unit and cash verification
+
+On 2026-09-12 an independent offline unit parser resolved namespace-qualified
+raw XBRL measures, including divide units, and compared them with every emitted
+row from the exact MSFT, TSLA and GOOG productions above. Instance receipts
+were checked against the sealed source manifest. All 684 rows matched:
+MSFT 257, TSLA 220 and GOOG 207; no unit mismatch or missing unit metadata was
+found. The emitted units cover USD, shares and USD per share. Other declared
+but unused units are inventoried without claiming emitted-row coverage.
+
+Eight synthetic harness tests passed, covering namespace aliases/rebinding,
+foreign measures, divide units, duplicate IDs, missing metadata, DTD rejection,
+resource limits and conservative cash inventory. The final unit report is
+`artifacts/sec-unit-cash-audit/audit-summary-20260912T061706326033Z.json`,
+SHA-256 `57a86121e4758cf4a00cba20ea977d2c5b2ff159a7eb8d4f00fb66f5a9a7a3de`.
+This verifies unit representation for these emitted rows, not completeness of
+all source facts or financial-quality approval.
+
+The cash follow-up compared retained primary cash-flow statements with selected
+instant balances and the disclosed net movement including exchange-rate effects.
+Eight EXACT CASH_ROLLFORWARD checks matched with zero residual and zero
+tolerance: MSFT four periods, TSLA two and GOOG two. Each rule selects the
+period end and the day before the duration start, requires unique nondimensional
+USD anchors, and binds its scope to the accession, production and primary-file
+hash. All eight signed sums were independently recomputed from report evidence.
+
+MSFT and GOOG use CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents
+for balances. TSLA uses the IncludingDisposalGroupAndDiscontinuedOperations
+balance concept: its primary cash-flow statement and restricted-cash note
+explicitly identify the corresponding totals. This relationship is accepted
+only for this retained TSLA filing; it is not a global concept alias. All three
+use the disclosed CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents
+PeriodIncreaseDecreaseIncludingExchangeRateEffect movement concept. No cash
+component was inferred as zero or replaced with another cash definition.
+
+Sixteen combined synthetic harness tests and Ruff undefined-name checks passed.
+The final cash report is
+`artifacts/sec-unit-cash-audit/cash-check-20260912T062149067966Z.json`,
+SHA-256 `81e027ae67a7c2decb13cd329dd1be4c480bc54025d318161be279562d36fda1`.
+It binds the final unit report above, primary receipts/snippets and full SDK
+term evidence. The cash process used 2.26 seconds and 245.77 MiB peak RSS;
+unit restoration stayed below 1.35 seconds per production and 273 MiB peak RSS.
+Both ran offline under the 60-second/512-MiB budget with snapshot writes denied.
+
+Review accepts these selected unit and cash-balance diagnostics. Operating,
+investing, financing and FX component completeness, broader financial-quality
+acceptance, and consumer acceptance remain separate. No SDK behavior, quality
+PASS, consumer data or publication changed; consumer reruns and migration
+documentation are not required for this evidence-only update.
