@@ -221,7 +221,8 @@ native decimals. Review accepted these limited production/restoration and
 raw-fact correspondence claims. Statement completeness, normalized unit quality,
 financial-quality PASS and first-publication time remain unproven. No consumer
 commit, publication or broader-universe expansion occurred; representative
-acceptance remains open, including the GOOG admission issue above.
+acceptance remains open. The subsequent GOOG admission resolution and pilot are
+recorded below.
 
 Production identity:
 `85e3cf97a01cdf8d147b0467334430e2dd555f8dcac74b8bf6d1b7900b8be391`.
@@ -231,3 +232,37 @@ Local evidence: `artifacts/sec-tsla-document-pilot/20260912T041356599937Z/`.
 Report SHA-256: `68f3193bef68a9d7b4a1ce5ff98d4a17804dd14946ac6c83d5df6a362ef91bb8`.
 Raw correspondence SHA-256:
 `03f3e802a869a44e20bd0649162eae11f14b0961e5ea08273d3ceab89b8542d3`.
+
+### Complete retained GOOG separate-document pilot
+
+Commit `8713d00` raised only the separate-document instance cap to 4MiB after
+214 affected tests, legacy identity/byte parity and a near-16MiB raw-source
+resource probe passed. Other per-role caps and the 16MiB aggregate cap remain
+unchanged. This resolves the directory-declared GOOG instance admission issue
+recorded above; it does not relabel the earlier failed pilots.
+
+The reviewed GOOG harness reused the two exact metadata receipts and passed nine
+local `uv` offline checks. On 2026-09-12 UTC, seven serial GETs returned HTTP 200
+for accession `0001652044-26-000071`; its extracted instance measured
+3,046,086 bytes. Nine raw sources total 8,083,259 bytes. Complete source and
+financial production, bundle writing, and read-only bundle/financial restoration
+finished in 22.280 seconds with 300,269,568 bytes peak RSS. Production/restoration
+had network disabled; restoration also denied snapshot writes. Production
+identity and standalone restored rows matched.
+
+The output contains 207 rows: balance sheet 70, income statement 60, cash flow
+77. Independent-from-parser XML/Decimal comparison matched all 207 emitted rows
+on concept namespace, context/unit references, value, period and native decimals.
+Review accepted this limited evidence. It does not prove statement completeness,
+normalized unit correctness, financial-quality PASS or first-publication time.
+Representative and consumer acceptance remain incomplete. No quality PASS,
+consumer commit or publication occurred.
+
+Production identity:
+`5853a29bbe341c76d679e9ef508d6fc7dbb5bb59fdb2681e2979780bbae9f2d7`.
+Protocol SHA-256:
+`ced7eaa621617224a37f4842995a83f6de1f87534dc1143583d69cc220d88cef`.
+Local evidence: `artifacts/sec-goog-document-pilot/20260912T044307782126Z/`.
+Report SHA-256: `c7c881d4f69f8408cc68c31dfc72be91cec3a40eedd745327d70860b67bde8e5`.
+Raw correspondence SHA-256:
+`4c712c4ab53f4ac25688a63786ef21af5ea2d359a5de1816e875df59e546ae2e`.
