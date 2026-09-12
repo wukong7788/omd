@@ -166,3 +166,33 @@ Protocol SHA-256: `5863d9ea3c4a7760f0c20b54d5ebf4f664fa6c5db6f8ca141a904ce513afa
 Local evidence directory: `artifacts/sec-embedded-live-pilot/20260912T033138500251Z/`.
 `report.json` SHA-256: `ded58d35ac8da3d526976e1f0bebceffa3405d60ae2b3d8b2857c3f0e6839aa6`.
 `raw-corroboration.json` SHA-256: `8283049122149618d9b6a6a63224932c5e2e25b7b9a9794f8dd2774a8ca291a9`.
+
+### GOOG and TSLA directory discovery
+
+On 2026-09-12 UTC, the next bounded stage verified both retained submissions
+receipts and discovered only the GOOG and TSLA filing directories. Local project
+`uv` ran 12 offline tests using retained metadata and synthetic transports;
+undefined-name checks and offline candidate verification passed before the run.
+The reviewed protocol allowed two serial GETs, no retries or redirects, 2MiB
+per directory, 4MiB total, 60 seconds and 512MiB sampled RSS.
+
+Both responses returned HTTP 200: GOOG retained 9,891 bytes for accession
+`0001652044-26-000071`; TSLA retained 8,022 bytes for
+`0001628280-26-049270`. Elapsed time was 1.670 seconds and peak RSS was
+42,663,936 bytes. Both raw receipts replayed with network and snapshot writes
+denied, reproducing their directory summaries and observation identities.
+
+Directory filenames are candidates, not validated XBRL layout or financial
+production evidence. GOOG's extracted-instance declaration is 3,046,086 bytes,
+above the separate-document path's unchanged 2MiB XML cap. TSLA's primary is
+declared as 1,573,323 bytes and its instance as 1,471,667 bytes; the listed schema
+and separate linkbases also fall below that path's individual limits. Actual
+body sizes, source closure and parser compatibility remain unverified. TSLA is
+the next bounded complete-source candidate; GOOG requires a separately reviewed
+resolution of the admission limit. No component downloads, new financial PASS,
+consumer commit or broader-universe expansion occurred in this stage.
+
+Protocol: `artifacts/sec-next-directory-pilot/protocol.json`, SHA-256
+`0529bffff6198d1a6ff36d0fe061cf08cdc3ea83129fd81e707846a4239ae771`.
+Report: `artifacts/sec-next-directory-pilot/20260912T035930911974Z/report.json`,
+SHA-256 `ab8251e5a09ff229b24e34a8fe7ca5b0eacc874a16ecd9dabf7894c3ce73ebd8`.
