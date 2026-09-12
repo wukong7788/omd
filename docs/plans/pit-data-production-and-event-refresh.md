@@ -171,6 +171,8 @@ P0、P1、P2、P3和P4均为部分完成；五个阶段尚无一个通过该阶�
 - [x] TSLA独立链接表来源完成真实制作、bundle及财务重放，220行原始事实对应核验通过。详见[TSLA验收](sec-representative-pilot.md#complete-retained-tsla-separate-document-pilot)。
 - [x] 独立文档instance限额由2MiB调整至4MiB：其他限额不变，214项相关测试、近16MiB来源资源探测及旧输入身份/字节对照通过；此为已有切片的容量调整。
 - [x] GOOG完整来源制作、bundle及财务重放和207行原始事实对应核验通过。详见[GOOG验收](sec-representative-pilot.md#complete-retained-goog-separate-document-pilot)。
+- [x] MSFT/TSLA/GOOG固定会计规则离线诊断完成：30条中4条MATCH、26条MISSING，保留缺失概念及逐项证据；AAPL已有22条证据复用。详见[诊断验收](sec-document-accounting.md#selected-retained-source-diagnostic-run)。
+- [ ] NVDA单独样本验收按用户要求暂缓，不计为通过；继续离线财务质量工作。
 - [ ] 完成独立文档来源的代表样本与完整金融质量验收。
 
 ### P0：契约与已有实现审计 — 部分完成
