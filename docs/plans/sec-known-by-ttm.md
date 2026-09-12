@@ -542,3 +542,43 @@ Ignored evidence (SHA-256):
   `637ce271ff72e30d1627103bcd4afd753fe2056bc0efa09bc922de8a92f78367`.
 - `artifacts/sec-revision-inventory/selected-periods-20260912T125009585878Z.json`:
   `72732b74fd3e99029ce5acf9b5272a92b5671f519ac37c11d2e7e8997bcebe1c`.
+
+## 10. Basis qualification decision and remaining inputs (2026-09-12)
+
+The offline, fail-closed basis qualification evaluator (`artifacts/sec-basis-qualification/evaluator.py`)
+evaluated all 17 pinned evidence reports from Sections 6–9 to assess whether available SEC disclosures
+qualify the FY+YTD TTM inputs under a common restatement basis.
+
+### Evaluation Decision & Gate Status
+
+- **Assessment Decision**: `NOT_QUALIFIED` across all six issuer/metric pairs under cohort `AS_REPORTED_CROSS_FILING_NOT_RESTATEMENT_QUALIFIED`. Completed assessment decision is `NOT_QUALIFIED`, distinct from an authorized qualified gate. No fictional `PASS` is issued.
+- **Diagnostic Execution**: `diagnostic_supported: true` (derived from all six decisions).
+- **Gate Breakdown**:
+  1. `evidence_hash_integrity`: `PASS` (all 17 pinned file hashes checked, with consumed JSON bytes rechecked before parsing; empty pin sets fail).
+  2. `original_vs_comparative_numeric_match`: `PASS` (exact finite Decimal `delta=0` verified across all six pairs under strict concept, period, basis, USD currency, iso4217:USD unit, and null dimension checks).
+  3. `policy_disclosure_review`: `UNKNOWN` (Section 9 reviewed detailed revenue and policy notes; disclosure review alone does not replace annual basis approval for un-overlapped duration periods).
+  4. `amendment_scope`: `UNKNOWN` (inventory scope reviewed starting at FY2024 filing dates: AAPL 2024-11-01, GOOG 2025-02-05, TSLA 2025-01-30; complete historical amendment coverage unacquired).
+  5. `annual_basis_qualification`: `NOT_QUALIFIED` (assessment-only tool; annual-vs-current approval schema absent).
+  6. `financial_quality_gate`: `NOT_QUALIFIED` (independent financial quality gate not granted).
+  7. `pit_publication_gate`: `NOT_QUALIFIED` (separate PIT publication gate; does not determine accounting-basis result).
+  8. `consumer_shadow_gate`: `NOT_QUALIFIED` (separate consumer shadow / DATA_DIR gate; does not determine accounting-basis result).
+
+### Bounded Remaining Requirements
+
+Bounded to the selected six metrics and cutoff (without requiring unbounded scans or downloading irrelevant older files):
+
+1. **Annual-vs-current basis review**: Explicit metric/period-specific applicability review and rationale for the selected six metrics (FY2025 annual vs current comparative YTD) through cutoff, with referenced bridge or affirmative no-recast rationale.
+2. **Targeted amendment coverage**: Targeted SEC amendment coverage confirmation for selected report dates through evidence cutoff with limits (only inventory scope was reviewed; historical complete coverage unacquired).
+3. **Point-in-time publication evidence**: Independent PIT availability and publication cutoff evidence.
+4. **Independent financial quality gate**: Execution and verification of independent accounting quality rules beyond as-reported arithmetic.
+5. **Consumer shadow validation**: Shadow comparison against consumer `DATA_DIR` before production publication.
+
+### Validation and Artifact
+
+Twenty-five focused checks in `artifacts/sec-basis-qualification/` passed, including independent actual-file missing/tampering and malformed-JSON/root regressions, concept/period/basis/value contradictions, unit/currency/dimension checks and NaN/Infinity rejection. All six real comparisons remain exact matches. This task-local harness records the current assessment; it does not implement an SDK qualification API or accept accounting approvals.
+
+Artifact:
+
+- `artifacts/sec-basis-qualification/qualification.json`, SHA-256
+  `9d73300a50274e910d922d3ba74fb3f107e21836327ff20b1db75dc916c18cdd`:
+  fail-closed qualification decision and remaining requirements.

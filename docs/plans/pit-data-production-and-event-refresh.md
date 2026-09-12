@@ -653,5 +653,5 @@ MSFT真实单份来源链随后通过限定验收：两次GET，五份原始来�
 - [x] 留存并核对被引用的三家2024年报政策、AAPL四期收入附注及15个税项/收购/投资等段落；
   AAPL年度选定确认政策除开头冠词外相同，13项收入核验回归通过，修订盘点扩展到所选报告日期，
   见[收入口径证据](sec-known-by-ttm.md#9-referenced-annual-policies-and-selected-income-components-2026-09-12)。
-- [ ] 将限定证据映射到共同重述基准的资格验收；原报表口径诊断包含并表、投资及税项实际影响，
-  文字一致和限定修订盘点不自动授予金融质量PASS，也不替代无前视门禁与消费者shadow。
+- [x] 完成限定证据到共同重述基准的离线fail-closed资格裁决评估：生成资格决策产物与精确剩余输入清单；确认原报表YTD数值匹配但年度基准审批仍然缺失，维持NOT_QUALIFIED，不制造伪PASS，见[基准资格评估与剩余输入](sec-known-by-ttm.md#10-basis-qualification-decision-and-remaining-inputs-2026-09-12)。
+- [ ] 跨申报共同重述基准的完整金融质量、无前视门禁与消费者shadow验收。
