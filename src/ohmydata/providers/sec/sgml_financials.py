@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from importlib.metadata import PackageNotFoundError, version
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
 from ...core import RequestSpec
@@ -18,6 +18,9 @@ from ._pit_projection import _decode_projection
 from .edgartools_adapter import ensure_edgar_available, parse_statement_rows
 from .financials import SecCompanyFinancialVintage, SecStatementRow, StatementType
 from .pit import SecNormalizedFinancialFactVersion, _version_from_replayed_projection
+
+if TYPE_CHECKING:
+    from edgar.financials import Financials
 
 _EASTERN = ZoneInfo("America/New_York")
 _ACCESSION = re.compile(r"^[0-9]{10}-[0-9]{2}-[0-9]{6}$")
@@ -341,7 +344,12 @@ def _rows_from_documents(
         if name in documents:
             parser(documents[name])
     xbrl.parser.parse_instance_content(documents["EX-101.INS"])
-    financials = Financials(xbrl)
+    return _financial_rows(Financials(xbrl), request, max_rows)
+
+
+def _financial_rows(
+    financials: Financials, request: SecSgmlFinancialsRequest, max_rows: int
+) -> tuple[SecStatementRow, ...]:
     getters = {
         "balance_sheet": financials.balance_sheet,
         "income_statement": financials.income_statement,
@@ -363,6 +371,33 @@ def _rows_from_documents(
             raise ValueError("SEC financial row limit exceeded")
         rows.extend(parsed)
     return tuple(rows)
+
+
+def _rows_from_embedded_documents(
+    schema: str, instance: str, request: SecSgmlFinancialsRequest, max_rows: int
+) -> tuple[SecStatementRow, ...]:
+    """Parse a schema whose required linkbases are embedded in ``xs:appinfo``.
+
+    This deliberately invokes the pinned parser's schema extractor once.  An
+    embedded schema is not also passed to the label or presentation parsers.
+    """
+    ensure_edgar_available()
+    try:
+        installed = version("edgartools")
+    except PackageNotFoundError as exc:
+        raise ImportError("edgartools 5.56.0 is required for SEC SGML financials") from exc
+    if installed != "5.56.0":
+        raise RuntimeError("SEC SGML financial parser requires edgartools 5.56.0")
+    from edgar.financials import Financials
+    from edgar.xbrl import XBRL
+
+    if _validate_xml(schema) + _validate_xml(instance) > 200_000:
+        raise ValueError("embedded XBRL XML aggregate element limit exceeded")
+    _validate_instance_identity(instance, request.cik)
+    xbrl = XBRL()
+    xbrl.parser.parse_schema_content(schema)
+    xbrl.parser.parse_instance_content(instance)
+    return _financial_rows(Financials(xbrl), request, max_rows)
 
 
 def _rows(

@@ -14,6 +14,7 @@ from typing import cast
 from ...core import SnapshotObservationRef
 from .document_financials import SecDocumentFinancialProduction
 from .document_source import SecDocumentSourcePackage
+from .embedded_document_source import SecEmbeddedDocumentSourcePackage
 from .financials import SecStatementRow
 from .observed_financial_replay import (
     SecObservedFinancialConsumerCommit,
@@ -32,6 +33,7 @@ _MAX_BYTES = 32 * 1024 * 1024
 _ALLOWED = (
     SecDocumentFinancialProduction,
     SecDocumentSourcePackage,
+    SecEmbeddedDocumentSourcePackage,
     SecObservedFinancialVintage,
     SecStatementRow,
     SecSgmlFinancialsRequest,

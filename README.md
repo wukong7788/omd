@@ -1532,3 +1532,23 @@ fail explicitly. Missing market availability does not prevent a system-only
 plan. The result retains exact targets and a bounded deterministic proof path;
 it does not prove source timing, coverage of intervening dates, or execute
 metric recalculation. See the [dated invalidation contract](docs/plans/sec-dated-invalidation.md).
+
+Embedded-linkbase SEC filings use the explicit
+`produce_sec_embedded_document_source_package` and
+`produce_sec_financials_from_embedded_document_source` entries. The source
+contains exactly five raw receipts: submissions, index, primary HTML, intact
+schema and extracted instance. Embedded label/presentation links stay inside
+the retained schema; no synthetic standalone linkbase observations are created.
+The new source, parser and output domains are distinct. Existing producers
+continue to accept only their original source domains.
+
+`restore_sec_document_financial_production`, document bundles, selectors and
+accounting diagnostics support both sealed variants with exact identity binding.
+Embedded limits are 8 MiB primary, 12 MiB instance, 2 MiB schema/metadata and
+24 MiB total source; output stays at 8 MiB/10,000 rows and bundle dependencies
+at 32 MiB. Sources exceeding a cumulative budget fail explicitly. This path
+requires one embedded linkbase container using the pinned parser's `link:`
+prefix; mixed external filing linkbase references are rejected. Offline
+resource acceptance does not establish real filing quality or market availability.
+See the [source contract](docs/plans/sec-embedded-document-source.md) and
+[financial contract](docs/plans/sec-embedded-document-financials.md).

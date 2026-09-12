@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Support explicitly retained schema-embedded SEC linkbases through a distinct
+  five-receipt source domain and financial producer, with strict variant
+  restoration and shared document lifecycle APIs. Preserve legacy identities.
+
 - Plan exact dated metric invalidations from caller-declared issuer, security,
   recipe and availability scopes, with indexed target lookup, deterministic
   proof paths, defensive copies and bounded traversal/serialization.

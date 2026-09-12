@@ -52,9 +52,17 @@ class Dependencies:
         remaining = self.maximum - self.used
         if remaining <= 0 or len(self.records) >= 120:
             raise ValueError("document bundle dependency limit exceeded")
-        replay = store.replay_observation(
-            observation, max_payload_bytes=min(8 * 1024 * 1024, remaining)
+        embedded_raw_document = (
+            observation.provider,
+            observation.endpoint,
+            observation.serialization_identifier,
+        ) == (
+            "sec",
+            "company-filing-document",
+            "sec-filing-document-bytes-v1",
         )
+        cap = 12 * 1024 * 1024 if embedded_raw_document else 8 * 1024 * 1024
+        replay = store.replay_observation(observation, max_payload_bytes=min(cap, remaining))
         size = len(replay.payload)
         self.used += size
         self.records[identity] = (store, observation, size)

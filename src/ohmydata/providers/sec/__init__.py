@@ -49,6 +49,7 @@ from .document_financial_replay import (
 from .document_financials import (
     SecDocumentFinancialProduction,
     produce_sec_financials_from_document_source,
+    produce_sec_financials_from_embedded_document_source,
     restore_sec_document_financial_production,
 )
 from .document_source import (
@@ -71,6 +72,11 @@ from .edgartools_adapter import (
     ensure_edgar_available,
     parse_statement_rows,
     validate_user_agent,
+)
+from .embedded_document_source import (
+    SecEmbeddedDocumentSourcePackage,
+    produce_sec_embedded_document_source_package,
+    restore_sec_embedded_document_source_package,
 )
 from .endpoints import SecEdgarSubmissionsRequest, SecEmptyPolicy, SecNportQuarterRequest
 from .event_dependencies import (
@@ -287,6 +293,7 @@ __all__ = [
     "SecDocumentSource",
     "SecDocumentSourcePackage",
     "SecEdgarSubmissionsRequest",
+    "SecEmbeddedDocumentSourcePackage",
     "SecEmptyPolicy",
     "SecEquityEtfUniverse",
     "SecEventDiscoveryLedger",
@@ -416,7 +423,9 @@ __all__ = [
     "plan_sec_dated_invalidation",
     "plan_sec_event_invalidation",
     "produce_sec_document_source_package",
+    "produce_sec_embedded_document_source_package",
     "produce_sec_financials_from_document_source",
+    "produce_sec_financials_from_embedded_document_source",
     "produce_sec_financials_from_observed_xbrl_package",
     "produce_sec_financials_from_sgml",
     "produce_sec_financials_from_xbrl_package",
@@ -427,6 +436,7 @@ __all__ = [
     "resolve_submissions",
     "restore_sec_document_financial_production",
     "restore_sec_document_source_package",
+    "restore_sec_embedded_document_source_package",
     "retain_sec_execution_outputs",
     "retain_sec_execution_validation",
     "rows_from_result",
