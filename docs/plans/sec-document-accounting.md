@@ -222,3 +222,42 @@ Review accepts the selected top-level cash component reconciliation. It does
 not establish completeness of the detailed rows within operating, investing
 or financing sections, or overall financial-quality PASS. Earlier deferred
 component-total work is resolved for these eight periods only.
+
+## Filing-scoped equity reconciliation
+
+On 2026-09-12 the retained primary balance sheets and emitted equity rows were
+reviewed for MSFT, TSLA and GOOG. MSFT and GOOG use the displayed
+StockholdersEquity subtotal in Assets minus Liabilities minus StockholdersEquity.
+TSLA separately discloses MinorityInterest and
+RedeemableNoncontrollingInterestEquityCarryingAmount outside that subtotal;
+its rule subtracts both distinct terms as well. GOOG preferred stock is already
+inside StockholdersEquity and is not counted again. These are filing-specific
+equalities, not aliases for equity including noncontrolling interests.
+
+Eleven SAME_CONTEXT EXACT USD checks produced six MATCH and five MISSING:
+MSFT 2/1, TSLA 2/0 and GOOG 2/4. The six matches have zero residual and
+tolerance; their signed sums were independently recomputed. Historical
+equity-only contexts remain present in the union of selected concepts: MSFT
+2025-03-31 and GOOG 2024-12-31, 2025-03-31, 2025-06-30 and 2026-03-31 lack
+selected Assets and Liabilities rows. No missing value is inferred as zero.
+Earlier generic missing checks remain preserved; these are additional rules.
+
+Five focused tests passed, including actual offline SDK checks and distinct
+TSLA terms, no double-counted GOOG preferred stock, historical anchor retention
+and unknown-symbol rejection. Ruff undefined-name checks passed. The retained
+source inventory and final diagnostics are under
+`artifacts/sec-equity-scope-audit/`:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `equity-scope-20260912T065315642748Z.json` | `a380bb051ea4636267c4b46448e1cd6a132e14f02b3b761c857ca4c93b73a114` |
+| `equity-check-20260912T065330159886Z.json` | `9473ee0311e2bb4a804eaa8e0a20350b1b620f032f123f1d537531d607cb6efd` |
+
+The final inventory locates the actual balance-sheet headings, not a table of
+contents or narrative mention; prior inventory drafts are superseded. The
+check report pins its inventory hash, production/output identities and primary
+source hashes. It completed in 1.77 seconds at 244.94 MiB peak RSS under the
+60-second/512-MiB offline budget with network and snapshot writes denied.
+Review accepts this selected reconciliation only, not overall financial-quality
+PASS. No SDK behavior or consumer data changed; consumer reruns and migration
+documentation are not required.
