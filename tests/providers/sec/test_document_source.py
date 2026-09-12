@@ -245,6 +245,7 @@ def test_restoration_replays_tampered_raw_dependencies(tmp_path):
     "role,size",
     [
         ("primary", 4 * 1024 * 1024 + 1),
+        ("instance", 4 * 1024 * 1024 + 1),
         ("schema", 2 * 1024 * 1024 + 1),
         ("submissions", 2 * 1024 * 1024 + 1),
     ],
@@ -256,6 +257,25 @@ def test_source_size_limit_before_unbounded_parse(tmp_path, role, size):
     with pytest.raises(SnapshotIntegrityError):
         produce(tmp_path, inputs(tmp_path, change=change))
     assert not list((tmp_path / "package").rglob("response.bin"))
+
+
+def test_separate_document_instance_admitted_above_2mib(tmp_path):
+    def change(payloads):
+        target_size = 3_046_086
+        padding = b"<!--" + b"x" * (target_size - len(payloads["instance"]) - 7) + b"-->"
+        payloads["instance"] = padding + payloads["instance"]
+        assert len(payloads["instance"]) == target_size
+
+    sources = inputs(tmp_path, change=change)
+    package = produce(tmp_path, sources)
+    assert package.package_identity
+    mapping = {s.observation.observation_identity: (s.store, s.observation) for s in sources}
+    restored = restore_sec_document_source_package(
+        store=SnapshotStore(tmp_path / "package"),
+        observation=package.observation,
+        resolve_observation=mapping.__getitem__,
+    )
+    assert restored.package_identity == package.package_identity
 
 
 @pytest.mark.parametrize(

@@ -292,7 +292,10 @@ def _build(
                 "filename": claim["filename"],
             },
         )
-        maximum = 12 * 1024 * 1024 if embedded and claim["role"] == "instance" else 2 * 1024 * 1024
+        if claim["role"] == "instance":
+            maximum = 12 * 1024 * 1024 if embedded else 4 * 1024 * 1024
+        else:
+            maximum = 2 * 1024 * 1024
         raw = store.replay_observation(observation, spec, maximum).payload
         components[_COMPONENTS[claim["role"]] if not embedded else claim["role"]] = raw.decode(
             "utf-8"
@@ -302,7 +305,7 @@ def _build(
         instance.encode(),
         max_elements=200_000,
         max_depth=128,
-        max_bytes=12 * 1024 * 1024 if embedded else 2 * 1024 * 1024,
+        max_bytes=12 * 1024 * 1024 if embedded else 4 * 1024 * 1024,
     )
     native_rows = (
         _rows_from_embedded_documents(components["schema"], instance, request, 10_000)

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Raise separate-document XBRL instance limit from 2MiB to 4MiB to
+  admit observed directory declarations (such as GOOG 3,046,086 bytes) across
+  document-source admission, link validation, financial production, unit decoding,
+  and lifecycle restore/bundles. Preserve 16MiB aggregate source cap, all other
+  per-role caps (primary 4MiB, XML linkbases 2MiB, metadata 2MiB), embedded-source
+  contracts, legacy SGML semantics, and parser versions.
+
 - Support explicitly retained schema-embedded SEC linkbases through a distinct
   five-receipt source domain and financial producer, with strict variant
   restoration and shared document lifecycle APIs. Preserve legacy identities.

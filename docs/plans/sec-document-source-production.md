@@ -60,12 +60,25 @@ explicit dependent work until their new-type validation is implemented.
 
 One package contains 7–9 source observations: submissions, index, primary and
 4–6 components. Submissions/index are each at most 2 MiB, primary at most 4 MiB,
-each XML component at most 2 MiB, all unique source bytes at most 16 MiB.
+separate-document XBRL instance at most 4 MiB (other XML components at most 2 MiB),
+all unique source bytes at most 16 MiB.
 Package receipt envelope is at most 256 KiB; normalized output at most 8 MiB.
 Maximum 10,000 filing rows/index entries, 200,000 XML elements across all components combined, XML depth 128,
 and 10,000 selected financial rows. Limits are positive exact integers and may
 only be stricter. Remaining aggregate limits are passed before dependency reads.
 No unbounded HTTP/JSON/XML reads or silent partial closure are permitted.
+Resource probes for >2MiB instances must execute full parser acceptance and
+retained read-only restoration under harness sampled budgets (512 MiB RSS, 60s) with no network.
+
+The 4MiB instance extension passed 214 affected offline tests, including exact
+4MiB source/financial/bundle roundtrip and 4MiB+1 rejection. A network-denied
+probe used a 4,194,304-byte instance with 5,000 extra distinct context/fact pairs
+and 16,695,496 raw source bytes. Financial production, bundle writing and three
+write-denied restores completed in 6.004 seconds at 426,639,360 bytes peak RSS.
+This is a sampled harness budget, not an SDK memory guarantee for every XML
+shape. Local evidence is in `artifacts/sec-document-4mib-instance-acceptance/`.
+Its `legacy-parity.json` compares pre-change and current code: the existing
+fixture's production identity, output SHA-256 and bundle SHA-256 are identical.
 
 First implement and review source closure independently, then financial production
 and complete restart support. Offline tests cover missing/duplicate/cross-filing

@@ -18,7 +18,7 @@ source; envelope bytes are separate. Each first read receives the smaller of
 8MiB and remaining aggregate budget. Recursive restoration uses the same
 resolver wrapper; it retains exact receipt/path/verified size, not payloads.
 Repeated references retain role-specific validation. Source limits remain
-16MiB aggregate, 4MiB primary, 2MiB metadata/XML.
+16MiB aggregate, 4MiB primary, 4MiB separate XBRL instance, 2MiB metadata/linkbase XML.
 
 Writer admission applies document selector conservative serialization/node
 budgets before copies and hashing. Duplicates count for admission, then only

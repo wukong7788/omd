@@ -23,6 +23,7 @@ from ohmydata.providers.sec import (
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_document_financials import build
+from test_document_source import CAPTURED
 from test_observed_financial_bundle import _records
 
 
@@ -220,3 +221,40 @@ def test_empty_bundle_and_bounded_generator(case):
     ref = write(**empty)
     loaded = load(store=args["store"], bundle_ref=ref, resolve_observation=mapping.__getitem__)
     assert loaded.productions == loaded.quality_records == loaded.consumer_commits == ()
+
+
+def test_exact_4mib_instance_roundtrip_and_4mib_plus_one_rejection(tmp_path):
+    def change_exact(payloads):
+        target = 4 * 1024 * 1024
+        padding = b"<!--" + b"x" * (target - len(payloads["instance"]) - 7) + b"-->"
+        payloads["instance"] = padding + payloads["instance"]
+        assert len(payloads["instance"]) == target
+
+    result, output, mapping, _sources = build(tmp_path / "exact_input", change=change_exact)
+    mapping[result.output_observation.observation_identity] = (output, result.output_observation)
+    bundle_store = SnapshotStore(tmp_path / "exact_bundle")
+    ref = write(
+        store=bundle_store,
+        batch_identity="exact-4mib-batch",
+        productions=(result,),
+        quality_records=(),
+        consumer_commits=(),
+        captured_at=CAPTURED + timedelta(hours=2),
+        resolve_observation=mapping.__getitem__,
+    )
+    loaded = load(
+        store=bundle_store,
+        bundle_ref=ref,
+        resolve_observation=mapping.__getitem__,
+    )
+    assert loaded.productions[0].production_identity == result.production_identity
+    assert loaded.productions[0].vintage.rows == result.vintage.rows
+
+    def change_over(payloads):
+        target = 4 * 1024 * 1024 + 1
+        padding = b"<!--" + b"x" * (target - len(payloads["instance"]) - 7) + b"-->"
+        payloads["instance"] = padding + payloads["instance"]
+        assert len(payloads["instance"]) == 4194305
+
+    with pytest.raises(SnapshotIntegrityError):
+        build(tmp_path / "over_input", change=change_over)

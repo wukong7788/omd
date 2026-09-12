@@ -6,9 +6,7 @@ import re
 from html.parser import HTMLParser
 from xml.etree import ElementTree
 
-from .observed_xbrl_package import _validate_components
 from .sgml_financials import _validate_instance_identity
-from .xbrl_package import SecXbrlPackageComponents
 
 _LINK = "http://www.xbrl.org/2003/linkbase"
 _XLINK = "http://www.w3.org/1999/xlink"
@@ -103,6 +101,50 @@ class _PrimaryReferences(HTMLParser):
         self.stack.pop()
 
 
+_COMPONENT_BYTE_LIMITS = {
+    "instance": 4 * 1024 * 1024,
+    "schema": 2 * 1024 * 1024,
+    "presentation": 2 * 1024 * 1024,
+    "labels": 2 * 1024 * 1024,
+    "calculation": 2 * 1024 * 1024,
+    "definition": 2 * 1024 * 1024,
+}
+
+
+def _validate_component_payloads(
+    components: dict[str, bytes],
+    *,
+    max_elements: int = 200_000,
+    max_depth: int = 128,
+) -> None:
+    total = 0
+    for name, value in components.items():
+        if type(value) is not bytes:
+            raise TypeError(f"{name} must be bytes")
+        limit = _COMPONENT_BYTE_LIMITS.get(name, 2 * 1024 * 1024)
+        if len(value) > limit:
+            raise ValueError("SEC observed XBRL component limit exceeded")
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("SEC observed XBRL component must be UTF-8") from exc
+        if re.search(r"<!DOCTYPE|<!ENTITY", text, flags=re.IGNORECASE):
+            raise ValueError("unsafe SEC observed XBRL XML declaration")
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError as exc:
+            raise ValueError(f"malformed SEC observed XBRL {name} XML") from exc
+        stack = [(root, 1)]
+        while stack:
+            element, depth = stack.pop()
+            total += 1
+            if total > max_elements:
+                raise ValueError("SEC observed XBRL XML aggregate element limit exceeded")
+            if depth > max_depth:
+                raise ValueError("SEC observed XBRL XML depth limit exceeded")
+            stack.extend((child, depth + 1) for child in element)
+
+
 def _validate_links(
     primary: bytes, components: dict[str, bytes], filenames: dict[str, str], cik: str
 ) -> None:
@@ -111,17 +153,7 @@ def _validate_links(
     parser.close()
     if parser.stack or parser.references != [filenames["schema"]]:
         raise ValueError("SEC primary schemaRef does not bind selected schema")
-    package = SecXbrlPackageComponents(
-        components["schema"],
-        components["presentation"],
-        components["labels"],
-        components["instance"],
-        components.get("calculation"),
-        components.get("definition"),
-    )
-    _validate_components(
-        package, max_component_bytes=2 * 1024 * 1024, max_elements=200_000, max_depth=128
-    )
+    _validate_component_payloads(components, max_elements=200_000, max_depth=128)
     for payload in components.values():
         for element in ElementTree.fromstring(payload).iter():
             if "{http://www.w3.org/XML/1998/namespace}base" in element.attrib:

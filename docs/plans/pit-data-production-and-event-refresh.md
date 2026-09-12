@@ -169,6 +169,7 @@ P0、P1、P2、P3和P4均为部分完成；五个阶段尚无一个通过该阶�
 - [x] 单份MSFT内嵌文档来源完成真实制作、bundle重放及257个输出行的原始事实对应核验。
 - [x] GOOG、TSLA下一批目录发现及原始receipt离线重放完成；仅目录证据，未完成财务制作。详见[目录验收](sec-representative-pilot.md#goog-and-tsla-directory-discovery)。
 - [x] TSLA独立链接表来源完成真实制作、bundle及财务重放，220行原始事实对应核验通过。详见[TSLA验收](sec-representative-pilot.md#complete-retained-tsla-separate-document-pilot)。
+- [x] 独立文档instance限额由2MiB调整至4MiB：其他限额不变，214项相关测试、近16MiB来源资源探测及旧输入身份/字节对照通过；此为已有切片的容量调整。
 - [ ] 完成独立文档来源的代表样本与完整金融质量验收。
 
 ### P0：契约与已有实现审计 — 部分完成

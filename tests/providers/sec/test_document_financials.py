@@ -246,3 +246,35 @@ def test_compound_raw_units_and_dimensions_remain_explicit(tmp_path):
     assert row.dimension is not None
     assert row.period_start.isoformat() == "2024-01-01"
     assert row.period_end.isoformat() == "2024-03-31"
+
+
+def test_separate_document_instance_above_2mib_reaches_real_parser_and_replays(tmp_path):
+    def change(payloads):
+        target_size = 3_046_086
+        padding = b"<!--" + b"x" * (target_size - len(payloads["instance"]) - 7) + b"-->"
+        payloads["instance"] = padding + payloads["instance"]
+        assert len(payloads["instance"]) == target_size
+
+    result, output, mapping, sources = build(tmp_path, change=change)
+    assert result.vintage.rows
+    assert result.vintage.rows[0].value_native == "123"
+    assert result.vintage.rows[0].unit == "iso4217:USD"
+    instance_source = next(s for s in sources if s.role == "instance")
+    assert len(instance_source.observation.response_sha256) == 64
+
+    restored = restore_sec_document_financial_production(
+        output_store=SnapshotStore(output.root),
+        output_observation=result.output_observation,
+        resolve_observation=mapping.__getitem__,
+    )
+    assert restored.production_identity == result.production_identity
+    assert restored.vintage == result.vintage
+
+
+def test_separate_document_instance_above_4mib_rejected(tmp_path):
+    def change(payloads):
+        payloads["instance"] = b"<!--" + b"x" * (4 * 1024 * 1024) + b"-->" + payloads["instance"]
+
+    with pytest.raises(SnapshotIntegrityError):
+        build(tmp_path, change=change)
+    assert not list((tmp_path / "financial").rglob("response.bin"))

@@ -183,7 +183,7 @@ def _build(
         remaining = _MAX_TOTAL - used
         if remaining <= 0:
             raise ValueError("SEC document source aggregate byte limit exceeded")
-        limit = (4 if source.role == "primary" else 2) * 1024 * 1024
+        limit = (4 if source.role in {"primary", "instance"} else 2) * 1024 * 1024
         replay = source.store.replay_observation(source.observation, spec, min(limit, remaining))
         payloads[source.role] = replay.payload
         used += len(replay.payload)
