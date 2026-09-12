@@ -271,10 +271,12 @@ filings needed for the next direct comparison:
 | TSLA | 0001628280-25-035806 | 2025-06-30 | tsla-20250630.htm |
 | AAPL | 0000320193-25-000073 | 2025-06-28 | aapl-20250628.htm |
 
-Those payloads have not been acquired by this slice. Next, retain them under
-bounded admission and compare the six original revenue/net-income YTD values
-with the comparative YTD values in the current filings. Any difference needs an
-explicit revision/reclassification bridge; equality alone still does not replace
+Those payloads were not acquired in this annual-vs-current inventory slice (which
+evaluated annual FY2025 vs current FY2026 filings, where duration periods have
+`NO_OVERLAP`). They have subsequently been retained and compared against current
+filing comparative YTD values under bounded admission in [Section 7](#7-original-comparative-ytd-evidence-2026-09-12),
+supplying the six required duration overlaps. Any differences would have required
+an explicit revision/reclassification bridge; equality alone still does not replace
 review of the annual-period basis and relevant accounting disclosures. Candidate
 selection covers retained recent submissions only, not complete amendment history.
 
@@ -295,3 +297,96 @@ Ignored local reports:
   `aeb426d4896ad79fdff86baa67f2809c8b3c0cdd1891721ddd35dfebec7fd586`.
 - `artifacts/sec-fy2025-ttm/prior-ytd-candidates-20260912T101233083993Z.json`, SHA-256
   `97eeea1da6ab61e382fa7dcc72cd9054d49487c51bd757edd81ed41dcc8f838b`.
+
+## 7. Original comparative YTD evidence (2026-09-12)
+
+The subsequent slice retained and restored the original FY2025 10-Q filings
+identified above (GOOG/TSLA fiscal Q2 and AAPL fiscal Q3), and compared their YTD duration
+facts directly against the comparative prior-YTD figures presented in the
+current filings for GOOG, TSLA, and AAPL.
+
+### Bounded original-quarter acquisition and restore
+
+Three directory observations were discovered and retained in 3 GET requests
+returning 22,996 bytes, verified in:
+
+- `artifacts/sec-prior-ytd-pilot/20260912T114648812140Z/report.json`, SHA-256
+  `e8e0b7f062115a7b5311352c0c744d190997bffe7110976b1e6fa17cc42fad51`.
+
+All three original-quarter productions completed full source retention,
+financial production, bundle creation, and read-only restore parity under
+existing caps (primary and instance <= 4 MiB, other sources <= 2 MiB, aggregate
+sources <= 16 MiB, 60s timeout, 512 MiB RSS budget):
+
+| Issuer | 10-Q accession | Rows | Retained source bytes | Seconds | Peak RSS bytes |
+| --- | --- | ---: | ---: | ---: | ---: |
+| GOOG | 0001652044-25-000062 | 184 | 7,131,410 | 13.7082 | 290,291,712 |
+| TSLA | 0001628280-25-035806 | 224 | 4,496,507 | 19.8741 | 199,262,208 |
+| AAPL | 0000320193-25-000073 | 178 | 2,933,069 | 17.3210 | 185,303,040 |
+
+Registry binding each original quarter production identity and output hash:
+
+- `artifacts/sec-prior-ytd-pilot/productions.json`, SHA-256
+  `dd66a72978d4753bc6c39f466ed794e60cde61c5d63cb47e08e8ebc860bd0dec`.
+
+### Comparative YTD direct matching and verification
+
+While Section 6 recorded `NO_OVERLAP` between annual FY2025 and current filings
+due to differing duration spans, this direct comparison of original FY2025 YTD
+filings against the current filing's comparative prior-YTD figures supplies all
+six duration overlaps.
+
+The comparison restored both the original quarter productions and pinned
+current productions under strict denial of network access and SnapshotStore
+writes/observes. In 2.3638 seconds and 278,822,912 bytes peak RSS, all six
+revenue and net-income metric pairs matched with exact value equality and zero
+delta.
+
+Values below are USD millions, displayed from exact retained USD Decimals:
+
+| Issuer / metric | Concept | Period | Original 10-Q YTD | Current comparative YTD | Delta | Raw XML check | Primary IS excerpt |
+| --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| GOOG revenue | `us-gaap_Revenues` | 2025-01-01–2025-06-30 | 186,662 | 186,662 | 0 | VERIFIED | FOUND (16,000 chars) |
+| GOOG net income | `us-gaap_NetIncomeLoss` | 2025-01-01–2025-06-30 | 62,736 | 62,736 | 0 | VERIFIED | FOUND (16,000 chars) |
+| TSLA revenue | `us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax` | 2025-01-01–2025-06-30 | 41,831 | 41,831 | 0 | VERIFIED | FOUND (16,000 chars) |
+| TSLA common net income | `us-gaap_NetIncomeLoss` | 2025-01-01–2025-06-30 | 1,581 | 1,581 | 0 | VERIFIED | FOUND (16,000 chars) |
+| AAPL revenue | `us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax` | 2024-09-29–2025-06-28 | 313,695 | 313,695 | 0 | VERIFIED | FOUND (16,000 chars) |
+| AAPL net income | `us-gaap_NetIncomeLoss` | 2024-09-29–2025-06-28 | 84,544 | 84,544 | 0 | VERIFIED | FOUND (16,000 chars) |
+
+All selectors use exact concepts without aliases or fallbacks:
+
+- GOOG revenue uses `us-gaap_Revenues`; AAPL and TSLA use
+  `us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax`.
+- All net income metrics use `us-gaap_NetIncomeLoss`. TSLA's net income is on
+  the reported common-stockholders basis, while GOOG and AAPL reflect
+  consolidated net income as reported.
+- Exact durations and calendar boundaries are preserved without inference:
+  GOOG and TSLA cover `2025-01-01..2025-06-30`; AAPL covers its fiscal Q3 YTD
+  period `2024-09-29..2025-06-28`.
+- For all six original rows, strict raw XML instance correspondence was verified
+  via `check_raw_instance_correspondence` against the replayed instance XML
+  payloads (matching QName, contextRef, unitRef, dates, native decimal precision
+  `-6`, and Decimal values).
+- Primary income statement sections were bounded to 16,000 characters and
+  verified with `HEADING_IS` and scale headers in both original and current HTML.
+
+### Limits and pending qualifications
+
+- **Diagnostic-only scope**: These equality findings demonstrate numerical
+  consistency between original 10-Q YTD disclosures and subsequent comparative
+  disclosures. They do not constitute a financial quality `PASS`, full
+  accounting-basis qualification, or `MARKET_KNOWN` status.
+- **No arithmetic or SDK changes**: No concept aliasing, synthetic facts, or
+  TTM arithmetic formula changes were introduced.
+- **Pending qualifications**: Annual accounting policies, adoption notes, and
+  complete amendment/revision histories remain open. MSFT annual admission
+  remains blocked by payload bounds.
+
+### Test and comparison evidence
+
+- Adapter discovery tests: 15 passed (`artifacts/sec-prior-ytd-pilot/test_pilot_adapter.py`).
+- Comparison harness tests: 10 passed (`artifacts/sec-prior-ytd-pilot/test_compare.py`).
+- Real comparison report:
+  `artifacts/sec-prior-ytd-pilot/comparison-20260912T115918523520Z.json`, SHA-256
+  `6407f885100d6813d16afdb15ab2593edc87e8bb8382980264ebc163d563103d`
+  (2.3638s, 278,822,912 bytes peak RSS, strict 6 raw facts verified).
