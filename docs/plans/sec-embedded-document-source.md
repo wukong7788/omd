@@ -2,8 +2,10 @@
 
 `sec-document-embedded-source-package-v1` is an experimental, sealed source
 closure for a single SEC filing whose XBRL linkbases are embedded in the filing
-schema. It is not a public API or an accepted financial-production path. The
-offline financial pipeline gate has passed; one real filing has passed production/restoration and emitted-row correspondence; broader acceptance remains pending.
+schema. The explicit public source and financial producers have passed offline
+acceptance. One real filing has passed production/restoration and emitted-row
+correspondence; broader financial-quality and representative acceptance remain
+pending.
 
 The package records exactly five distinct raw `SecDocumentSource` observations:
 submissions, filing-directory index, primary HTML, schema, and instance. The
