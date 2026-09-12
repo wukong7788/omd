@@ -12,6 +12,7 @@ Availability follows the canonical contracts in [plan Section 3](pit-data-produc
 Missing-status taxonomy:
 - `raw_source_absent`: Proven absence in both primary statement presentation and raw instance (tag absence alone is insufficient).
 - `parser_missing`: Proven raw fact within declared scope/role omitted by adapter/parser. Other discrepancies remain unresolved/incomparable.
+- `supplemental_note_scope`: Source facts exist in a note role outside the primary statement; supplemental production remains separate.
 - `not_required`: Concept/term inapplicable to issuer's specific presentation or consolidation structure.
 - `derived`: Output of a named, versioned transform with recorded provenance. GOOG gross profit is derived potential, currently `NOT_RUN`.
 - `unresolved`: Evidence does not yet distinguish disclosure absence, parser omission or incompatible scope; keep the affected requirement open.
@@ -33,12 +34,12 @@ For this consolidated sample contract, numeric facts require no segment dimensio
 | IS: Revenue | TTM Rev, Margin, YoY, PS | Consolidated duration (3M/YTD) | GOOG: `Revenues`; MSFT/TSLA: `RevenueFromContractWithCustomerExcludingAssessedTax`; AAPL: see completed inventory in Section 5 | Native fact required; contract revenue only if consolidated | [sec-document-accounting.md](sec-document-accounting.md) |
 | IS: Net Income Scope | TTM NI, PE, Margin, YoY | Total economic vs common attributable | `NetIncomeLoss` vs common attributable; verify if preferred dividends/NCI present [`iso4217:USD`] | Native fact required; PE denominator depends on equity scope | [sec-quarter-ttm-recipe.md](sec-quarter-ttm-recipe.md) |
 | CF: Operating Cash | CFO-CapEx, FCF, YoY | Consolidated duration (YTD/3M) | `NetCashProvidedByUsedInOperatingActivities` [`iso4217:USD`] | Native fact required | [sec-document-accounting.md](sec-document-accounting.md) |
-| CF: Cash Totals | Cash bridge reconciliation | Operating, Investing, Financing, FX, Net Movement (YTD) | Disclosed 5 totals: Operating, Investing, Financing, FX, Net Change | Native facts required; 8 diagnostic checks MATCH | [sec-document-accounting.md](sec-document-accounting.md) |
+| CF: Cash Totals | Cash bridge reconciliation | Operating, Investing, Financing, FX, Net Movement (YTD) | Operating, Investing, Financing, Net Change; FX when separately disclosed | Filing-specific terms; AAPL has a three-activity equation (Section 6); prior 8 checks MATCH | [sec-document-accounting.md](sec-document-accounting.md) |
 | **(b) Conditional / Scope** | | | | | |
 | IS: Cost of Revenue | Gross profit reconciliation | Matching revenue period | MSFT: `CostOfGoodsAndServicesSold`; TSLA/GOOG: `CostOfRevenue`; AAPL: see completed inventory in Section 5 | Required gross profit evidence | [sec-document-accounting.md](sec-document-accounting.md) |
 | IS: Gross Profit | Gross margin recipe | Required if disclosed; derivation separate if absent | MSFT/TSLA: native `GrossProfit`; GOOG: `raw_source_absent` (derived potential `NOT_RUN`); AAPL: see completed inventory in Section 5 | Conditional on disclosure; no synthetic native fact | [sec-document-accounting.md](sec-document-accounting.md) |
 | CF: CapEx | CFO-CapEx recipe | Declared CapEx concept; explicit sign | Required input for CFO-CapEx; strict declared sign (`POSITIVE_OUTFLOW` or `NEGATIVE_OUTFLOW`) | Required for CFO-CapEx; inventory completed in Section 5 | [sec-neutral-metric-graph.md](sec-neutral-metric-graph.md) |
-| IS: EPS & Shares | Supplemental per-share check | Consolidated duration (3M/YTD) | Basic/Diluted EPS [`USD/shares`], Diluted Shares [`shares`]; no exact EPS*shares equality assumed | Conditional supplemental source; not FPE forecast | [sec-financial-source-qualification.md](sec-financial-source-qualification.md) |
+| IS: EPS & Shares | Supplemental per-share check | Consolidated duration (3M/YTD) | Basic/Diluted EPS [`USD/shares`], Basic/Diluted Shares [`shares`]; shares may reside only in a note (Section 6); no exact EPS*shares equality assumed | Conditional supplemental source; not FPE forecast | [sec-financial-source-qualification.md](sec-financial-source-qualification.md) |
 | **(c) Downstream / Bridges** | | | | | |
 | External inputs | PE, PS, FPE valuation | External caller attestation | `COMPANY_MARKET_CAP`, `SECURITY_PRICE`, `FORECAST_EPS` | Lacks real PIT pipeline; external attestation only | [sec-neutral-metric-graph.md](sec-neutral-metric-graph.md) |
 | Period bridges | TTM 4-quarter / FY+YTD | Multi-accession consecutive | Consecutive 4 quarters or FY+YTD duration sets | Real bridge coverage pending; classify missing required periods explicitly | [sec-quarter-ttm-recipe.md](sec-quarter-ttm-recipe.md) |
@@ -72,8 +73,8 @@ Execute an offline, read-only diagnostic script verifying uncovered candidate fi
 ## 5. Consolidated local audit (2026-09-12)
 
 Restored all four retained productions, 864 rows total, and located all 12 primary
-statement sections. The field/period inventory has 218 present candidates, 10 missing
-slots and four previously established GOOG gross-profit disclosure absences. Candidate
+statement sections. The field/period inventory has 218 present candidates, 10 initially missing
+slots (subsequently classified in Section 6) and four previously established GOOG gross-profit disclosure absences. Candidate
 presence is not a quality PASS. Existing unit, cash-component and equity evidence is
 reused from [the accounting record](sec-document-accounting.md).
 
@@ -104,9 +105,10 @@ reused from [the accounting record](sec-document-accounting.md).
 - GOOG's eight required share slots remain absent from the income-statement output.
   Raw instance inspection finds 48 occurrences: 36 dimensional and 12 undimensioned,
   including repeated basic facts, covering all four required periods. Thus this is
-  **not raw-source absence**. Statement-role/adapter omission remains unresolved;
-  neither class aggregation nor an automatic parser repair is accepted here.
-- AAPL's two FX slots remain missing/unresolved; no zero is inserted. GOOG's four
+  **not raw-source absence**. The follow-up in Section 6 establishes a note-only presentation scope;
+  neither class aggregation nor cross-role injection is accepted.
+- AAPL's two FX slots were initially unresolved; Section 6 establishes separate-line
+  disclosure absence. No zero is inserted. GOOG's four
   gross-profit absences retain the prior source-qualified status; derivation is NOT_RUN.
 
 The retained IS periods provide only two independent reported quarters per issuer,
@@ -126,6 +128,60 @@ Local evidence (ignored provider artifacts, not distributed in Git):
 
 Final local harness regression checks: 14 passed. Verification ran offline in 1.63s,
 224.3 MiB RSS, with snapshot writes disabled. No SDK change, consumer rerun, new
-fetch or release was performed. NVDA remains deferred. The next bounded execution
-is GOOG statement-role investigation, then AAPL FX source classification; historical
+fetch or release was performed. NVDA remains deferred. The follow-up role/source classification is complete in Section 6. Historical
 period fetching and consumer shadow evidence remain separate acceptance work.
+
+
+## 6. GOOG share roles and AAPL FX classification (2026-09-12)
+
+Both causes are resolved for these retained accessions. No SDK defect was established,
+so the primary-statement parser and sealed outputs are unchanged.
+
+**GOOG supplemental shares:** The exact presentation role
+`http://www.google.com/role/CONSOLIDATEDSTATEMENTSOFINCOME` has 16 arcs and neither
+weighted-average share concept. Both concepts occur exclusively in
+`http://www.google.com/role/NetIncomePerCommonShareDetails`. The primary table displays
+basic/diluted EPS referencing Note 12 and no share-count rows. The eight absent
+primary-output slots therefore have `supplemental_note_scope`, not `parser_missing`
+or `raw_source_absent`. This classification closes the primary-statement omission
+investigation; it does not claim that a reusable supplemental-note API is implemented.
+
+Raw facts cover all four required periods. There are 12 undimensioned occurrences:
+for each period two identical basic facts and one diluted fact, plus 36 dimensional
+occurrences across stock classes. Duplicate basic occurrences are not additional
+shares. No summing across classes or inserting note facts into the primary statement
+was performed. A future supplemental extraction must retain note role, exact context,
+units, duplicate/conflict policy and production provenance separately.
+
+**AAPL separate FX line:** The primary CF presentation role contains 34 unique concepts
+and no separate FX term. Raw-instance inspection found none of the four examined
+standard FX concepts or other exchange-rate-named fact candidates; primary-table review
+also found no separate FX line. The calculation linkbase explicitly connects net cash
+movement to operating, investing and financing totals, each with weight +1.
+Thus `raw_source_absent` describes the separately disclosed FX input in this filing;
+it is not required by this filing-specific three-activity equation. This makes no
+claim that the company's economic FX effect is zero.
+
+Independent checks matched the manually inspected primary amounts to all eight exact
+USD output rows and verified both equations (USD millions):
+
+- Prior nine months: `81,754 + 17,782 - 93,210 = 6,326`.
+- Current nine months: `116,996 - 18,811 - 94,575 = 3,610`.
+
+Both residuals are zero. These are local evidence checks, not new SDK quality PASS
+records. The earlier generic five-term diagnostic remains historical evidence of a
+missing term; it is not rewritten or filled with zero.
+
+Local evidence under ignored `artifacts/sec-output-gap-audit/`:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `audit-gap-20260912T074940036323Z.json` | `810f35e89bc8f087d423e9bd0ae12ad9cda5444bc52e3f883c5553872ab2fe8b` |
+| `review-20260912T074951434413Z.json` | `81547584ed4c9b70fee69187828b73abf978ddae52d11e601cdbf3ba8236b40c` |
+
+The diagnostic restores the existing sealed productions with network and snapshot
+writes disabled, pins the prior batch SHA, and records source receipts and role
+results. Final run: 1.56s / 258.5 MiB RSS. Independent receipt/role/period/value assertions
+and two cash equations passed; focused Ruff F checks passed. No SDK change or consumer
+migration requires a rerun in this step. Cross-filing periods, supplemental-note
+production, consumer shadow and overall data-quality acceptance remain open.

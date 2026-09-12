@@ -613,5 +613,8 @@ MSFT真实单份来源链随后通过限定验收：两次GET，五份原始来�
   AAPL 精确期间、EPS/股数正文核对及期间缺口，见
   [完整记录](sec-required-field-acceptance.md#5-consolidated-local-audit-2026-09-12)。
   56 项正文数值 MATCH、8 项净利润归属 MATCH；本项只完成诊断，未授予数据质量 PASS。
-- [ ] GOOG 收入表股数输出缺口、AAPL 两个 FX 缺口的来源/角色分类与必要修复。
+- [x] GOOG 股数与 AAPL 两个 FX 缺口的来源/角色分类：分别为附注角色数据和
+  未单列披露；未发现 SDK 缺陷，无需修改解析器，见
+  [分类证据](sec-required-field-acceptance.md#6-goog-share-roles-and-aapl-fx-classification-2026-09-12)。
+- [ ] 如需 GOOG 股数消费，增加独立附注来源补充能力，保留角色与重复事实策略。
 - [ ] 四家跨申报 FY/YTD/季度输入及消费者 shadow 验收；NVDA 保持暂缓。
