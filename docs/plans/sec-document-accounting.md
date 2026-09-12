@@ -182,3 +182,43 @@ investing, financing and FX component completeness, broader financial-quality
 acceptance, and consumer acceptance remain separate. No SDK behavior, quality
 PASS, consumer data or publication changed; consumer reruns and migration
 documentation are not required for this evidence-only update.
+
+## Retained cash component totals
+
+The 2026-09-12 follow-up evaluated net movement minus operating, investing,
+financing and exchange-rate effects against the same retained productions.
+All eight SAME_CONTEXT EXACT USD checks matched with zero residual and
+tolerance: MSFT four periods, TSLA two and GOOG two. Signed values were
+preserved, including negative investing/financing and FX amounts. Each of the
+eight sums was independently recomputed from the full retained term evidence.
+Primary cash-flow statement snippets were reviewed for all five displayed
+totals and their period columns; arithmetic agreement alone was not acceptance.
+
+The three activity concepts are NetCashProvidedByUsedInOperatingActivities,
+NetCashProvidedByUsedInInvestingActivities and
+NetCashProvidedByUsedInFinancingActivities. GOOG selects
+EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents;
+MSFT and TSLA select that concept with
+IncludingDisposalGroupAndDiscontinuedOperations appended. These are explicit
+filing-scoped selections, not global aliases. The disclosed net-movement
+concept is the same one used in the preceding cash-balance checks.
+
+Rules retain all five required terms and anchor contexts from their union,
+so missing net movement or FX is not silently skipped or treated as zero.
+Units are left for SDK comparability checks rather than filtered away. Five
+focused harness tests passed for signs, missing FX/net anchors, dimensions
+and unknown symbols; Ruff undefined-name checks passed. This evidence-only
+change does not alter the SDK or require consumer reruns or migration docs.
+
+Final local evidence:
+`artifacts/sec-cash-components-audit/cash-components-20260912T064452850547Z.json`,
+SHA-256 `727bf2bf067fac6a160bcb75fa510ab5fd669042153fbea7ba93d18d52868317`.
+It binds the preceding cash report by hash, exact production/output identities,
+primary receipts and full SDK diagnostics. The offline process completed in
+2.21 seconds with 244.83 MiB peak RSS, under its 60-second/512-MiB budget;
+network and snapshot writes were denied.
+
+Review accepts the selected top-level cash component reconciliation. It does
+not establish completeness of the detailed rows within operating, investing
+or financing sections, or overall financial-quality PASS. Earlier deferred
+component-total work is resolved for these eight periods only.
