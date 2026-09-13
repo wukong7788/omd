@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-13
+
 - Add bounded idempotent SEC single-target PIT event recompute adapter
   (`execute_sec_metric_recompute`) and target-binding validation
   (`validate_recompute_target_binding`), integrating explicit dated-invalidation
