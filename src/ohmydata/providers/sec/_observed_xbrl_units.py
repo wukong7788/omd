@@ -121,7 +121,7 @@ def decode_raw_units(
     max_bytes: int = 2 * 1024 * 1024,
 ) -> dict[str, str]:
     """Decode every declared XBRL unit without flattening divide descendants."""
-    if type(max_bytes) is not int or not 0 < max_bytes <= 12 * 1024 * 1024:
+    if type(max_bytes) is not int or not 0 < max_bytes <= 16 * 1024 * 1024:
         raise ValueError("invalid raw XBRL unit byte limit")
     if type(instance) is not bytes or len(instance) > max_bytes:
         raise ValueError("raw XBRL unit instance exceeds byte limit")

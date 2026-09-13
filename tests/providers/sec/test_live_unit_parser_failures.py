@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 from dataclasses import replace
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -97,6 +98,145 @@ def test_identical_duplicate_and_non_numeric_raw_facts_are_permitted():
         native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw
     )
     assert len(rows) == 1 and rows[0].value == 7
+
+
+def test_nvda_like_compatible_pair_is_permitted():
+    # NVDA IncomeTaxExpenseBenefit: USD 11,800,000,000 decimals=-8 and USD 11,819,000,000 decimals=-6
+    # Strictly positive overlap exists -> compatible
+    raw = raw_instance(
+        revenue="11800000000",
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="-6">11819000000</fake:Revenue>',
+    ).replace(b'decimals="0"', b'decimals="-8"')
+    stmt = native(raw_instance(revenue="11819000000").replace(b'decimals="0"', b'decimals="-6"'))
+    rows = parse_statement_rows(stmt, "income_statement", parser_version=V2, raw_instance=raw)
+    assert len(rows) == 1
+    assert rows[0].value == 11819000000
+    assert rows[0].decimals == -6
+
+
+def test_equal_value_with_different_decimals_is_compatible():
+    raw = raw_instance(
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="2">7</fake:Revenue>'
+    )
+    rows = parse_statement_rows(
+        native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw
+    )
+    assert len(rows) == 1 and rows[0].value == 7
+
+
+def test_differing_unit_ref_is_conflict():
+    raw = (
+        raw_instance()
+        .replace(
+            b"</unit>",
+            b'</unit><unit id="eur"><measure>iso4217:EUR</measure></unit>',
+        )
+        .replace(
+            b"</xbrl>",
+            b'<fake:Revenue contextRef="q" unitRef="eur" decimals="0">7</fake:Revenue></xbrl>',
+        )
+    )
+    with pytest.raises(SecUnitEvidenceError, match="conflict"):
+        parse_statement_rows(
+            native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw
+        )
+
+
+def test_inf_decimals_behavior():
+    # 1. INF vs INF, same value -> compatible
+    raw_inf_same = raw_instance(
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="INF">7</fake:Revenue>'
+    ).replace(b'decimals="0"', b'decimals="INF"')
+    rows = parse_statement_rows(
+        native(raw_instance().replace(b'decimals="0"', b'decimals="INF"')),
+        "income_statement",
+        parser_version=V2,
+        raw_instance=raw_inf_same,
+    )
+    assert len(rows) == 1 and rows[0].value == 7
+
+    # 2. INF vs finite decimals, same value -> compatible
+    raw_inf_finite = raw_instance(
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="INF">7</fake:Revenue>'
+    )
+    rows = parse_statement_rows(
+        native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw_inf_finite
+    )
+    assert len(rows) == 1 and rows[0].value == 7
+
+    # 3. INF vs INF, different value -> conflict
+    raw_inf_diff = raw_instance(
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="INF">8</fake:Revenue>'
+    ).replace(b'decimals="0"', b'decimals="INF"')
+    with pytest.raises(SecUnitEvidenceError, match="conflict"):
+        parse_statement_rows(
+            native(raw_instance().replace(b'decimals="0"', b'decimals="INF"')),
+            "income_statement",
+            parser_version=V2,
+            raw_instance=raw_inf_diff,
+        )
+
+    # 4. INF vs finite decimals, different value -> conflict
+    raw_inf_finite_diff = raw_instance(
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="INF">8</fake:Revenue>'
+    )
+    with pytest.raises(SecUnitEvidenceError, match="conflict"):
+        parse_statement_rows(
+            native(raw_instance()),
+            "income_statement",
+            parser_version=V2,
+            raw_instance=raw_inf_finite_diff,
+        )
+
+
+def test_boundary_touch_conflict_and_strictly_positive_overlap():
+    # Boundary touch: 100 with decimals=-1 (H1=5) and 105.5 with decimals=0 (H2=0.5)
+    # diff is 5.5 == H1+H2 -> mere boundary-touch is not enough -> conflict
+    raw_touch = raw_instance(
+        revenue="100",
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="0">105.5</fake:Revenue>',
+    ).replace(b'decimals="0"', b'decimals="-1"', 1)
+    with pytest.raises(SecUnitEvidenceError, match="conflict"):
+        parse_statement_rows(
+            native(raw_instance(revenue="100").replace(b'decimals="0"', b'decimals="-1"')),
+            "income_statement",
+            parser_version=V2,
+            raw_instance=raw_touch,
+        )
+
+    # Strictly positive overlap: 100 with decimals=-1 (H1=5) and 105.4 with decimals=0 (H2=0.5)
+    # diff is 5.4 < H1+H2=5.5 -> compatible
+    raw_overlap = raw_instance(
+        revenue="100",
+        extra='<fake:Revenue contextRef="q" unitRef="usd" decimals="0">105.4</fake:Revenue>',
+    ).replace(b'decimals="0"', b'decimals="-1"', 1)
+    stmt = native(raw_instance(revenue="105.4"))
+    rows = parse_statement_rows(
+        stmt, "income_statement", parser_version=V2, raw_instance=raw_overlap
+    )
+    assert len(rows) == 1 and rows[0].value == Decimal("105.4")
+
+
+@pytest.mark.parametrize("bad_decimals", ['decimals="bad"', 'decimals="1.5"'])
+def test_malformed_decimals_fail_closed_on_duplicate(bad_decimals):
+    raw = raw_instance(
+        extra=f'<fake:Revenue contextRef="q" unitRef="usd" {bad_decimals}>7</fake:Revenue>'
+    )
+    with pytest.raises(SecUnitEvidenceError, match="conflict"):
+        parse_statement_rows(
+            native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw
+        )
+
+
+@pytest.mark.parametrize("bad_val", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numeric_value_fails_closed(bad_val):
+    raw = raw_instance(
+        extra=f'<fake:Revenue contextRef="q" unitRef="usd" decimals="0">{bad_val}</fake:Revenue>'
+    )
+    with pytest.raises(SecUnitEvidenceError):
+        parse_statement_rows(
+            native(raw_instance()), "income_statement", parser_version=V2, raw_instance=raw
+        )
 
 
 @pytest.mark.parametrize(

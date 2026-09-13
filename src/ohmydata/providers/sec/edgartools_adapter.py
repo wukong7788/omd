@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ._live_unit_corroboration import _RAW_INSTANCE_MAX_BYTES
 from ._statement_parser import (
     SecStatementParseError,
     SecUnitEvidenceError,
@@ -25,7 +26,6 @@ logger = logging.getLogger(__name__)
 _EASTERN_TZ = ZoneInfo("America/New_York")
 _LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-5.56.0"
 _SAFE_DOCUMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-_RAW_INSTANCE_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _filing_archive_prefix(filing: Any) -> str:
@@ -176,7 +176,7 @@ def _read_instance(client: SecHttpClient, url: str, validator: Callable[[str], s
     response = client.open(
         url,
         accept="application/xml, text/xml, application/octet-stream",
-        max_bytes=2 * 1024 * 1024,
+        max_bytes=_RAW_INSTANCE_MAX_BYTES,
         redirect_validator=validator,
     )
     try:
@@ -187,7 +187,7 @@ def _read_instance(client: SecHttpClient, url: str, validator: Callable[[str], s
             if not chunk:
                 break
             total += len(chunk)
-            if total > 2 * 1024 * 1024:
+            if total > _RAW_INSTANCE_MAX_BYTES:
                 raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
             chunks.append(chunk)
         return b"".join(chunks)

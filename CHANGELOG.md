@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-09-13
+
+- Narrow OMD SEC v2 live XBRL compatibility fix:
+  - Consistently raise the raw XBRL instance byte ceiling from 2 MiB to 16 MiB across
+    `edgartools_adapter` transport, materialization, chunked read streaming, and
+    `_live_unit_corroboration` preparation (admitting large raw filings such as MSFT
+    and GOOGL), while maintaining bounded streaming, max XML elements (200,000),
+    max depth (128), exact byte limits, and rejecting inputs >16 MiB. Centralize
+    `_RAW_INSTANCE_MAX_BYTES` in `_live_unit_corroboration` and import in `edgartools_adapter`
+    to prevent cap drift.
+  - Replace blanket same-(concept, context) signature conflict rejection with a narrow
+    XBRL decimals compatibility rule: allow identical signatures; require identical
+    `unit_ref`; treat equal numeric values as compatible across differing decimals;
+    and for differing values with finite decimals, evaluate uncertainty intervals
+    with rounding quantum $10^{-\text{decimals}}$ and require strictly positive interval
+    overlap ($|V_1 - V_2| < H_1 + H_2$, where $H = 10^{-\text{decimals}} / 2$). Mere
+    boundary-touch and INF with differing values remain conflicts. Malformed decimals
+    and non-finite numeric values fail closed.
+  - Preserve exact corroboration: retained native statement rows must still match one
+    exact raw signature (concept, context, unit, value, decimals, period, dimensions, CIK)
+    without approximation.
+  - Preserve quarter binding semantics, parser version, public API shapes, unit
+    normalization, point-in-time claims, and consumer code.
+
 ## 0.3.1 — 2026-09-13
 
 - Add offline independent-quarter fact binding (`bind_sec_quarter_facts`,

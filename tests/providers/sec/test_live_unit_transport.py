@@ -12,7 +12,13 @@ from typing import Any
 
 import pytest
 
-from ohmydata.providers.sec._live_unit_corroboration import corroborate_rows, prepare_raw_instance
+from ohmydata.providers.sec._live_unit_corroboration import (
+    SecUnitEvidenceError as RawUnitEvidenceError,
+)
+from ohmydata.providers.sec._live_unit_corroboration import (
+    corroborate_rows,
+    prepare_raw_instance,
+)
 from ohmydata.providers.sec._statement_parser import SecUnitEvidenceError, parse_statement_rows
 from ohmydata.providers.sec.edgartools_adapter import (
     SecFinancialsClient,
@@ -214,7 +220,7 @@ def test_instance_acquisition_rejects_unbound_document_source(name, url, expecte
 
 
 def test_sgml_instance_size_limit_is_exact_and_not_over() -> None:
-    exact = _raw_instance() + b" " * (2 * 1024 * 1024 - len(_raw_instance()))
+    exact = _raw_instance() + b" " * (16 * 1024 * 1024 - len(_raw_instance()))
     assert _instance_attachment(_filing(_attachment("exact.xml", exact)), None)[1] == exact
     with pytest.raises(SecUnitEvidenceError, match="byte limit"):
         _instance_attachment(_filing(_attachment("over.xml", exact + b"x")), None)
@@ -255,3 +261,73 @@ def test_retained_context_cik_is_checked_after_preparing_raw_index() -> None:
     )
     with pytest.raises(Exception, match="does not match"):
         corroborate_rows(evidence, [row])
+
+
+class _StreamedChunkFake:
+    def __init__(self, total_bytes: int, chunk_size: int = 64 * 1024) -> None:
+        self.total_bytes = total_bytes
+        self.chunk_size = chunk_size
+        self.read_bytes = 0
+        self.closed = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self.read_bytes >= self.total_bytes:
+            return b""
+        remaining = self.total_bytes - self.read_bytes
+        chunk_len = min(size if size > 0 else self.chunk_size, self.chunk_size, remaining)
+        self.read_bytes += chunk_len
+        return b"x" * chunk_len
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_read_instance_accepts_over_2_mib_and_up_to_16_mib_streamed() -> None:
+    # 3 MiB instance (similar to GOOGL 3,046,085 bytes)
+    target_len = 3 * 1024 * 1024
+    body = _StreamedChunkFake(target_len)
+
+    class Transport:
+        def open(self, url: str, **kwargs: object) -> object:
+            assert kwargs.get("max_bytes") == 16 * 1024 * 1024
+            return type("Response", (), {"body": body})()
+
+    raw = _read_instance(
+        Transport(),  # type: ignore[arg-type]
+        "https://www.sec.gov:443/Archives/edgar/data/1/000000000124000001/a.xml",
+        lambda value: value,
+    )
+    assert len(raw) == target_len
+    assert body.closed
+
+
+def test_read_instance_rejects_over_16_mib_without_pathological_fixture() -> None:
+    # Simulates 16 MiB + 1 byte in 64 KiB chunks without allocating a 16MB contiguous array
+    over_limit = 16 * 1024 * 1024 + 1
+    body = _StreamedChunkFake(over_limit)
+
+    class Transport:
+        def open(self, url: str, **kwargs: object) -> object:
+            assert kwargs.get("max_bytes") == 16 * 1024 * 1024
+            return type("Response", (), {"body": body})()
+
+    with pytest.raises(SecUnitEvidenceError, match="byte limit"):
+        _read_instance(
+            Transport(),  # type: ignore[arg-type]
+            "https://www.sec.gov:443/Archives/edgar/data/1/000000000124000001/a.xml",
+            lambda value: value,
+        )
+    assert body.closed
+
+
+def test_prepare_raw_instance_accepts_over_2_mib_and_rejects_over_16_mib() -> None:
+    # Padded instance > 2 MiB (3 MiB) must be accepted by prepare_raw_instance
+    three_mib_instance = (
+        _raw_instance() + b"<!-- " + b"x" * (3 * 1024 * 1024 - len(_raw_instance()) - 7) + b" -->"
+    )
+    evidence = prepare_raw_instance(three_mib_instance)
+    assert "usd" in evidence.units
+
+    # > 16 MiB must be rejected
+    with pytest.raises(RawUnitEvidenceError, match="byte limit"):
+        prepare_raw_instance(b" " * (16 * 1024 * 1024 + 1))

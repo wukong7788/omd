@@ -82,7 +82,7 @@ def test_depth_elements_and_byte_budgets():
             decode(body, **kwargs)
     with pytest.raises(ValueError):
         decode_raw_units(b" " * (2 * 1024 * 1024 + 1), max_elements=10, max_depth=10)
-    for maximum in (True, 0, 12 * 1024 * 1024 + 1):
+    for maximum in (True, 0, 16 * 1024 * 1024 + 1):
         with pytest.raises(ValueError):
             decode_raw_units(b"<xbrl/>", max_elements=10, max_depth=10, max_bytes=maximum)
 

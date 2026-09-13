@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Any
 
 from ._observed_xbrl_units import decode_raw_units
@@ -13,7 +15,9 @@ from .financials import SecStatementRow
 
 _MAX_ELEMENTS = 200_000
 _MAX_DEPTH = 128
-_MAX_BYTES = 2 * 1024 * 1024
+_RAW_INSTANCE_MAX_BYTES = 16 * 1024 * 1024
+RAW_XBRL_INSTANCE_MAX_BYTES = _RAW_INSTANCE_MAX_BYTES
+_MAX_BYTES = _RAW_INSTANCE_MAX_BYTES
 
 
 class SecUnitEvidenceError(ValueError):
@@ -68,9 +72,72 @@ def _context_identity(context: Any) -> tuple[str, str | None, str | None, str | 
     raise SecUnitEvidenceError("raw XBRL context period is unavailable")
 
 
+def _parse_decimals(decimals: Any) -> int | str | None:
+    """Parse XBRL decimals as an int or 'INF', or None if malformed/missing."""
+    if decimals is None or type(decimals).__name__ in {"NAType", "NaTType"}:
+        return None
+    if isinstance(decimals, bool):
+        return None
+    if isinstance(decimals, int):
+        if abs(decimals) > 1000:
+            return None
+        return decimals
+    if isinstance(decimals, str):
+        cleaned = decimals.strip()
+        if cleaned.upper() == "INF":
+            return "INF"
+        if re.fullmatch(r"[+-]?\d+", cleaned):
+            val = int(cleaned)
+            if abs(val) > 1000:
+                return None
+            return val
+    return None
+
+
+def _half_quantum(decimals: int) -> Fraction:
+    """Return half the rounding quantum 10**(-decimals) as an exact Fraction."""
+    if decimals >= 0:
+        return Fraction(1, 2 * (10**decimals))
+    return Fraction(10 ** (-decimals), 2)
+
+
+def _are_signatures_compatible(sig_a: tuple[Any, ...], sig_b: tuple[Any, ...]) -> bool:
+    """Determine whether two raw XBRL facts with the same concept/context are compatible."""
+    if sig_a == sig_b:
+        return True
+
+    unit_ref_a, value_a, dec_str_a, period_key_a, start_a, end_a, dim_a = sig_a
+    unit_ref_b, value_b, dec_str_b, period_key_b, start_b, end_b, dim_b = sig_b
+
+    if (period_key_a, start_a, end_a, dim_a) != (period_key_b, start_b, end_b, dim_b):
+        return False
+    if unit_ref_a != unit_ref_b:
+        return False
+    if not isinstance(value_a, Decimal) or not value_a.is_finite():
+        return False
+    if not isinstance(value_b, Decimal) or not value_b.is_finite():
+        return False
+
+    dec_a = _parse_decimals(dec_str_a)
+    dec_b = _parse_decimals(dec_str_b)
+    if dec_a is None or dec_b is None:
+        return False
+
+    if value_a == value_b:
+        return True
+
+    if not isinstance(dec_a, int) or not isinstance(dec_b, int):
+        return False
+
+    h_a = _half_quantum(dec_a)
+    h_b = _half_quantum(dec_b)
+    diff = abs(Fraction(value_a) - Fraction(value_b))
+    return diff < (h_a + h_b)
+
+
 def prepare_raw_instance(raw: bytes, *, expected_cik: str | None = None) -> RawInstanceEvidence:
     """Parse and validate an instance once, preserving duplicate facts for checking."""
-    if type(raw) is not bytes or len(raw) > _MAX_BYTES:
+    if type(raw) is not bytes or len(raw) > _RAW_INSTANCE_MAX_BYTES:
         raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
     try:
         from edgar.xbrl import XBRL
@@ -80,7 +147,12 @@ def prepare_raw_instance(raw: bytes, *, expected_cik: str | None = None) -> RawI
             "raw XBRL instance cannot be parsed by pinned edgartools"
         ) from exc
     try:
-        units = decode_raw_units(raw, max_elements=_MAX_ELEMENTS, max_depth=_MAX_DEPTH)
+        units = decode_raw_units(
+            raw,
+            max_elements=_MAX_ELEMENTS,
+            max_depth=_MAX_DEPTH,
+            max_bytes=_RAW_INSTANCE_MAX_BYTES,
+        )
 
         parsed = XBRL()
         parsed.parser.parse_instance_content(raw.decode("utf-8"))
@@ -109,6 +181,8 @@ def prepare_raw_instance(raw: bytes, *, expected_cik: str | None = None) -> RawI
             value = Decimal(str(fact.value))
         except (AttributeError, InvalidOperation, ValueError):
             continue
+        if not value.is_finite():
+            raise SecUnitEvidenceError("raw XBRL fact value is non-finite")
         period_key, start, end, dimension = _context_identity(context)
         concept = str(getattr(fact, "element_id", "")).replace(":", "_")
         unit_ref = getattr(fact, "unit_ref", None)
@@ -125,8 +199,11 @@ def prepare_raw_instance(raw: bytes, *, expected_cik: str | None = None) -> RawI
             dimension,
         )
         identity = (concept, context_ref)
-        if by_context[identity] and signature not in by_context[identity]:
-            conflicts.add(identity)
+        if identity not in conflicts:
+            for existing_sig in by_context[identity]:
+                if not _are_signatures_compatible(existing_sig, signature):
+                    conflicts.add(identity)
+                    break
         by_context[identity].add(signature)
         indexed[
             (concept, context_ref, unit_ref, value, None if decimals is None else str(decimals))
