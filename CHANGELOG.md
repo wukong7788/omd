@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add bounded idempotent SEC single-target PIT event recompute adapter
+  (`execute_sec_metric_recompute`) and target-binding validation
+  (`validate_recompute_target_binding`), integrating explicit dated-invalidation
+  targets with existing `SecEventExecutor`, durable receipts, and required
+  caller-supplied crash recovery callbacks. Warm executions replay retained bytes
+  with zero graph computations. Preserves target-to-result lineage with
+  normalized-input dependency coverage only; does not perform automatic consumer
+  quality, commit, or PIT-eligibility derivation, nor publish consumer data.
+
 - Add offline FY+YTD TTM diagnostic (`diagnose_sec_fy_ytd_ttm`) for sealed observed
   and document financial productions, evaluating exact arithmetic and fiscal bridge
   intervals without fabricating normalized versions or financial quality approval.
