@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-09-13
+
+- Add offline independent-quarter fact binding (`bind_sec_quarter_facts`,
+  `bind_sec_independent_quarter_facts`, and `bind_sec_quarter_fact`) to structurally
+  bind explicit caller-declared 10-Q quarter facts (`SecQuarterFactDeclaration`) to native
+  non-dimensional duration statement rows of a single 10-Q accession without inferring
+  discrete quarters from dates or duration alone. Enforces exact accession, context_ref,
+  concept, statement type, period date, and unit match, rejecting Q4/YTD labels, dimensioned
+  or non-finite values, duplicate rows, and oversized inputs. Returns immutable
+  lineage (`SecQuarterBoundFact`, `SecQuarterBindingResult`) with deterministic binding
+  identities; does not assert financial quality approval or point-in-time publication.
+
 ## 0.3.0 — 2026-09-13
 
 - Add bounded idempotent SEC single-target PIT event recompute adapter

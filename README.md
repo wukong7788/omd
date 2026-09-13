@@ -618,6 +618,48 @@ ttm = compute_sec_four_quarter_ttm(
 )
 ```
 
+`bind_sec_quarter_facts` provides offline structural binding of caller-supplied
+explicit independent-quarter evidence to native SEC statement facts for a single
+10-Q accession (`SecCompanyFinancialVintage`). Each declaration
+(`SecQuarterFactDeclaration`) explicitly asserts the same accession, native
+`context_ref`, fiscal year and quarter (1..3), exact period start/end dates,
+exact required unit (e.g. `iso4217:USD`), a non-empty evidence reference, and
+an explicit duration source label (such as `Three Months Ended`). It matches
+native non-dimensional duration rows by exact context, statement type, concept,
+period dates, exact unit, and finite Decimal value. Dates, duration, or values
+alone are never used to infer a discrete quarter; Q4 and YTD/non-independent
+duration labels fail closed. Returns immutable `SecQuarterBoundFact` records
+and a deterministic `SecQuarterBindingResult` identity. This is structural
+lineage binding, not financial quality PASS, market-known/PIT publication, or
+metric correctness.
+
+```python
+from datetime import date
+from ohmydata.providers.sec import (
+    SecQuarterFactDeclaration,
+    bind_sec_quarter_facts,
+)
+
+declaration = SecQuarterFactDeclaration(
+    accession_number="0000320193-24-000069",
+    statement_type="income_statement",
+    native_concept="us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
+    context_ref="c-current-q3",
+    period_start=date(2024, 3, 31),
+    period_end=date(2024, 6, 29),
+    fiscal_year=2024,
+    fiscal_quarter=3,
+    evidence_reference="html-table-1-cell-r1c1",
+    unit="iso4217:USD",
+    source_label="Three Months Ended",
+)
+
+result = bind_sec_quarter_facts(
+    vintage=vintage_10q,
+    declarations=[declaration],
+)
+```
+
 `compute_sec_metric_graph` evaluates a bounded, topologically ordered graph of
 fixed recipes: four-quarter or FY+current-YTD−prior-YTD revenue/net-income TTM,
 CFO−CapEx, YoY, margins, PE, PS and FPE. SEC terminals pass through the existing
