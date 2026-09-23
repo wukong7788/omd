@@ -57,6 +57,22 @@ reconcile incompatible requirements.
 Before implementing a shared abstraction, identify at least two concrete
 callers or one provider requirement plus a near-term migration need.
 
+Stock Notify and FunMoney Backtest are current consumers. OMD is their single
+shared home for Tushare/yfinance/SEC source adapters, pagination, retries, rate
+limits, provider-native fields and units, source error/outcome classification,
+provenance, immutable raw snapshots/replay, SEC accession and amendment event
+discovery, reusable financial-fact parsing, and provider-neutral data-production
+primitives. When both consumers need a source capability, define one narrow,
+typed public OMD contract rather than copying implementations into either app.
+Document what is actually released; uncommitted worktrees are not SDK APIs.
+
+Consumers must pin an immutable published OMD version and integrate only public
+APIs. OMD does not choose their universe, PIT decision cutoff, business feature,
+strategy, local coverage/retry policy, storage path, publication, schedule,
+UI, or live execution. Provider observation time alone does not establish PIT
+availability or successful consumer publication. Preserve distinct missing,
+empty, transient-failure, and permanent-failure outcomes for consumers.
+
 Extend providers only within the requested scope. Use narrow interfaces; do
 not add speculative providers or premature generalized schemas.
 
