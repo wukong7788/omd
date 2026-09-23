@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib
+import random
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -14,6 +16,7 @@ from ohmydata.core.errors import CoverageError, ProviderError
 from ohmydata.core.policy import AttemptRecord, RetryPolicy, execute_with_retry
 from ohmydata.core.provenance import EmptyDisposition, FetchProvenance
 
+from ._fundamentals_reads import call_or_get, get_attribute, has_material_data, read_source
 from .endpoints import (
     STANDARD_COLUMNS,
     YFinanceAdjustmentMode,
@@ -30,8 +33,13 @@ from .errors import (
     YFinanceVersionMismatchError,
 )
 from .fundamentals import (
+    YFinanceFundamentalsOutcome,
     YFinanceFundamentalsRequest,
     YFinanceFundamentalsResult,
+    YFinanceFundamentalsSourceError,
+    YFinanceFundamentalsSourceResult,
+    YFinanceFundamentalsSourceStatus,
+    YFinanceFundamentalsSymbolResult,
     YFinanceSymbolFundamentals,
     parse_symbol_fundamentals,
 )
@@ -58,28 +66,6 @@ def assert_yfinance_version(module: Any = None) -> None:
         )
 
 
-def _safe_get_attr(obj: Any, attr: str) -> Any:
-    """Safely get an attribute from a ticker or similar object, returning None if missing or errored."""
-    try:
-        return getattr(obj, attr, None)
-    except (AttributeError, TypeError, ValueError, KeyError, OSError, RuntimeError):
-        return None
-
-
-def _safe_call_or_get(obj: Any, method_name: str, attr_name: str) -> Any:
-    """Try calling method_name() if present; otherwise get attr_name."""
-    try:
-        if hasattr(obj, method_name):
-            fn = getattr(obj, method_name)
-            if callable(fn):
-                return fn()
-        if hasattr(obj, attr_name):
-            return getattr(obj, attr_name)
-    except (AttributeError, TypeError, ValueError, KeyError, OSError, RuntimeError):
-        return None
-    return None
-
-
 class YFinanceClient:
     """High-level offline-testable yfinance provider client."""
 
@@ -89,6 +75,9 @@ class YFinanceClient:
         download_fn: Callable[..., Any] | None = None,
         ticker_factory: Callable[[str], Any] | None = None,
         default_retry_policy: RetryPolicy | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
+        random_value_fn: Callable[[], float] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ):
         if yf_module is not None:
             assert_yfinance_version(yf_module)
@@ -118,6 +107,9 @@ class YFinanceClient:
                 self._ticker_factory = None
 
         self._retry_policy = default_retry_policy or RetryPolicy(3, 1.0, 3.0, 5.0, 0.0)
+        self._sleep = sleep_fn or time.sleep
+        self._random_value = random_value_fn or random.random
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def fetch_daily_bars(self, request: YFinanceDailyBarsRequest) -> YFinanceDailyBarsResult:
         """Fetch daily bars for the requested symbols with shape normalization and repair."""
@@ -148,6 +140,8 @@ class YFinanceClient:
             retry_res = execute_with_retry(
                 _do_download,
                 policy=retry_policy,
+                sleep=self._sleep,
+                random_value=self._random_value,
             )
             raw_data = retry_res.value
             attempts_log.extend(retry_res.attempts)
@@ -289,7 +283,7 @@ class YFinanceClient:
                 "repair_policy": request.repair_policy.value,
             },
             requested_fields=STANDARD_COLUMNS,
-            retrieved_at=datetime.now(UTC),
+            retrieved_at=self._clock(),
             attempts=tuple(attempts_log),
             row_count=len(norm_df),
             columns=STANDARD_COLUMNS,
@@ -323,58 +317,172 @@ class YFinanceClient:
                 "yfinance is not installed or ticker_factory was not provided."
             )
         records: dict[str, YFinanceSymbolFundamentals] = {}
+        symbol_results: dict[str, YFinanceFundamentalsSymbolResult] = {}
         attempts_log: list[AttemptRecord] = []
+        retry_policy = request.retry_policy or self._retry_policy
 
         for sym in request.symbols:
-            ticker = ticker_factory(sym)
-            info = getattr(ticker, "info", {})
-            if not isinstance(info, dict):
-                info = {}
+            sources: dict[str, YFinanceFundamentalsSourceResult] = {}
 
-            income_stmt = None
-            balance_stmt = None
-            cashflow_stmt = None
+            def read(
+                name: str,
+                fn: Callable[[], Any],
+                *,
+                _sources: dict[str, YFinanceFundamentalsSourceResult] = sources,
+                **kwargs: Any,
+            ) -> Any:
+                value, evidence = read_source(
+                    name,
+                    fn,
+                    retry_policy,
+                    sleep=self._sleep,
+                    random_value=self._random_value,
+                    **kwargs,
+                )
+                _sources[name] = evidence
+                attempts_log.extend(evidence.attempts)
+                return value
+
+            ticker = read("ticker", lambda sym=sym: ticker_factory(sym), require_value=True)
+            if ticker is None:
+                status = sources["ticker"].status
+                outcome = (
+                    YFinanceFundamentalsOutcome.TRANSIENT_FAILURE
+                    if status == YFinanceFundamentalsSourceStatus.TRANSIENT_FAILURE
+                    else YFinanceFundamentalsOutcome.PERMANENT_FAILURE
+                )
+                symbol_results[sym] = YFinanceFundamentalsSymbolResult(
+                    sym, outcome, None, MappingProxyType(sources)
+                )
+                continue
+
+            def get_info(ticker: Any = ticker) -> Any:
+                value = get_attribute(ticker, "info")
+                return {} if value is None else value
+
+            info = read("info", get_info, require_dict=True)
+            income_stmt = balance_stmt = cashflow_stmt = None
             if request.include_financials:
-                income_stmt = _safe_get_attr(ticker, "quarterly_income_stmt")
-                balance_stmt = _safe_get_attr(ticker, "quarterly_balance_sheet")
-                cashflow_stmt = _safe_get_attr(ticker, "quarterly_cashflow")
+                income_stmt = read(
+                    "quarterly_income_stmt",
+                    lambda ticker=ticker: get_attribute(ticker, "quarterly_income_stmt"),
+                )
+                balance_stmt = read(
+                    "quarterly_balance_sheet",
+                    lambda ticker=ticker: get_attribute(ticker, "quarterly_balance_sheet"),
+                )
+                cashflow_stmt = read(
+                    "quarterly_cashflow",
+                    lambda ticker=ticker: get_attribute(ticker, "quarterly_cashflow"),
+                )
 
-            rev_est_df = None
-            eps_est_df = None
+            rev_est_df = eps_est_df = None
             if request.include_estimates:
-                rev_est_df = _safe_call_or_get(ticker, "get_revenue_estimate", "revenue_estimate")
-                eps_est_df = _safe_call_or_get(ticker, "get_earnings_estimate", "earnings_estimate")
+                rev_est_df = read(
+                    "revenue_estimate",
+                    lambda ticker=ticker: call_or_get(
+                        ticker, "get_revenue_estimate", "revenue_estimate"
+                    ),
+                )
+                eps_est_df = read(
+                    "earnings_estimate",
+                    lambda ticker=ticker: call_or_get(
+                        ticker, "get_earnings_estimate", "earnings_estimate"
+                    ),
+                )
 
-            fast_info = _safe_get_attr(ticker, "fast_info")
-
-            fund_record = parse_symbol_fundamentals(
-                symbol=sym,
-                info=info,
-                income_stmt=income_stmt,
-                balance_stmt=balance_stmt,
-                cashflow_stmt=cashflow_stmt,
-                rev_estimate_df=rev_est_df,
-                eps_estimate_df=eps_est_df,
-                fast_info=fast_info,
+            fast_info_raw = read(
+                "fast_info", lambda ticker=ticker: get_attribute(ticker, "fast_info")
             )
-            records[sym] = fund_record
+            fast_info = None
+            if fast_info_raw is not None:
+                fast_info = SimpleNamespace(
+                    market_cap=read(
+                        "fast_info.market_cap",
+                        lambda raw=fast_info_raw: get_attribute(raw, "market_cap"),
+                    ),
+                    shares=read(
+                        "fast_info.shares",
+                        lambda raw=fast_info_raw: get_attribute(raw, "shares"),
+                    ),
+                )
+
+            try:
+                fund_record = parse_symbol_fundamentals(
+                    symbol=sym,
+                    info=info,
+                    income_stmt=income_stmt,
+                    balance_stmt=balance_stmt,
+                    cashflow_stmt=cashflow_stmt,
+                    rev_estimate_df=rev_est_df,
+                    eps_estimate_df=eps_est_df,
+                    fast_info=fast_info,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate malformed provider payloads by symbol
+                attempts = (AttemptRecord(1, type(exc).__name__, None),)
+                status = YFinanceFundamentalsSourceStatus.PERMANENT_FAILURE
+                error = YFinanceFundamentalsSourceError(
+                    "parse", status, type(exc).__name__, attempts
+                )
+                sources["parse"] = YFinanceFundamentalsSourceResult(status, attempts, error)
+                attempts_log.extend(attempts)
+                symbol_results[sym] = YFinanceFundamentalsSymbolResult(
+                    sym,
+                    YFinanceFundamentalsOutcome.PERMANENT_FAILURE,
+                    None,
+                    MappingProxyType(sources),
+                )
+                continue
+
+            failures = [source.status for source in sources.values() if source.error is not None]
+            if not has_material_data(fund_record):
+                if YFinanceFundamentalsSourceStatus.PERMANENT_FAILURE in failures:
+                    outcome = YFinanceFundamentalsOutcome.PERMANENT_FAILURE
+                elif failures:
+                    outcome = YFinanceFundamentalsOutcome.TRANSIENT_FAILURE
+                else:
+                    outcome = YFinanceFundamentalsOutcome.UNAVAILABLE
+                fund_record = None
+            elif failures or any(
+                source.status == YFinanceFundamentalsSourceStatus.EMPTY
+                for name, source in sources.items()
+                if name not in {"fast_info", "fast_info.market_cap", "fast_info.shares"}
+            ):
+                outcome = YFinanceFundamentalsOutcome.INCOMPLETE
+            else:
+                outcome = YFinanceFundamentalsOutcome.COMPLETE
+
+            if fund_record is not None:
+                records[sym] = fund_record
+            symbol_results[sym] = YFinanceFundamentalsSymbolResult(
+                sym, outcome, fund_record, MappingProxyType(sources)
+            )
 
         provenance = FetchProvenance(
             provider="yfinance",
             endpoint="fundamentals",
-            request_identity=f"yfinance:fundamentals:{','.join(request.symbols)}",
+            request_identity=(
+                f"yfinance:fundamentals:{','.join(request.symbols)}:"
+                f"{int(request.include_financials)}:{int(request.include_valuation)}:"
+                f"{int(request.include_estimates)}"
+            ),
             effective_parameters={
                 "symbols": list(request.symbols),
                 "include_financials": request.include_financials,
                 "include_valuation": request.include_valuation,
                 "include_estimates": request.include_estimates,
+                "max_attempts_per_source": retry_policy.max_attempts,
             },
             requested_fields=("symbol", "report_date", "valuation", "financials", "estimates"),
-            retrieved_at=datetime.now(UTC),
+            retrieved_at=self._clock(),
             attempts=tuple(attempts_log),
             row_count=len(records),
             columns=("symbol", "report_date", "quote_type", "valuation", "financials", "estimates"),
-            warnings=(),
+            warnings=tuple(
+                f"{sym}:{result.outcome.value}"
+                for sym, result in symbol_results.items()
+                if result.outcome != YFinanceFundamentalsOutcome.COMPLETE
+            ),
             snapshot_identities=(),
             empty_disposition=EmptyDisposition.ALLOWED_EMPTY
             if not records
@@ -386,4 +494,5 @@ class YFinanceClient:
             requested_symbols=request.symbols,
             yfinance_version=EXPECTED_YFINANCE_VERSION,
             provenance=provenance,
+            symbol_results=MappingProxyType(symbol_results),
         )

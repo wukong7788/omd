@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from ohmydata.core.policy import RetryPolicy
 from ohmydata.providers.yfinance.client import (
     YFinanceClient,
     assert_yfinance_version,
@@ -21,7 +23,11 @@ from ohmydata.providers.yfinance.errors import (
     CoverageError,
     YFinanceVersionMismatchError,
 )
-from ohmydata.providers.yfinance.fundamentals import YFinanceFundamentalsRequest
+from ohmydata.providers.yfinance.fundamentals import (
+    YFinanceFundamentalsOutcome,
+    YFinanceFundamentalsRequest,
+    YFinanceFundamentalsSourceStatus,
+)
 
 
 class TestVersionAssertion:
@@ -243,3 +249,190 @@ class TestClientFundamentals:
         assert len(df) == 1
         assert df["symbol"].iloc[0] == "AAPL"
         assert df["trailing_pe"].iloc[0] == 28.0
+
+    @staticmethod
+    def _client(factory, **kwargs):
+        return YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"), ticker_factory=factory, **kwargs
+        )
+
+    def test_all_empty_is_unavailable_with_read_evidence(self):
+        ticker = SimpleNamespace(info={})
+        result = self._client(lambda symbol: ticker).fetch_fundamentals(
+            YFinanceFundamentalsRequest(symbols=("EMPTY",))
+        )
+
+        assert result.records == {}
+        symbol = result.symbol_results["EMPTY"]
+        assert symbol.record is None
+        assert symbol.outcome == YFinanceFundamentalsOutcome.UNAVAILABLE
+        assert symbol.errors == ()
+        assert symbol.sources["info"].status == YFinanceFundamentalsSourceStatus.EMPTY
+        assert symbol.sources["info"].attempts[0].attempt == 1
+        assert result.provenance.row_count == 0
+        assert result.provenance.attempt_count == 8
+
+    def test_partial_coverage_retains_data_and_missing_source_states(self):
+        ticker = SimpleNamespace(info={"marketCap": 123.0})
+        result = self._client(lambda symbol: ticker).fetch_fundamentals(
+            YFinanceFundamentalsRequest(symbols=("PART",), include_estimates=False)
+        )
+
+        symbol = result.symbol_results["PART"]
+        assert symbol.outcome == YFinanceFundamentalsOutcome.INCOMPLETE
+        assert symbol.record is result.records["PART"]
+        assert symbol.record.valuation.market_cap == 123.0
+        assert (
+            symbol.sources["quarterly_income_stmt"].status == YFinanceFundamentalsSourceStatus.EMPTY
+        )
+        assert "earnings_estimate" not in symbol.sources
+
+    def test_success_after_transient_retry_records_attempts(self):
+        calls = 0
+        delays = []
+        now = datetime(2026, 9, 23, tzinfo=UTC)
+
+        def factory(symbol):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise TimeoutError("credential=secret")
+            return SimpleNamespace(info={"marketCap": 123.0})
+
+        result = self._client(
+            factory, sleep_fn=delays.append, random_value_fn=lambda: 0.5, clock=lambda: now
+        ).fetch_fundamentals(
+            YFinanceFundamentalsRequest(
+                symbols=("GOOD",),
+                include_financials=False,
+                include_estimates=False,
+                retry_policy=RetryPolicy(2, 1, 2, 1, 0),
+            )
+        )
+
+        symbol = result.symbol_results["GOOD"]
+        assert symbol.outcome == YFinanceFundamentalsOutcome.COMPLETE
+        assert [a.exception_type for a in symbol.sources["ticker"].attempts] == [
+            "TimeoutError",
+            None,
+        ]
+        assert result.provenance.attempt_count == 4
+        assert result.provenance.retrieved_at == now
+        assert delays == [1.0]
+        assert "secret" not in repr(symbol)
+        assert "secret" not in repr(result.provenance.to_dict())
+
+    def test_exhausted_transient_failure_is_per_symbol(self):
+        def factory(symbol):
+            if symbol == "BAD":
+                raise TimeoutError("credential=secret")
+            return SimpleNamespace(info={"marketCap": 123.0})
+
+        result = self._client(factory).fetch_fundamentals(
+            YFinanceFundamentalsRequest(
+                symbols=("BAD", "GOOD"),
+                include_financials=False,
+                include_estimates=False,
+                retry_policy=RetryPolicy(2, 0, 2, 0, 0),
+            )
+        )
+
+        bad = result.symbol_results["BAD"]
+        assert bad.outcome == YFinanceFundamentalsOutcome.TRANSIENT_FAILURE
+        assert bad.record is None
+        assert bad.errors[0].exception_type == "TimeoutError"
+        assert len(bad.errors[0].attempts) == 2
+        assert result.symbol_results["GOOD"].outcome == YFinanceFundamentalsOutcome.COMPLETE
+        assert tuple(result.records) == ("GOOD",)
+        assert result.provenance.row_count == 1
+
+    def test_accessor_exception_and_malformed_info_are_permanent(self):
+        class RaisingInfo:
+            @property
+            def info(self):
+                raise RuntimeError("credential=secret")
+
+        class RaisingAttributeError:
+            @property
+            def info(self):
+                raise AttributeError("credential=secret")
+
+        for ticker, expected in (
+            (RaisingInfo(), "RuntimeError"),
+            (RaisingAttributeError(), "AttributeError"),
+            (SimpleNamespace(info=[]), "TypeError"),
+        ):
+            result = self._client(lambda symbol, ticker=ticker: ticker).fetch_fundamentals(
+                YFinanceFundamentalsRequest(
+                    symbols=("BAD",), include_financials=False, include_estimates=False
+                )
+            )
+            symbol = result.symbol_results["BAD"]
+            assert symbol.outcome == YFinanceFundamentalsOutcome.PERMANENT_FAILURE
+            assert symbol.errors[0].source == "info"
+            assert symbol.errors[0].exception_type == expected
+            assert result.records == {}
+            assert "secret" not in repr(result)
+
+    def test_failed_estimate_read_retains_partial_record_and_error(self):
+        class Ticker:
+            def __init__(self):
+                self.info = {"marketCap": 123.0}
+
+            def get_revenue_estimate(self):
+                raise OSError("credential=secret")
+
+        result = self._client(lambda symbol: Ticker()).fetch_fundamentals(
+            YFinanceFundamentalsRequest(
+                symbols=("PART",),
+                include_financials=False,
+                retry_policy=RetryPolicy(2, 0, 2, 0, 0),
+            )
+        )
+
+        symbol = result.symbol_results["PART"]
+        assert symbol.outcome == YFinanceFundamentalsOutcome.INCOMPLETE
+        assert symbol.record.valuation.market_cap == 123.0
+        assert symbol.errors[0].source == "revenue_estimate"
+        assert symbol.errors[0].status == YFinanceFundamentalsSourceStatus.TRANSIENT_FAILURE
+        assert len(symbol.errors[0].attempts) == 2
+
+    @pytest.mark.parametrize(
+        ("status_code", "expected", "attempt_count"),
+        [
+            (429, YFinanceFundamentalsOutcome.TRANSIENT_FAILURE, 2),
+            (401, YFinanceFundamentalsOutcome.PERMANENT_FAILURE, 1),
+        ],
+    )
+    def test_http_status_classification(self, status_code, expected, attempt_count):
+        class HTTPReadError(Exception):
+            def __init__(self):
+                self.response = SimpleNamespace(status_code=status_code)
+
+        def factory(symbol):
+            raise HTTPReadError()
+
+        result = self._client(factory).fetch_fundamentals(
+            YFinanceFundamentalsRequest(
+                symbols=("BAD",),
+                retry_policy=RetryPolicy(2, 0, 2, 0, 0),
+            )
+        )
+        symbol = result.symbol_results["BAD"]
+        assert symbol.outcome == expected
+        assert len(symbol.errors[0].attempts) == attempt_count
+        assert symbol.errors[0].exception_type == "HTTPReadError"
+
+    def test_permission_error_is_not_retried(self):
+        calls = 0
+
+        def factory(symbol):
+            nonlocal calls
+            calls += 1
+            raise PermissionError("credential=secret")
+
+        result = self._client(factory).fetch_fundamentals(
+            YFinanceFundamentalsRequest(symbols=("BAD",), retry_policy=RetryPolicy(3, 0, 2, 0, 0))
+        )
+        assert calls == 1
+        assert result.symbol_results["BAD"].outcome == YFinanceFundamentalsOutcome.PERMANENT_FAILURE

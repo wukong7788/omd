@@ -151,6 +151,7 @@ from .known_by_ttm import (
     SecKnownByTtmResult,
     diagnose_sec_fy_ytd_ttm,
 )
+from .live_discovery import fetch_sec_discovery_batch
 from .metric_graph import (
     SecMetricCapexSign,
     SecMetricDomainPolicy,
@@ -451,6 +452,7 @@ __all__ = [
     "evaluate_sec_structural_quality",
     "execute_sec_metric_recompute",
     "extract_from_artifact",
+    "fetch_sec_discovery_batch",
     "fetch_sec_submissions_closure",
     "historical_basenames",
     "historical_submission_url",

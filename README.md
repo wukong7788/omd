@@ -739,6 +739,24 @@ financial production paths take an explicit accession, while the live
 not acquire the filing artifacts needed for exact-accession financial production.
 Event ledger/work processing remains a separate step.
 
+For one explicit discovery policy and cursor, `fetch_sec_discovery_batch` runs
+the same closure fetch followed by offline discovery. It returns a validated
+batch for `SecEventDiscoveryLedger.append`; it does not advance the ledger on
+its own. The caller supplies the clock, overlap window and reconciliation
+schedule.
+
+```python
+from ohmydata.providers.sec import fetch_sec_discovery_batch
+
+batch = fetch_sec_discovery_batch(
+    SecHttpClient(sec_user_agent),
+    snapshot_store,
+    policy=discovery_policy,
+    prior_cursor=prior_cursor,
+    clock=utc_now,
+)
+```
+
 `SecEventDiscoveryLedger` atomically stores discovered events and their cursor in
 immutable generations. On POSIX filesystems, appenders cooperate through a writer
 lock; `load()` replays the retained source observations and reconstructs the
@@ -1335,14 +1353,18 @@ fund_req = YFinanceFundamentalsRequest(
 )
 fund_result = client.fetch_fundamentals(fund_req)
 
-nvda = fund_result.records["NVDA"]
-# Forward P/E is calibrated to current year consensus (FY1 0y.avg) rather than out-year (+1y)
-print("NVDA Calibrated FPE:", nvda.valuation.forward_pe, nvda.valuation.forward_pe_source)
-print("NVDA Raw Yahoo FPE:", nvda.valuation.raw_forward_pe)
+for symbol in fund_result.requested_symbols:
+    item = fund_result.symbol_results[symbol]
+    print(symbol, item.outcome, item.errors)
 
-gev = fund_result.records["GEV"]
+nvda = fund_result.symbol_results["NVDA"].record
+if nvda is not None:
+    print("NVDA Calibrated FPE:", nvda.valuation.forward_pe, nvda.valuation.forward_pe_source)
+    print("NVDA Raw Yahoo FPE:", nvda.valuation.raw_forward_pe)
+
+gev = fund_result.symbol_results["GEV"].record
 # Legacy flag measures EPS-source divergence; accounting basis remains unknown.
-if gev.estimates.has_gaap_distortion:
+if gev is not None and gev.estimates.has_gaap_distortion:
     print(f"GEV EPS-source gap: {gev.estimates.gaap_diff_pct * 100:.1f}%")
 ```
 
@@ -1350,6 +1372,8 @@ Financial values bind to actual statement columns, with per-metric dates and
 coverage. FY1 calibration requires an actual quote and compatible currencies;
 otherwise raw values remain available. See the
 [period selection, valuation provenance and migration guide](docs/financial-period-integrity.md).
+See the [per-symbol outcome contract](docs/yfinance-fundamentals-outcomes.md)
+for empty, partial and failed reads.
 
 #### Zero-Drift Audit CLI (`omd audit-drift`)
 

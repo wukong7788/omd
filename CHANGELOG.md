@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-23
+
+- Add `fetch_sec_discovery_batch` as a typed live SEC event-discovery entry
+  point. It reuses the complete retained Submissions closure introduced in
+  0.3.3, then runs the existing offline discovery validation.
+- Add per-symbol yfinance fundamentals outcomes and source read evidence,
+  including explicit empty, incomplete, transient failure and permanent
+  failure states. Retry classified transient accessor failures per source and
+  retain attempt records without upstream exception text. The pinned yfinance
+  version and daily-bar adjustment defaults are unchanged.
+
+### Migration from 0.3.x
+
+`YFinanceFundamentalsResult.records` now contains only symbols with material
+data. Callers that previously indexed `records[symbol]` for every requested
+symbol must inspect `symbol_results[symbol].outcome` first and choose how to
+handle `INCOMPLETE`, `UNAVAILABLE` and failure outcomes. Consumer repositories
+must pin `ohmydata==0.4.0` explicitly before adopting this behavior.
+
 ## 0.3.3 — 2026-09-23
 
 - Add `fetch_sec_submissions_closure` to fetch and retain a complete SEC

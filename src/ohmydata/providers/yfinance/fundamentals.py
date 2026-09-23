@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
 import pandas as pd
 
-from ohmydata.core.policy import RetryPolicy
+from ohmydata.core.policy import AttemptRecord, RetryPolicy
 from ohmydata.core.provenance import FetchProvenance
 
 from ._fundamentals_parsers import (
@@ -175,6 +176,62 @@ class YFinanceFundamentalsRequest:
         object.__setattr__(self, "symbols", tuple(validated))
 
 
+class YFinanceFundamentalsOutcome(str, Enum):
+    """Final state of one requested symbol, independent of the other symbols."""
+
+    COMPLETE = "COMPLETE"
+    INCOMPLETE = "INCOMPLETE"
+    UNAVAILABLE = "UNAVAILABLE"
+    TRANSIENT_FAILURE = "TRANSIENT_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+
+class YFinanceFundamentalsSourceStatus(str, Enum):
+    """State of one yfinance accessor; EMPTY means a successful empty read."""
+
+    PRESENT = "PRESENT"
+    EMPTY = "EMPTY"
+    TRANSIENT_FAILURE = "TRANSIENT_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+
+@dataclass(frozen=True)
+class YFinanceFundamentalsSourceError:
+    """Typed failure evidence without provider exception text or credentials."""
+
+    source: str
+    status: YFinanceFundamentalsSourceStatus
+    exception_type: str
+    attempts: tuple[AttemptRecord, ...]
+
+
+@dataclass(frozen=True)
+class YFinanceFundamentalsSourceResult:
+    """Read evidence for a ticker source (including a missing optional accessor)."""
+
+    status: YFinanceFundamentalsSourceStatus
+    attempts: tuple[AttemptRecord, ...]
+    error: YFinanceFundamentalsSourceError | None = None
+
+
+@dataclass(frozen=True)
+class YFinanceFundamentalsSymbolResult:
+    """One requested symbol's data and source-level evidence."""
+
+    symbol: str
+    outcome: YFinanceFundamentalsOutcome
+    record: YFinanceSymbolFundamentals | None
+    sources: MappingProxyType[str, YFinanceFundamentalsSourceResult]
+
+    def __post_init__(self):
+        object.__setattr__(self, "sources", MappingProxyType(dict(self.sources)))
+
+    @property
+    def errors(self) -> tuple[YFinanceFundamentalsSourceError, ...]:
+        """All failed source reads in request order."""
+        return tuple(source.error for source in self.sources.values() if source.error is not None)
+
+
 @dataclass(frozen=True)
 class YFinanceFundamentalsResult:
     """Result contract for fundamentals."""
@@ -183,11 +240,15 @@ class YFinanceFundamentalsResult:
     requested_symbols: tuple[str, ...]
     yfinance_version: str
     provenance: FetchProvenance | None = None
+    symbol_results: MappingProxyType[str, YFinanceFundamentalsSymbolResult] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def __post_init__(self):
         object.__setattr__(self, "requested_symbols", tuple(self.requested_symbols))
         if isinstance(self.records, dict):
             object.__setattr__(self, "records", MappingProxyType(dict(self.records)))
+        object.__setattr__(self, "symbol_results", MappingProxyType(dict(self.symbol_results)))
 
     def to_records(self) -> list[dict[str, Any]]:
         """Return list of flattened dictionaries."""
@@ -474,8 +535,13 @@ def parse_symbol_fundamentals(
 __all__ = [
     "NON_EQUITY_QUOTE_TYPES",
     "YFinanceAnalystEstimates",
+    "YFinanceFundamentalsOutcome",
     "YFinanceFundamentalsRequest",
     "YFinanceFundamentalsResult",
+    "YFinanceFundamentalsSourceError",
+    "YFinanceFundamentalsSourceResult",
+    "YFinanceFundamentalsSourceStatus",
+    "YFinanceFundamentalsSymbolResult",
     "YFinanceMetricPeriod",
     "YFinanceQuarterlyFinancials",
     "YFinanceSymbolFundamentals",
