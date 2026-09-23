@@ -266,6 +266,7 @@ from .sgml_financials import (
     produce_sec_financials_from_sgml,
 )
 from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
+from .submissions import SecSubmissionsClosure, fetch_sec_submissions_closure
 from .unit_evidence import SecFinancialUnitEvidence
 from .xbrl_package import (
     SecXbrlPackage,
@@ -419,6 +420,7 @@ __all__ = [
     "SecStatementParseError",
     "SecStatementRow",
     "SecStructuralQualityReport",
+    "SecSubmissionsClosure",
     "SecTargetMetricInputs",
     "SecTransportEvidence",
     "SecUnavailableResult",
@@ -449,6 +451,7 @@ __all__ = [
     "evaluate_sec_structural_quality",
     "execute_sec_metric_recompute",
     "extract_from_artifact",
+    "fetch_sec_submissions_closure",
     "historical_basenames",
     "historical_submission_url",
     "latest_completed_quarter",

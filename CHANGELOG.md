@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.3 — 2026-09-23
+
+- Add `fetch_sec_submissions_closure` to fetch and retain a complete SEC
+  Submissions root and its advertised history pages using the injected SEC HTTP
+  client. It returns snapshot-backed discovery sources and fails explicitly on
+  missing pages, malformed schemas, conflicting accession metadata or bounds.
+
 ## 0.3.2 — 2026-09-13
 
 - Narrow OMD SEC v2 live XBRL compatibility fix:

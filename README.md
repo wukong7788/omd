@@ -702,6 +702,43 @@ It preserves acceptance metadata, emits filing events and exact 8-K item 2.02
 events, and fails on missing pages or conflicting facts. Acceptance is not proof
 of the website's first publication time.
 
+`fetch_sec_submissions_closure` obtains that complete root and every advertised
+history page with an injected `SecHttpClient` and `SnapshotStore`. The client
+requires a caller supplied SEC User-Agent and applies its request spacing and
+retry policy for transient connection and HTTP status failures. A response body
+read failure is classified as transient; the caller retries the full closure.
+The fetcher validates bounded JSON, response length, CIK, page names,
+columns and duplicate accession metadata, then retains exact response bytes as
+append-only observations. A failed later page leaves earlier observations
+available for inspection but returns no complete closure. A new call fetches a
+fresh root and all pages it advertises; callers choose their own schedule and
+reconciliation windows. Up to 16 history pages, 8 MiB per page, 64 MiB total and
+100,000 filing rows are supported; exceeding a bound fails explicitly.
+
+```python
+from ohmydata.providers.sec import (
+    SecHttpClient,
+    fetch_sec_submissions_closure,
+    discover_sec_filing_events,
+)
+
+closure = fetch_sec_submissions_closure(snapshot_store, SecHttpClient(sec_user_agent), "0000000001")
+batch = discover_sec_filing_events(
+    snapshot_store,
+    closure.root_source,
+    closure.historical_sources,
+    policy=discovery_policy,
+    prior_cursor=prior_cursor,
+)
+```
+
+The closure is retained source evidence. Event discovery does not infer whether
+an amendment changes financial values. Existing retained document and SGML
+financial production paths take an explicit accession, while the live
+`SecFinancialsClient` still selects filings by form and date. This fetcher does
+not acquire the filing artifacts needed for exact-accession financial production.
+Event ledger/work processing remains a separate step.
+
 `SecEventDiscoveryLedger` atomically stores discovered events and their cursor in
 immutable generations. On POSIX filesystems, appenders cooperate through a writer
 lock; `load()` replays the retained source observations and reconstructs the
