@@ -10,8 +10,10 @@ The authorized 2026-09-11 scope extension is described in
 OMD may additionally own reusable normalized schemas, versioned quality and
 correction records, neutral offline metric recipes, and incremental dependency
 calculation. This supersedes the original ingestion-only restriction for those
-capabilities; project-specific features and schemas, calendars, cutoffs,
-scheduling, storage locations, publication, and strategy remain consumer-owned.
+capabilities; project-specific features and schemas, session-selection
+policies, cutoffs, scheduling, storage locations, publication, and strategy
+remain consumer-owned. OMD may provide exchange schedule source facts, including
+session dates and actual local open/close timestamps.
 Implementation begins with the bounded SEC financial-version/PIT query slice;
 the broader roadmap below remains historical context and does not establish
 completion of the extension or waive consumer migration gates.

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.2 — 2026-09-23
+
+- Add an optional offline XNYS exchange-calendar API with bounded session
+  queries and timezone-aware regular and early-close timestamps. Consumers
+  retain their own session-selection and completed-session cutoff policies.
+
 ## 0.4.1 — 2026-09-23
 
 - Expose selected Yahoo-native quote and revenue fields through the typed

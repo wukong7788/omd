@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohmydata"
-version = "0.4.1"
+version = "0.4.2"
 description = "Financial and alternative market data ingestion SDK."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -28,6 +28,7 @@ sec-financials = [
   "edgartools==5.56.0",
   "pyarrow>=23.0.1,<24.0",
 ]
+calendars = ["exchange-calendars==4.13.2"]
 
 [dependency-groups]
 dev = [

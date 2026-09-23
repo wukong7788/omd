@@ -99,9 +99,12 @@ Consumers own:
 - business features, investment judgments, ratings, and strategy-specific calculations;
 - storage locations and publication workflows;
 - strategy, backtest, signal, live execution, notifications, and UI;
-- project-specific normalized schemas and operational schedules;
-- market calendars, decision cutoffs, and publication/commit evidence supplied
-  to OMD's explicit query modes.
+- project-specific normalized schemas, session-selection policies, decision
+  cutoffs, and operational schedules;
+- publication/commit evidence supplied to OMD's explicit query modes.
+
+OMD may supply offline exchange schedule source facts through narrow public
+calendar APIs. Consumers choose their own completed-session cutoffs.
 
 ## API Design Rules
 

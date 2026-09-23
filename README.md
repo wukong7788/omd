@@ -20,6 +20,18 @@ Pandas-backed Tushare adapter, `ohmydata[yfinance]` for US/global market data an
 fundamentals, `ohmydata[sec-cli]` for the SEC N-PORT batch CLI, or
 `ohmydata[sec-financials]` for company 10-K/10-Q financial statements and Parquet
 dataset writer. Provider tests use fake clients and never call a network.
+Install `ohmydata[calendars]` for offline XNYS session dates and actual
+timezone-aware open/close timestamps, including early closes. OMD supplies
+exchange schedule facts; callers retain their own session-selection and
+completed-session cutoff policies.
+
+```python
+from ohmydata.calendars import get_xnys_sessions
+
+sessions = get_xnys_sessions("2026-11-27", "2026-11-27")
+if sessions:
+    print(sessions[0].close_at)  # 2026-11-27 13:00:00-05:00 (early close)
+```
 
 ## Core Architecture (offline & immutable)
 

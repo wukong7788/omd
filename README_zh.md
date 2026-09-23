@@ -46,6 +46,7 @@
 
 | Extra 扩展名 | 核心功能 | 核心依赖 | 适用场景 |
 | :--- | :--- | :--- | :--- |
+| `ohmydata[calendars]` | 离线查询 XNYS 交易日及含提前收市的纽约本地开收市时间 | `exchange-calendars==4.13.2` | 美股数据对齐；会话选择与已完成交易日截止策略仍由调用方决定 |
 | `ohmydata[yfinance]` | 美股及全球行情日线、估值快照、财务对比、分析师预期、跨版本零漂移审计 | `pandas`, `yfinance==1.7.0` | 美股、全球 ETF、全球宏观标的回测与选股 |
 | `ohmydata[sec-cli]` | SEC EDGAR N-PORT 季度基金持仓批量流构建、校验与合格评定 CLI | `pyarrow` | 美股 ETF / 共同基金底层持仓穿透与机构跟踪 |
 | `ohmydata[sec-financials]` | SEC EDGAR 10-K / 10-Q 三大表（资产负债、利润、现金流）PIT 抽取与 Parquet 本地湖 | `edgartools`, `pyarrow` | 美股上市公司财务基本面、财报季量化研究 |
