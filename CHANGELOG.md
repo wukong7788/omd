@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.4.1 — 2026-09-23
+
+- Expose selected Yahoo-native quote and revenue fields through the typed
+  `YFinanceSymbolFundamentals.source_info` payload, retaining source timestamp
+  and units alongside the existing per-source `info` outcome evidence.
+- Add a public SEC ticker→CIK mapping API.
+  It reuses `SecHttpClient` and `SnapshotStore`, validates the official mapping,
+  classifies missing and ambiguous tickers explicitly, and supports resolving
+  multiple tickers from one retained mapping snapshot. Ambiguity in one ticker
+  does not prevent resolving other tickers from the same snapshot.
+
 ## 0.4.0 — 2026-09-23
 
 - Add `fetch_sec_discovery_batch` as a typed live SEC event-discovery entry

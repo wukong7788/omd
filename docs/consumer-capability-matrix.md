@@ -163,8 +163,6 @@ permission、duplicate 和 coverage contract。
 
 ## 7. 代码证据索引
 
-### OMD
-
 - `src/ohmydata/core/`
 - `src/ohmydata/providers/tushare/client.py`
 - `src/ohmydata/providers/tushare/endpoints.py`
@@ -189,3 +187,31 @@ permission、duplicate 和 coverage contract。
 - `funmoney_backtest/data_pipeline/etf_iter04_contract.py`
 - `funmoney_backtest/data_pipeline/cn_iter05_4/`
 - `funmoney_backtest/config/data/cn_research_datasets.yaml`
+
+## 8. SEC ticker→CIK public contract (0.4.1)
+
+This capability is included in `ohmydata==0.4.1`. Consumers must pin that
+immutable version before importing this API.
+
+Both consumers will resolve US tickers through OMD's official SEC mapping:
+
+```python
+from ohmydata.providers.sec import fetch_sec_ticker_cik_mapping
+
+mapping = fetch_sec_ticker_cik_mapping(client, snapshot_store)
+aapl = mapping.resolve("AAPL")
+msft = mapping.resolve("MSFT")
+# One SEC download and one retained snapshot for both lookups.
+```
+
+`fetch_sec_ticker_cik_mapping` uses the shared `SecHttpClient`, retains the
+exact `https://www.sec.gov/files/company_tickers.json` response through
+`SnapshotStore`, and returns `SecTickerCikMapping` with the source observation.
+Use its `resolve` method for a batch of tickers; `fetch_sec_ticker_cik` is the
+single-ticker convenience wrapper and downloads the mapping once per call.
+`resolve_sec_ticker_cik` remains the deterministic replay helper for an
+already retained bytes payload. Tickers are trimmed and upper-cased; invalid
+rows fail with `SchemaMismatchError`, a requested ticker with conflicting rows
+fails with `SecTickerCikAmbiguousError`, and an absent requested ticker fails
+with `SecTickerCikNotFoundError`. Neither consumer owns a second SEC mapping
+download, retry policy, or CIK parser.

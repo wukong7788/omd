@@ -7,8 +7,11 @@ import datetime
 import pandas as pd
 import pytest
 
+from ohmydata.providers.yfinance import YFinanceFundamentalsInfoFields
+from ohmydata.providers.yfinance._fundamentals_reads import has_material_data
 from ohmydata.providers.yfinance.fundamentals import (
     YFinanceFundamentalsRequest,
+    YFinanceFundamentalsResult,
     extract_estimates_horizons,
     extract_metric_pair,
     extract_quarterly_pair,
@@ -18,6 +21,36 @@ from ohmydata.providers.yfinance.fundamentals import (
 
 
 class TestFundamentalsExtractionHelpers:
+    def test_timestamp_only_source_info_is_not_material(self):
+        record = parse_symbol_fundamentals(
+            "AAPL", {"quoteType": "EQUITY", "regularMarketTime": 1_788_278_400}
+        )
+        assert has_material_data(record) is False
+
+    def test_source_info_is_nested_in_all_serializations(self):
+        record = parse_symbol_fundamentals(
+            "AAPL",
+            {
+                "quoteType": "EQUITY",
+                "regularMarketTime": 1_788_278_400,
+                "regularMarketPrice": 123.45,
+                "currentPrice": 123.5,
+                "totalRevenue": 987_654_321,
+                "financialCurrency": "USD",
+            },
+        )
+        result = YFinanceFundamentalsResult({"AAPL": record}, ("AAPL",), "1.7.0")
+        expected = {
+            "regular_market_time": 1_788_278_400,
+            "regular_market_price": 123.45,
+            "current_price": 123.5,
+            "total_revenue": 987_654_321,
+            "financial_currency": "USD",
+        }
+        assert record.to_dict()["source_info"] == expected
+        assert result.to_records()[0]["source_info"] == expected
+        assert result.to_dataframe().iloc[0]["source_info"] == expected
+
     def test_extract_quarterly_pair_full(self):
         # 5 quarters: Q0, Q1, Q2, Q3, Q4 (YoY is Q4)
         series = pd.Series(
@@ -75,6 +108,42 @@ class TestFundamentalsExtractionHelpers:
 
 
 class TestSymbolFundamentalsParsing:
+    def test_source_info_fields_preserve_yahoo_values_and_units(self):
+        info = {
+            "regularMarketTime": 1_788_278_400,
+            "regularMarketPrice": 123.45,
+            "currentPrice": 123.5,
+            "totalRevenue": 987_654_321,
+            "financialCurrency": "usd",
+        }
+
+        record = parse_symbol_fundamentals("RAW", info)
+
+        assert isinstance(record.source_info, YFinanceFundamentalsInfoFields)
+        assert record.source_info.regular_market_time == 1_788_278_400
+        assert type(record.source_info.regular_market_time) is int
+        assert record.source_info.regular_market_price == 123.45
+        assert record.source_info.current_price == 123.5
+        assert record.source_info.total_revenue == 987_654_321
+        assert type(record.source_info.total_revenue) is int
+        assert record.source_info.financial_currency == "usd"
+
+    def test_invalid_source_info_numeric_values_remain_missing(self):
+        record = parse_symbol_fundamentals(
+            "RAW",
+            {
+                "regularMarketTime": True,
+                "regularMarketPrice": float("nan"),
+                "currentPrice": "123.5",
+                "totalRevenue": float("inf"),
+            },
+        )
+
+        assert record.source_info.regular_market_time is None
+        assert record.source_info.regular_market_price is None
+        assert record.source_info.current_price is None
+        assert record.source_info.total_revenue is None
+
     def test_parse_equity_fundamentals(self):
         info = {
             "quoteType": "EQUITY",

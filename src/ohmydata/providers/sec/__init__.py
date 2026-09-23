@@ -268,6 +268,16 @@ from .sgml_financials import (
 )
 from .structural_quality import SecStructuralQualityReport, evaluate_sec_structural_quality
 from .submissions import SecSubmissionsClosure, fetch_sec_submissions_closure
+from .ticker_cik import (
+    SEC_TICKER_CIK_URL,
+    SecTickerCikAmbiguousError,
+    SecTickerCikMapping,
+    SecTickerCikNotFoundError,
+    SecTickerCikResolution,
+    fetch_sec_ticker_cik,
+    fetch_sec_ticker_cik_mapping,
+    resolve_sec_ticker_cik,
+)
 from .unit_evidence import SecFinancialUnitEvidence
 from .xbrl_package import (
     SecXbrlPackage,
@@ -282,6 +292,7 @@ from .xbrl_package_financials import (
 )
 
 __all__ = [
+    "SEC_TICKER_CIK_URL",
     "AdvisoryLock",
     "AppendOnlyIndex",
     "Deadline",
@@ -423,6 +434,10 @@ __all__ = [
     "SecStructuralQualityReport",
     "SecSubmissionsClosure",
     "SecTargetMetricInputs",
+    "SecTickerCikAmbiguousError",
+    "SecTickerCikMapping",
+    "SecTickerCikNotFoundError",
+    "SecTickerCikResolution",
     "SecTransportEvidence",
     "SecUnavailableResult",
     "SecUnitEvidenceError",
@@ -454,6 +469,8 @@ __all__ = [
     "extract_from_artifact",
     "fetch_sec_discovery_batch",
     "fetch_sec_submissions_closure",
+    "fetch_sec_ticker_cik",
+    "fetch_sec_ticker_cik_mapping",
     "historical_basenames",
     "historical_submission_url",
     "latest_completed_quarter",
@@ -479,6 +496,7 @@ __all__ = [
     "qualify_sec_nport",
     "quarter_range",
     "read_member",
+    "resolve_sec_ticker_cik",
     "resolve_submissions",
     "restore_sec_document_financial_production",
     "restore_sec_document_source_package",

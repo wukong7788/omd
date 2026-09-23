@@ -61,6 +61,22 @@ class YFinanceValuationSnapshot:
 
 
 @dataclass(frozen=True)
+class YFinanceFundamentalsInfoFields:
+    """Selected provider-native fields from ``Ticker.info``.
+
+    Numeric values retain their Python int/float representation and Yahoo's
+    reported units. ``regular_market_time`` remains the Unix-seconds source
+    timestamp; consumers choose their own display-time conversion.
+    """
+
+    regular_market_time: int | float | None = None
+    regular_market_price: int | float | None = None
+    current_price: int | float | None = None
+    total_revenue: int | float | None = None
+    financial_currency: str | None = None
+
+
+@dataclass(frozen=True)
 class YFinanceQuarterlyFinancials:
     """Quarterly financial metrics (latest quarter and prior year same quarter YoY)."""
 
@@ -134,6 +150,9 @@ class YFinanceSymbolFundamentals:
     valuation: YFinanceValuationSnapshot = field(default_factory=YFinanceValuationSnapshot)
     financials: YFinanceQuarterlyFinancials = field(default_factory=YFinanceQuarterlyFinancials)
     estimates: YFinanceAnalystEstimates = field(default_factory=YFinanceAnalystEstimates)
+    source_info: YFinanceFundamentalsInfoFields = field(
+        default_factory=YFinanceFundamentalsInfoFields, kw_only=True
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Flatten into a dictionary matching consumer schema."""
@@ -154,6 +173,7 @@ class YFinanceSymbolFundamentals:
             out.update(asdict(self.financials))
         if self.estimates:
             out.update(asdict(self.estimates))
+        out["source_info"] = asdict(self.source_info)
         return out
 
 
@@ -271,6 +291,21 @@ def parse_symbol_fundamentals(
 ) -> YFinanceSymbolFundamentals:
     """Parse raw yfinance objects into typed YFinanceSymbolFundamentals."""
     info = info or {}
+
+    def source_number(key: str) -> int | float | None:
+        value = info.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value if pd.notna(value) and abs(value) != float("inf") else None
+
+    source_currency = info.get("financialCurrency")
+    source_info = YFinanceFundamentalsInfoFields(
+        regular_market_time=source_number("regularMarketTime"),
+        regular_market_price=source_number("regularMarketPrice"),
+        current_price=source_number("currentPrice"),
+        total_revenue=source_number("totalRevenue"),
+        financial_currency=source_currency if isinstance(source_currency, str) else None,
+    )
     quote_type = str(info.get("quoteType") or "").strip().upper() or None
 
     is_excluded = False
@@ -529,12 +564,14 @@ def parse_symbol_fundamentals(
         valuation=valuation,
         financials=financials,
         estimates=estimates,
+        source_info=source_info,
     )
 
 
 __all__ = [
     "NON_EQUITY_QUOTE_TYPES",
     "YFinanceAnalystEstimates",
+    "YFinanceFundamentalsInfoFields",
     "YFinanceFundamentalsOutcome",
     "YFinanceFundamentalsRequest",
     "YFinanceFundamentalsResult",

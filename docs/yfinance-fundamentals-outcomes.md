@@ -19,8 +19,31 @@ Upstream exception text is omitted because it can contain request details.
 | `TRANSIENT_FAILURE` | No material data was obtained and a transient read failed after retry exhaustion. | Absent |
 | `PERMANENT_FAILURE` | No material data was obtained and a permanent read or parse failed. A permanent failure wins if both failure kinds occur. | Absent |
 
-“Material” means a parsed financial or valuation number, an actual report
-date, or a provider quote type that explicitly excludes a non-equity security.
+“Material” means a parsed financial or valuation number, a finite numeric
+source-info field, an actual report date, or a provider quote type that
+explicitly excludes a non-equity security.
+The selected source-native `Ticker.info` fields are also retained on
+`YFinanceSymbolFundamentals.source_info` as `YFinanceFundamentalsInfoFields`:
+`regular_market_time`, `regular_market_price`, `current_price`,
+`total_revenue`, and `financial_currency` correspond directly to Yahoo's
+`regularMarketTime`, `regularMarketPrice`, `currentPrice`, `totalRevenue`, and
+`financialCurrency`. Finite integer/float values retain their Python numeric
+type and Yahoo's units (including unscaled revenue); the currency string
+retains its provider spelling. Missing, nonnumeric, boolean, NaN, or infinite
+numeric values become `None`. The market timestamp remains the original
+Unix-seconds value; consumers decide how to render it. It is Yahoo's quote
+time, distinct from `result.provenance.retrieved_at`, which is the local fetch
+time; neither timestamp alone establishes point-in-time availability. Existing
+`valuation.quote_price` and `quote_time` remain normalized OMD fields and keep
+their existing selection rules.
+
+The `info` read status and attempts remain available at
+`symbol_results[symbol].sources["info"]`. These source-native fields are part
+of the material-data test, except `regular_market_time`, which is retained
+metadata and does not make a record material by itself. An info response
+containing another numeric source field still returns a record and the
+ordinary per-symbol outcome.
+
 An empty `info` object, missing accessors, and empty statement/estimate frames
 are successful `EMPTY` reads, not failures. Missing fields stay `None`; no value
 is converted to zero. `fast_info` is supplemental and its empty state does not
@@ -59,6 +82,11 @@ for symbol in result.requested_symbols:
 ```
 
 ## Compatibility and release
+
+`YFinanceSymbolFundamentals.source_info` and its nested `to_dict()` export were
+added in `ohmydata==0.4.1`. They preserve selected Yahoo-native quote and
+revenue fields; a timestamp alone does not make an otherwise empty result
+material.
 
 `result.records`, `to_records()`, and `to_dataframe()` keep their shapes for
 material records. They now omit unavailable and failed symbols instead of

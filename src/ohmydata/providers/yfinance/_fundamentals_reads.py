@@ -148,4 +148,10 @@ def has_material_data(record: YFinanceSymbolFundamentals) -> bool:
                 continue
             if isinstance(value, (int, float)) and pd.notna(value):
                 return True
+    for field in fields(record.source_info):
+        if field.name == "regular_market_time":
+            continue
+        value = getattr(record.source_info, field.name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and pd.notna(value):
+            return True
     return False

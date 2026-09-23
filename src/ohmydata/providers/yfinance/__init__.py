@@ -25,6 +25,7 @@ from .errors import (
 from .fundamentals import (
     NON_EQUITY_QUOTE_TYPES,
     YFinanceAnalystEstimates,
+    YFinanceFundamentalsInfoFields,
     YFinanceFundamentalsOutcome,
     YFinanceFundamentalsRequest,
     YFinanceFundamentalsResult,
@@ -64,6 +65,7 @@ __all__ = [
     "YFinanceDailyBarsResult",
     "YFinanceEmptyBatchError",
     "YFinanceError",
+    "YFinanceFundamentalsInfoFields",
     "YFinanceFundamentalsOutcome",
     "YFinanceFundamentalsRequest",
     "YFinanceFundamentalsResult",

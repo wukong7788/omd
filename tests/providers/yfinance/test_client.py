@@ -287,6 +287,27 @@ class TestClientFundamentals:
         )
         assert "earnings_estimate" not in symbol.sources
 
+    def test_info_source_fields_alone_retain_material_record_and_info_evidence(self):
+        ticker = SimpleNamespace(
+            info={
+                "regularMarketTime": 1_788_278_400,
+                "regularMarketPrice": 123.45,
+                "totalRevenue": 987_654_321,
+                "financialCurrency": "USD",
+            }
+        )
+        result = self._client(lambda symbol: ticker).fetch_fundamentals(
+            YFinanceFundamentalsRequest(
+                symbols=("QUOTE",), include_financials=False, include_estimates=False
+            )
+        )
+
+        symbol = result.symbol_results["QUOTE"]
+        assert symbol.record is result.records["QUOTE"]
+        assert symbol.record.source_info.total_revenue == 987_654_321
+        assert symbol.record.source_info.regular_market_time == 1_788_278_400
+        assert symbol.sources["info"].status == YFinanceFundamentalsSourceStatus.PRESENT
+
     def test_success_after_transient_retry_records_attempts(self):
         calls = 0
         delays = []
