@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.4.3 — 2026-09-25
+
+- Add `fetch_sec_canonical_quarters`, a SEC-only quarterly financial API for
+  operating companies. It retains SEC companyfacts and submissions observations,
+  returns up to eight fiscal quarters with typed Revenue, Gross Profit, Operating
+  Income, and GAAP diluted EPS fields, and keeps exact native concept, unit,
+  period, accession, acceptance time, and official filing URL evidence. Missing,
+  ambiguous amendment, incomplete coverage, unresolved period, and eligibility
+  outcomes remain distinct. The mapping is explicitly versioned; no Yahoo data
+  or adjusted EPS is substituted.
+- Add a lower-level SEC quarterly projection for caller-supplied filing vintages
+  and explicit period evidence. Q4 additive USD flows require compatible FY and
+  Q3 year-to-date facts; diluted EPS is never obtained by subtraction.
+- Raise the bounded SEC submissions history limit from 16 to 256 pages, fixing
+  issuers whose official closures exceed 16 pages while retaining byte and row
+  limits. Add root-window incremental discovery with explicit reconciliation
+  status; partial root candidates cannot be committed as a complete discovery
+  batch.
+
 ## 0.4.2 — 2026-09-23
 
 - Add an optional offline XNYS exchange-calendar API with bounded session

@@ -10,7 +10,7 @@ from typing import Any
 
 from ...core import RequestSpec, SnapshotMode, SnapshotStore
 from ._event_discovery_models import SecDiscoverySource
-from .edgar import historical_basenames, historical_submission_url
+from .edgar import _MAX_HISTORICAL_FILES, historical_basenames, historical_submission_url
 from .errors import (
     PermanentProviderError,
     ResourceLimitError,
@@ -91,6 +91,8 @@ def fetch_sec_submissions_closure(
     if not isinstance(filings, dict) or not isinstance(filings.get("files"), list):
         raise SchemaMismatchError("historical submissions references missing")
     names = historical_basenames(root, cik)
+    if len(names) > _MAX_HISTORICAL_FILES:
+        raise ResourceLimitError("historical submissions file limit exceeded")
     observed = len(root_bytes)
     rows: dict[str, dict[str, object]] = {}
     row_count = 0
@@ -140,4 +142,40 @@ def fetch_sec_submissions_closure(
     return SecSubmissionsClosure(cik, root_source, tuple(children))
 
 
-__all__ = ["SecSubmissionsClosure", "fetch_sec_submissions_closure"]
+def fetch_sec_submissions_root(
+    store: SnapshotStore,
+    client: SecHttpClient,
+    cik: str,
+    *,
+    utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> SecDiscoverySource:
+    """Fetch and retain only the current root for bounded incremental discovery."""
+    if type(cik) is not str or re.fullmatch(r"[0-9]{10}", cik) is None:
+        raise ValueError("CIK must be ten digits")
+    if not isinstance(store, SnapshotStore) or not isinstance(client, SecHttpClient):
+        raise TypeError("invalid submissions fetch dependencies")
+    root_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    body = _fetch(client, root_url, _SOURCE_LIMIT)
+    root = _strict_json(body)
+    filings = root.get("filings")
+    if not isinstance(filings, dict) or not isinstance(filings.get("files"), list):
+        raise SchemaMismatchError("historical submissions references missing")
+    rows = _submission_rows(root, cik, child=False)
+    if len(rows) > _ROW_LIMIT:
+        raise ResourceLimitError("filing row limit exceeded")
+    historical_basenames(root, cik)
+    observation = store.observe(
+        RequestSpec("sec", "edgar_submissions", {"cik": cik}),
+        body,
+        utc_now(),
+        _SERIALIZATION,
+        SnapshotMode.APPEND,
+    )
+    return SecDiscoverySource(root_url, observation)
+
+
+__all__ = [
+    "SecSubmissionsClosure",
+    "fetch_sec_submissions_closure",
+    "fetch_sec_submissions_root",
+]

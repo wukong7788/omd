@@ -14,6 +14,7 @@ from ohmydata.providers.sec import (
     SecEventDiscoveryLedger,
     SecHttpClient,
     fetch_sec_discovery_batch,
+    fetch_sec_incremental_discovery,
 )
 from ohmydata.providers.sec.errors import SchemaMismatchError, TransientProviderError
 
@@ -103,6 +104,37 @@ def test_fetches_complete_closure_and_appends_cursor(tmp_path):
     assert len(ledger.load()[1]) == 4
 
 
+def test_fetches_more_than_sixteen_history_pages_for_reconciliation(tmp_path):
+    store = SnapshotStore(tmp_path / "snapshots")
+    root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
+    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 18))
+    pages = {
+        root_url: {
+            "cik": "0000000001",
+            "filings": {
+                "recent": _rows(["0000000001-24-000001"], ["10-Q"]),
+                "files": [{"name": name} for name in names],
+            },
+        }
+    }
+    for index, name in enumerate(names, start=2):
+        pages[f"https://data.sec.gov/submissions/{name}"] = {
+            "cik": "0000000001",
+            **_rows([f"0000000001-24-{index:06}"], ["10-Q"]),
+        }
+    client = FakeClient(pages)
+    batch = fetch_sec_discovery_batch(
+        client,
+        store,
+        policy=_policy(),
+        prior_cursor=None,
+        clock=lambda: datetime(2024, 5, 2, tzinfo=UTC),
+    )
+    assert len(batch.sources) == 18
+    assert len(batch.events) == 18
+    assert len(client.calls) == 18
+
+
 def test_failed_history_does_not_advance_ledger(tmp_path):
     store = SnapshotStore(tmp_path / "snapshots")
     root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
@@ -166,3 +198,73 @@ def test_body_read_failure_is_transient(tmp_path):
             prior_cursor=None,
             clock=lambda: datetime(2024, 5, 2, tzinfo=UTC),
         )
+
+
+def test_root_only_incremental_proves_window_and_skips_history_pages(tmp_path):
+    store = SnapshotStore(tmp_path / "snapshots")
+    root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
+    name = "CIK0000000001-submissions-001.json"
+    client = FakeClient(
+        {
+            root_url: {
+                "cik": "0000000001",
+                "filings": {
+                    "recent": _rows(["0000000001-24-000001"], ["10-Q"]),
+                    "files": [{"name": name, "filingFrom": "2020-01-01", "filingTo": "2020-12-31"}],
+                },
+            }
+        }
+    )
+    policy = SecDiscoveryPolicy(
+        "1",
+        ("10-Q",),
+        datetime(2024, 5, 1, 12, tzinfo=UTC),
+        datetime(2024, 5, 2, tzinfo=UTC),
+        timedelta(0),
+        SecDiscoveryMode.INCREMENTAL,
+        "root-window-v1",
+    )
+    result = fetch_sec_incremental_discovery(
+        client,
+        store,
+        policy=policy,
+        prior_cursor=None,
+        clock=lambda: datetime(2024, 5, 2, tzinfo=UTC),
+    )
+    assert result.status.value == "NEEDS_RECONCILE"
+    assert result.window is not None and len(result.window.events) == 1
+    assert result.window.coverage_semantics == "SEC_RECENT_ROOT_WINDOW"
+    assert result.covered_from == datetime(2024, 5, 1, 12, tzinfo=UTC)
+    assert [call[0] for call in client.calls] == [root_url]
+
+
+def test_root_only_incremental_requires_reconcile_before_coverage_boundary(tmp_path):
+    store = SnapshotStore(tmp_path / "snapshots")
+    root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
+    client = FakeClient(
+        {
+            root_url: {
+                "cik": "0000000001",
+                "filings": {"recent": _rows(["0000000001-24-000001"], ["10-Q"]), "files": []},
+            }
+        }
+    )
+    policy = SecDiscoveryPolicy(
+        "1",
+        ("10-Q",),
+        datetime(2024, 4, 30, tzinfo=UTC),
+        datetime(2024, 5, 2, tzinfo=UTC),
+        timedelta(0),
+        SecDiscoveryMode.INCREMENTAL,
+        "root-window-v1",
+    )
+    result = fetch_sec_incremental_discovery(
+        client,
+        store,
+        policy=policy,
+        prior_cursor=None,
+        clock=lambda: datetime(2024, 5, 2, tzinfo=UTC),
+    )
+    assert result.status.value == "NEEDS_RECONCILE"
+    assert result.window is None
+    assert result.reason is not None and "coverage boundary" in result.reason

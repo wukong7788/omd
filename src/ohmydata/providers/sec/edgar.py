@@ -12,6 +12,8 @@ from .errors import CoverageError, SchemaMismatchError
 
 _HIST = re.compile(r"^CIK[0-9]{10}-submissions-[0-9]{3}\.json$")
 _ACCESSION = re.compile(r"^[0-9]{10}-[0-9]{2}-[0-9]{6}$")
+_MAX_HISTORICAL_FILES = 256
+_MAX_HISTORICAL_ROWS = 100_000
 _COLUMNS = (
     "accessionNumber",
     "form",
@@ -133,8 +135,9 @@ def resolve_submissions(
     required_accessions: tuple[str, ...],
     *,
     load: Callable[[str], dict[str, Any] | bytes | SecPayloadReceipt],
-    max_files: int = 16,
+    max_files: int = _MAX_HISTORICAL_FILES,
     max_bytes: int = 128 * 1024**2,
+    max_rows: int = _MAX_HISTORICAL_ROWS,
 ) -> dict[str, dict[str, Any]]:
     """Resolve required filings through bounded official history files.
 
@@ -142,8 +145,18 @@ def resolve_submissions(
     The callback is deliberately injected so the parser remains offline-testable.
     """
     required = tuple(required_accessions)
+    if type(max_files) is not int or not 1 <= max_files <= _MAX_HISTORICAL_FILES:
+        raise ValueError("max_files must be in 1..256")
+    if type(max_bytes) is not int or not 1 <= max_bytes <= 128 * 1024**2:
+        raise ValueError("max_bytes must be in 1..134217728")
+    if type(max_rows) is not int or max_rows <= 0 or max_rows > _MAX_HISTORICAL_ROWS:
+        raise ValueError("max_rows must be in 1..100000")
     found: dict[str, dict[str, Any]] = {}
+    row_count = 0
     for row in _rows(payload, cik):
+        row_count += 1
+        if row_count > max_rows:
+            raise SchemaMismatchError("submissions row limit exceeded")
         if row["accessionNumber"] in required:
             found[row["accessionNumber"]] = row
     if set(found) == set(required):
@@ -176,6 +189,9 @@ def resolve_submissions(
         if observed > max_bytes:
             raise SchemaMismatchError("historical submissions bytes exceeded")
         for row in _child_rows(child, cik):
+            row_count += 1
+            if row_count > max_rows:
+                raise SchemaMismatchError("submissions row limit exceeded")
             if row["accessionNumber"] in required:
                 old = found.get(row["accessionNumber"])
                 if old is not None and old != row:
@@ -202,7 +218,7 @@ def historical_basenames(payload: dict[str, Any], cik: str) -> tuple[str, ...]:
     _validate_cik(payload, cik)
     filings = cast(dict[str, Any], payload.get("filings", {}))
     refs = cast(list[Any], filings.get("files", []))
-    if len(refs) > 16:
+    if len(refs) > _MAX_HISTORICAL_FILES:
         raise SchemaMismatchError("historical file limit exceeded")
     names: list[str] = []
     for raw_ref in refs:

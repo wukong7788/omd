@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Any, Never, cast
 
 from ...core.snapshot import SnapshotStore
@@ -17,12 +19,15 @@ from ._event_discovery_models import (
     SecDiscoverySource,
     SecFilingDiscoveryEvent,
     SecFilingEventKind,
+    SecRootCoverageStatus,
+    SecRootDiscoveryResult,
+    SecRootDiscoveryWindow,
     _canonical,
     _parse_stamp,
     _stamp,
     canonical_batch_bytes,
 )
-from .edgar import historical_basenames, historical_submission_url
+from .edgar import _MAX_HISTORICAL_FILES, historical_basenames, historical_submission_url
 from .errors import CoverageError, ResourceLimitError, SchemaMismatchError
 
 _SCHEMA = 1
@@ -170,7 +175,7 @@ class _DiscoveryReplayCache:
 def _bounded_sources(values: Iterable[SecDiscoverySource]) -> tuple[SecDiscoverySource, ...]:
     iterator = iter(values)
     result: list[SecDiscoverySource] = []
-    for _ in range(16):
+    for _ in range(_MAX_HISTORICAL_FILES):
         try:
             result.append(next(iterator))
         except StopIteration:
@@ -179,7 +184,7 @@ def _bounded_sources(values: Iterable[SecDiscoverySource]) -> tuple[SecDiscovery
         next(iterator)
     except StopIteration:
         return tuple(result)
-    raise ResourceLimitError("historical source limit exceeded")
+    raise ResourceLimitError(f"historical source limit exceeded (maximum {_MAX_HISTORICAL_FILES})")
 
 
 def _validate_source(
@@ -287,6 +292,7 @@ def discover_sec_filing_events(
     policy: SecDiscoveryPolicy,
     prior_cursor: SecDiscoveryCursor | None,
     _replay_cache: _DiscoveryReplayCache | None = None,
+    _root_only: bool = False,
 ) -> SecDiscoveryBatch:
     """Replay a complete retained SEC submissions closure and emit selected events."""
     if (
@@ -306,6 +312,8 @@ def discover_sec_filing_events(
         raise ValueError("incremental window excludes declared overlap")
     _replay_cache = _replay_cache or _DiscoveryReplayCache(store)
     children = _bounded_sources(historical_sources)
+    if _root_only and children:
+        raise ValueError("root-only discovery cannot include historical sources")
     padded = policy.cik.zfill(10)
     root, root_bytes = _validate_source(
         store, root_source, policy.cik, root=True, _replay_cache=_replay_cache
@@ -314,13 +322,14 @@ def discover_sec_filing_events(
     if not isinstance(filings, Mapping) or not isinstance(filings.get("files"), (list, tuple)):
         raise SchemaMismatchError("historical submissions references missing")
     names = historical_basenames(root, padded)
-    if len(names) != len(children):
-        raise CoverageError("historical submissions closure mismatch")
-    expected = tuple(historical_submission_url(padded, name) for name in names)
-    if tuple(sorted(source.url for source in children)) != tuple(sorted(expected)) or len(
-        {source.url for source in children}
-    ) != len(children):
-        raise CoverageError("historical submissions closure mismatch")
+    if not _root_only:
+        if len(names) != len(children):
+            raise CoverageError("historical submissions closure mismatch")
+        expected = tuple(historical_submission_url(padded, name) for name in names)
+        if tuple(sorted(source.url for source in children)) != tuple(sorted(expected)) or len(
+            {source.url for source in children}
+        ) != len(children):
+            raise CoverageError("historical submissions closure mismatch")
     children = tuple(sorted(children, key=lambda source: source.url))
     names_by_url = {historical_submission_url(padded, name): name for name in names}
     payloads = [(root_source, root, False, root_bytes)]
@@ -446,6 +455,94 @@ def discover_sec_filing_events(
     )
 
 
+def discover_sec_incremental_events_from_root(
+    store: SnapshotStore,
+    root_source: SecDiscoverySource,
+    *,
+    policy: SecDiscoveryPolicy,
+    prior_cursor: SecDiscoveryCursor | None,
+    _replay_cache: _DiscoveryReplayCache | None = None,
+) -> SecRootDiscoveryResult:
+    """Discover from one retained root when its recent rows prove the full window.
+
+    SEC root `files` date ranges describe filing dates, not acceptance timestamps,
+    and are not used to establish the covered lower boundary. Windows extending
+    before the oldest acceptance in the recent rows require full reconciliation.
+    """
+    if policy.mode is not SecDiscoveryMode.INCREMENTAL:
+        raise ValueError("root-only discovery requires incremental mode")
+    cache = _replay_cache or _DiscoveryReplayCache(store)
+    root, _ = _validate_source(store, root_source, policy.cik, root=True, _replay_cache=cache)
+    body_rows = _submission_rows(root, policy.cik.zfill(10), child=False)
+    accepted: list[datetime] = []
+    for row in body_rows:
+        accepted.append(_parse_stamp(row.get("acceptanceDateTime"), "acceptance timestamp"))
+    fetched_at = root_source.observation.snapshot_fetched_at.astimezone(UTC)
+    if not accepted:
+        return SecRootDiscoveryResult(
+            SecRootCoverageStatus.NEEDS_RECONCILE,
+            root_source,
+            None,
+            fetched_at,
+            None,
+            "root has no recent acceptance rows to prove coverage",
+        )
+    ordered = all(left >= right for left, right in pairwise(accepted))
+    oldest = min(accepted)
+    newest = max(accepted)
+    reason: str | None = None
+    if not ordered:
+        reason = "root acceptance rows are not in descending timestamp order"
+    elif policy.acceptance_upper > fetched_at:
+        reason = "requested window extends beyond root observation time"
+    elif policy.acceptance_lower < oldest:
+        reason = "requested window begins before the root recent-row coverage boundary"
+    if reason is not None:
+        return SecRootDiscoveryResult(
+            SecRootCoverageStatus.NEEDS_RECONCILE,
+            root_source,
+            oldest,
+            min(fetched_at, newest),
+            None,
+            reason,
+        )
+    batch = discover_sec_filing_events(
+        store,
+        root_source,
+        (),
+        policy=policy,
+        prior_cursor=prior_cursor,
+        _replay_cache=cache,
+        _root_only=True,
+    )
+    window = SecRootDiscoveryWindow(
+        policy,
+        prior_cursor,
+        root_source,
+        batch.events,
+        batch.candidate_cursor,
+        oldest,
+        fetched_at,
+    )
+    refs = historical_basenames(root, policy.cik.zfill(10))
+    if refs:
+        return SecRootDiscoveryResult(
+            SecRootCoverageStatus.NEEDS_RECONCILE,
+            root_source,
+            oldest,
+            fetched_at,
+            window,
+            "root events cover recent rows only; historical references remain unscanned",
+        )
+    return SecRootDiscoveryResult(
+        SecRootCoverageStatus.COMPLETE,
+        root_source,
+        oldest,
+        fetched_at,
+        window,
+    )
+
+
 __all__ = [
     "SecDiscoveryBatch",
     "SecDiscoveryCursor",
@@ -454,6 +551,9 @@ __all__ = [
     "SecDiscoverySource",
     "SecFilingDiscoveryEvent",
     "SecFilingEventKind",
+    "SecRootCoverageStatus",
+    "SecRootDiscoveryResult",
     "canonical_batch_bytes",
     "discover_sec_filing_events",
+    "discover_sec_incremental_events_from_root",
 ]

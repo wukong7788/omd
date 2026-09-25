@@ -11,10 +11,11 @@ from ._event_discovery_models import (
     SecDiscoveryCursor,
     SecDiscoveryMode,
     SecDiscoveryPolicy,
+    SecRootDiscoveryResult,
 )
-from .event_discovery import discover_sec_filing_events
+from .event_discovery import discover_sec_filing_events, discover_sec_incremental_events_from_root
 from .http import SecHttpClient
-from .submissions import fetch_sec_submissions_closure
+from .submissions import fetch_sec_submissions_closure, fetch_sec_submissions_root
 
 
 def fetch_sec_discovery_batch(
@@ -56,4 +57,29 @@ def fetch_sec_discovery_batch(
     )
 
 
-__all__ = ["fetch_sec_discovery_batch"]
+def fetch_sec_incremental_discovery(
+    client: SecHttpClient,
+    store: SnapshotStore,
+    *,
+    policy: SecDiscoveryPolicy,
+    prior_cursor: SecDiscoveryCursor | None,
+    clock: Callable[[], datetime],
+) -> SecRootDiscoveryResult:
+    """Fetch one root and report whether its recent rows cover the full window.
+
+    NEEDS_RECONCILE carries no batch, so callers cannot mistake a partial root
+    projection for a complete filing-event scan.
+    """
+    if not isinstance(client, SecHttpClient) or not isinstance(store, SnapshotStore):
+        raise TypeError("client and store must be SEC HTTP and snapshot instances")
+    if type(policy) is not SecDiscoveryPolicy or not callable(clock):
+        raise TypeError("invalid discovery policy or clock")
+    if prior_cursor is not None and type(prior_cursor) is not SecDiscoveryCursor:
+        raise TypeError("invalid prior cursor")
+    root_source = fetch_sec_submissions_root(store, client, policy.cik.zfill(10), utc_now=clock)
+    return discover_sec_incremental_events_from_root(
+        store, root_source, policy=policy, prior_cursor=prior_cursor
+    )
+
+
+__all__ = ["fetch_sec_discovery_batch", "fetch_sec_incremental_discovery"]

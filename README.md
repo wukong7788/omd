@@ -707,6 +707,71 @@ metrics = compute_sec_metric_graph(
 final_metric = metrics.final
 ```
 
+### SEC-only canonical quarterly facts
+
+`fetch_sec_canonical_quarters` accepts an injected SEC HTTP client and snapshot
+store. It resolves a ticker through a retained SEC mapping, checks the issuer's
+submissions root, retains its companyfacts response, and fetches only history
+pages needed to verify the target filings. It returns up to eight chronological
+fiscal quarter slots so the last four can be displayed alongside the prior-year
+comparables. The caller remains responsible for its universe, decision cutoff,
+storage and publication.
+
+```python
+from ohmydata.providers.sec import (
+    SecCanonicalFieldStatus,
+    SecCanonicalMetric,
+    SecCompanyEligibilityStatus,
+    SecHttpClient,
+    fetch_sec_canonical_quarters,
+)
+
+result = fetch_sec_canonical_quarters(
+    "AAPL", SecHttpClient(sec_user_agent), snapshot_store, count=8
+)
+if result.eligibility.status is SecCompanyEligibilityStatus.SEC_COMPANY:
+    if result.periods_resolved and result.coverage_complete:
+        for quarter in result.slots[-4:]:
+            revenue = quarter.field(SecCanonicalMetric.REVENUE)
+            if revenue.status is SecCanonicalFieldStatus.PRESENT:
+                print(quarter.fiscal_year, quarter.fiscal_quarter, revenue.value, revenue.unit)
+```
+
+The versioned mapping covers SEC `us-gaap` Revenue, Gross Profit, Operating
+Income and **GAAP diluted EPS** concepts. Values retain native USD or USD/shares
+units; no billions conversion is implicit. `GAAP_DILUTED_EPS` is not adjusted
+EPS and must not be put into a consumer's `adj_eps` field. Some issuers,
+including banks that report net revenue through other concepts, will have
+`MISSING` fields until an explicitly versioned mapping covers their semantics.
+
+Each field reports `PRESENT`, `MISSING`, `AMBIGUOUS` or `COVERAGE_INCOMPLETE`.
+Conflicting aliases or amendments remain alternatives. For additive USD flow
+metrics, Q4 uses a matched 10-K fiscal year fact minus a Q3 year-to-date 10-Q
+fact with the same native concept, unit and start date. This high-level API
+keeps amendments as alternatives and does not pair them in that subtraction.
+Diluted EPS is never subtracted; it appears for Q4 only when SEC supplies an
+explicit three-month fact. Field evidence retains native tag, unit, start/end dates,
+fiscal focus, accession, filing acceptance time, companyfacts observation ID
+and the official filing URL when the submissions document name is usable.
+Derived Q4 values retain both source facts in `source_evidence`.
+
+Check `coverage_complete`, `periods_resolved`, `uncovered_accessions` and
+`unresolved_period_accessions` before publishing any result. `NON_SEC` means
+absent from the specific retained SEC ticker mapping, not a universal proof
+that a security has no SEC filing; `NON_COMPANY` and `UNKNOWN` are distinct.
+The SEC mapping/root alone does not certify that a ticker is not an ETF, so
+consumers should apply their own security-type eligibility rule. Eligibility
+transient failures are typed; companyfacts transport or schema failures raise
+provider errors. Filing acceptance is source timing evidence, not proof of
+first public availability or a consumer publication event.
+
+For already retained native SEC financial vintages,
+`project_sec_quarterly_facts` is a lower-level projection. Callers supply
+exact, source-backed fiscal-period labels and choose additive USD concepts;
+`derive_sec_quarterly_period_evidence` returns `UNRESOLVED` when the supplied
+source cannot prove an independent quarter. This entry point does not
+authenticate arbitrary caller-supplied vintages.
+
 `discover_sec_filing_events` replays a retained SEC submissions root and every
 historical file declared by that root. The caller supplies a CIK, selected forms,
 UTC acceptance window, overlap duration and incremental/reconciliation mode.
@@ -724,7 +789,7 @@ columns and duplicate accession metadata, then retains exact response bytes as
 append-only observations. A failed later page leaves earlier observations
 available for inspection but returns no complete closure. A new call fetches a
 fresh root and all pages it advertises; callers choose their own schedule and
-reconciliation windows. Up to 16 history pages, 8 MiB per page, 64 MiB total and
+reconciliation windows. Up to 256 history pages, 8 MiB per page, 64 MiB total and
 100,000 filing rows are supported; exceeding a bound fails explicitly.
 
 ```python
@@ -776,6 +841,12 @@ entire committed chain. An exact retry returns its original receipt, even after
 later appends. The ledger records discovery; execution, retry scheduling and
 consumer publication remain separate. Resource caps and snapshot request
 bindings are specified in the [event discovery contract](docs/plans/sec-event-discovery-ledger.md).
+
+For a recent incremental poll, `fetch_sec_incremental_discovery` fetches just
+the submissions root. It returns a typed root window with candidate events and
+`COMPLETE` or `NEEDS_RECONCILE` coverage. Historical references are not silently
+treated as scanned; a `NEEDS_RECONCILE` result is not a ledger-committable batch.
+Use `fetch_sec_discovery_batch` for a complete reconciliation when required.
 
 ```python
 from ohmydata.providers.sec import SecEventDiscoveryLedger, discover_sec_filing_events

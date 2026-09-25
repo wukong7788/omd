@@ -299,6 +299,47 @@ def test_edgar_historical_loader_accounts_exact_wire_bytes() -> None:
     assert res_direct[accession]["form"] == "NPORT-P"
 
 
+def test_edgar_resolver_reaches_history_after_sixteen_pages() -> None:
+    import json
+
+    target = "0000000001-24-000019"
+    names = [f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 18)]
+    root_recent = {
+        "accessionNumber": ["0000000001-24-000001"],
+        "form": ["NPORT-P"],
+        "filingDate": ["2024-01-01"],
+        "reportDate": ["2023-12-31"],
+        "primaryDocument": ["x.htm"],
+        "acceptanceDateTime": ["20240101120000"],
+    }
+    root = {
+        "cik": "0000000001",
+        "filings": {"recent": root_recent, "files": [{"name": name} for name in names]},
+    }
+    requested_row = {
+        "accessionNumber": [target],
+        "form": ["NPORT-P"],
+        "filingDate": ["2024-05-01"],
+        "reportDate": ["2024-03-31"],
+        "primaryDocument": ["target.htm"],
+        "acceptanceDateTime": ["20240501120000"],
+    }
+    loaded: list[str] = []
+
+    def load(url: str) -> bytes:
+        loaded.append(url)
+        if url.endswith(names[-1]):
+            return json.dumps(requested_row).encode()
+        return json.dumps(
+            {key: [value[0]] for key, value in requested_row.items()}
+            | {"accessionNumber": [f"0000000001-24-{len(loaded):06}"]}
+        ).encode()
+
+    result = resolve_submissions(root, "0000000001", (target,), load=load)
+    assert result[target]["accessionNumber"] == target
+    assert len(loaded) == 17
+
+
 def test_resolver_accepted_policy_and_unknown_acceptance() -> None:
     v = SecFundHoldingVintage(
         "0000000001-24-000001",

@@ -24,6 +24,7 @@ _MAX_SOURCE_BYTES = 8 * 1024**2
 _MAX_TOTAL_BYTES = 64 * 1024**2
 _MAX_ROWS = 100_000
 _MAX_EVENTS = 10_000
+_MAX_HISTORICAL_SOURCES = 256
 _MAX_STRING = 1024
 _MAX_JSON_DEPTH = 64
 _MAX_JSON_NODES = 500_000
@@ -36,6 +37,11 @@ if TYPE_CHECKING:
 class SecDiscoveryMode(str, Enum):
     INCREMENTAL = "INCREMENTAL"
     RECONCILE = "RECONCILE"
+
+
+class SecRootCoverageStatus(str, Enum):
+    COMPLETE = "COMPLETE"
+    NEEDS_RECONCILE = "NEEDS_RECONCILE"
 
 
 class SecFilingEventKind(str, Enum):
@@ -339,7 +345,7 @@ class SecDiscoveryBatch:
             or payload["schema_version"] != _SCHEMA
             or not isinstance(payload["policy"], Mapping)
             or not isinstance(payload["sources"], list)
-            or len(payload["sources"]) > 17
+            or len(payload["sources"]) > _MAX_HISTORICAL_SOURCES + 1
             or any(not isinstance(item, Mapping) for item in payload["sources"])
         ):
             raise SchemaMismatchError("invalid discovery batch")
@@ -362,6 +368,60 @@ class SecDiscoveryBatch:
         if canonical_batch_bytes(rebuilt) != _canonical(dict(payload)):
             raise SchemaMismatchError("discovery batch revalidation mismatch")
         return rebuilt
+
+
+@dataclass(frozen=True)
+class SecRootDiscoveryResult:
+    """Root-only incremental discovery with an explicit completeness boundary."""
+
+    status: SecRootCoverageStatus
+    root_source: SecDiscoverySource
+    covered_from: datetime | None
+    covered_through: datetime
+    window: SecRootDiscoveryWindow | None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not SecRootCoverageStatus:
+            raise TypeError("invalid root coverage status")
+        if type(self.root_source) is not SecDiscoverySource:
+            raise TypeError("invalid root source")
+        through = _utc(self.covered_through, "covered_through")
+        object.__setattr__(self, "covered_through", through)
+        if self.covered_from is not None:
+            start = _utc(self.covered_from, "covered_from")
+            object.__setattr__(self, "covered_from", start)
+            if start > through:
+                raise ValueError("root coverage interval is inverted")
+        if self.status is SecRootCoverageStatus.COMPLETE:
+            if self.window is None or self.reason is not None:
+                raise ValueError("complete root discovery requires a root window and no reason")
+        elif not self.reason:
+            raise ValueError("incomplete root discovery requires a reason")
+
+
+@dataclass(frozen=True)
+class SecRootDiscoveryWindow:
+    """Events observed in the root recent rows, explicitly outside full-closure batches."""
+
+    policy: SecDiscoveryPolicy
+    prior_cursor: SecDiscoveryCursor | None
+    root_source: SecDiscoverySource
+    events: tuple[SecFilingDiscoveryEvent, ...]
+    candidate_cursor: SecDiscoveryCursor | None
+    covered_from: datetime
+    covered_through: datetime
+    coverage_semantics: str = "SEC_RECENT_ROOT_WINDOW"
+
+    def __post_init__(self) -> None:
+        if self.coverage_semantics != "SEC_RECENT_ROOT_WINDOW":
+            raise ValueError("invalid root window coverage semantics")
+        start = _utc(self.covered_from, "covered_from")
+        through = _utc(self.covered_through, "covered_through")
+        if start > through:
+            raise ValueError("root window interval is inverted")
+        object.__setattr__(self, "covered_from", start)
+        object.__setattr__(self, "covered_through", through)
 
 
 def _policy_from_payload(raw: Mapping[str, object]) -> SecDiscoveryPolicy:

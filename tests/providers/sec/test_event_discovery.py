@@ -89,6 +89,41 @@ def test_discovers_complete_snapshot_closure_and_rebuilds(tmp_path) -> None:
     assert canonical_batch_bytes(batch)
 
 
+def test_complete_closure_and_replay_include_more_than_sixteen_history_pages(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 18))
+    root = _source(
+        store,
+        "edgar_submissions",
+        {"cik": "0000000001", "required_accessions": ["0000000001-24-000001"]},
+        "https://data.sec.gov/submissions/CIK0000000001.json",
+        {
+            "cik": "0000000001",
+            "filings": {
+                "recent": _row("0000000001-24-000001"),
+                "files": [{"name": name} for name in names],
+            },
+        },
+    )
+    children = tuple(
+        _source(
+            store,
+            "edgar_submissions_history",
+            {"cik": "0000000001", "basename": name},
+            f"https://data.sec.gov/submissions/{name}",
+            {
+                "cik": "0000000001",
+                **_row(f"0000000001-24-{index + 2:06}", "10-Q", None),
+            },
+        )
+        for index, name in enumerate(names)
+    )
+    batch = discover_sec_filing_events(store, root, children, policy=_policy(), prior_cursor=None)
+    assert len(batch.sources) == 18
+    assert len(batch.events) == 19
+    assert type(batch).from_canonical_payload(batch.canonical_payload(), store) == batch
+
+
 def test_fails_closed_for_missing_history_and_naive_acceptance(tmp_path) -> None:
     store = SnapshotStore(tmp_path)
     name = "CIK0000000001-submissions-001.json"
@@ -389,14 +424,14 @@ def test_exact_resource_boundaries_and_generator_sentinel(tmp_path, monkeypatch)
 
     def too_many():
         nonlocal yielded
-        for _ in range(17):
+        for _ in range(discovery._MAX_HISTORICAL_FILES + 1):
             yielded += 1
             yield root
 
     monkeypatch.setattr(discovery, "_MAX_SOURCE_BYTES", payload_size)
     with pytest.raises(ResourceLimitError):
         discover_sec_filing_events(store, root, too_many(), policy=_policy(), prior_cursor=None)
-    assert yielded == 17
+    assert yielded == discovery._MAX_HISTORICAL_FILES + 1
     monkeypatch.setattr(discovery, "_MAX_EVENTS", 1)
     with pytest.raises(ResourceLimitError):
         discover_sec_filing_events(store, root, (), policy=_policy(), prior_cursor=None)
