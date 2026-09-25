@@ -777,6 +777,57 @@ exact, source-backed fiscal-period labels and choose additive USD concepts;
 source cannot prove an independent quarter. This entry point does not
 authenticate arbitrary caller-supplied vintages.
 
+### TSMC SEC 6-K quarterly releases
+
+`fetch_sec_tsm_6k_quarters` is a separate, TSMC-specific source API. It resolves
+`TSM` through the SEC ticker mapping, verifies CIK `0001046179`, and retains the
+submissions root, filing index, and exact EX-99.1 earnings release for each
+selected 6-K. The parser requires the stated quarter, consolidated TIFRS basis,
+current-quarter table, and agreement between the table and release prose.
+The window ends at the latest matching earnings release in the current SEC
+submissions root. Missing quarters are exposed by `coverage_complete=False`
+and `missing_period_ends`; if no release matches, the result has no quarters
+and incomplete coverage. Source or schema failures raise typed provider errors.
+
+```python
+from ohmydata.providers.sec import (
+    SecHttpClient,
+    estimate_sec_tsm_6k_usd_from_revenue,
+    fetch_sec_tsm_6k_quarters,
+)
+
+result = fetch_sec_tsm_6k_quarters(SecHttpClient(sec_user_agent), snapshot_store, count=8)
+if result.coverage_complete:
+    for quarter in result.quarters:
+        reported = quarter.values
+        print(reported.period_end, reported.revenue_usd_billion, reported.diluted_eps_usd_per_adr)
+        estimated = estimate_sec_tsm_6k_usd_from_revenue(reported)  # Explicit opt-in
+        print(estimated.estimated_gross_profit_usd_million)
+```
+
+The issuer release reports USD revenue **in billions** and diluted EPS **per
+ADR**. Its current-quarter table reports net sales, gross profit, operating
+income, income before tax and net income **in millions of TWD**, and diluted EPS
+**per ordinary share in TWD**. Gross and operating margins are the disclosed
+percentages. The raw fields retain their stated precision and units. Consumers
+must not put TWD amounts into USD columns or treat the ADR EPS as EPS per
+ordinary share.
+
+The optional `estimate_sec_tsm_6k_usd_from_revenue` transform computes an
+*implied* TWD-per-USD rate from the two disclosed revenue figures, then applies
+it to the TWD income rows. Its USD amounts are rounded to whole USD millions
+and named `estimated_*`; reported USD revenue and USD-per-ADR EPS stay in
+separate `reported_*` fields. The release rounds USD revenue to 0.01 billion,
+so the implied rate and translated amounts are approximations, not SEC-reported
+USD facts. The next-quarter exchange-rate assumption in the release is not used.
+Callers that require only directly disclosed USD facts leave other USD columns
+missing rather than invoking this transform.
+
+This API does not generalize 6-K layouts to other issuers, decide whether a
+new quarter is due, or establish point-in-time public availability from SEC
+acceptance time alone. It does not reconcile 6-K/A amendments or search
+historical submissions pages. A changed release layout fails explicitly.
+
 `discover_sec_filing_events` replays a retained SEC submissions root and every
 historical file declared by that root. The caller supplies a CIK, selected forms,
 UTC acceptance window, overlap duration and incremental/reconciliation mode.

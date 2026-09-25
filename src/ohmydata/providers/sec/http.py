@@ -180,6 +180,8 @@ class SecHttpClient:
             if "zip" in accept.lower()
             else {"application/xml", "text/xml", "application/octet-stream"}
             if "xml" in accept.lower()
+            else {"text/html", "application/xhtml+xml"}
+            if accept.lower() == "text/html"
             else {"application/json"}
         )
         total_delay = 0.0

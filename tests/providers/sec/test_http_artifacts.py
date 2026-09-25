@@ -78,6 +78,14 @@ def test_http_injected_opener_headers_and_content_type() -> None:
         SecHttpClient("test", opener=_Opener(_Response(b"{}", "text/plain"))).open(
             "https://data.sec.gov/submissions/x", accept="application/json"
         )
+    html = SecHttpClient("test", opener=_Opener(_Response(b"<p>SEC</p>", "text/html"))).open(
+        "https://www.sec.gov/Archives/edgar/data/1/report.htm", accept="text/html"
+    )
+    assert html.body.read() == b"<p>SEC</p>"
+    with pytest.raises(PermanentProviderError, match="content type"):
+        SecHttpClient("test", opener=_Opener(_Response(b"{}"))).open(
+            "https://www.sec.gov/Archives/edgar/data/1/report.htm", accept="text/html"
+        )
 
 
 def test_default_opener_has_empty_proxy_handler(monkeypatch: pytest.MonkeyPatch) -> None:

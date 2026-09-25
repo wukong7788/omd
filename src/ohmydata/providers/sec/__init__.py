@@ -324,6 +324,15 @@ from .ticker_cik import (
     fetch_sec_ticker_cik_mapping,
     resolve_sec_ticker_cik,
 )
+from .tsm_6k import (
+    SecTsm6KEstimatedUsdValues,
+    SecTsm6KQuarter,
+    SecTsm6KQuarterlyResult,
+    SecTsm6KValues,
+    estimate_sec_tsm_6k_usd_from_revenue,
+    fetch_sec_tsm_6k_quarters,
+    parse_sec_tsm_6k_release,
+)
 from .unit_evidence import SecFinancialUnitEvidence
 from .xbrl_package import (
     SecXbrlPackage,
@@ -515,6 +524,10 @@ __all__ = [
     "SecTickerCikNotFoundError",
     "SecTickerCikResolution",
     "SecTransportEvidence",
+    "SecTsm6KEstimatedUsdValues",
+    "SecTsm6KQuarter",
+    "SecTsm6KQuarterlyResult",
+    "SecTsm6KValues",
     "SecUnavailableResult",
     "SecUnitEvidenceError",
     "SecXbrlPackage",
@@ -541,6 +554,7 @@ __all__ = [
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
+    "estimate_sec_tsm_6k_usd_from_revenue",
     "evaluate_sec_document_accounting",
     "evaluate_sec_observed_accounting",
     "evaluate_sec_structural_quality",
@@ -554,6 +568,7 @@ __all__ = [
     "fetch_sec_submissions_root",
     "fetch_sec_ticker_cik",
     "fetch_sec_ticker_cik_mapping",
+    "fetch_sec_tsm_6k_quarters",
     "historical_basenames",
     "historical_submission_url",
     "latest_completed_quarter",
@@ -564,6 +579,7 @@ __all__ = [
     "logical_table_hash",
     "parse_sec_companyfacts_payload",
     "parse_sec_date",
+    "parse_sec_tsm_6k_release",
     "parse_statement_rows",
     "parse_submissions",
     "partition_identity",

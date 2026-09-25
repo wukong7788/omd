@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.4.5 — 2026-09-25
+
+- Add a bounded SEC-only TSMC 6-K quarterly earnings-release API. It verifies
+  SEC ticker/CIK and exact EX-99.1 filing identity, retains immutable index
+  and exhibit observations, and parses up to eight consecutive quarters with
+  explicit gaps and fail-closed table/prose consistency checks. Native TWD
+  amounts and ordinary-share EPS remain separate from directly disclosed USD
+  revenue and USD-per-ADR EPS; fetching does not implicitly convert units.
+- Permit explicitly requested `text/html` responses through the SEC HTTP
+  client while retaining the existing HTTPS allowlist, redirect checks and
+  content-type validation.
+- Retain the release's TWD income-before-tax and net-income rows. Add an
+  explicitly invoked, approximate USD translation using the exchange
+  relationship implied by reported TWD and USD revenue; derived amounts are
+  labeled separately from directly disclosed USD revenue and ADR EPS.
+
 ## 0.4.4 — 2026-09-25
 
 - Accept SEC companyfacts CIKs represented as decimal strings while still
