@@ -41,7 +41,10 @@ def _fiscal_period(
 ) -> tuple[int, int] | None:
     if fact.accn != filing.accession_number or fact.form != filing.form:
         return None
-    if fact.filed > filing.accepted_at.date() or fact.end != filing.report_date:
+    # SEC filingDate is a provider field and can be one calendar day after the
+    # UTC acceptance date for late US filings. Do not infer it from UTC time.
+    filed_by = filing.filing_date or filing.accepted_at.date()
+    if fact.filed > filed_by or fact.end != filing.report_date:
         return None
     if fact.form.startswith("10-Q") and fact.fp in {"Q1", "Q2", "Q3"}:
         return fact.fy, int(fact.fp[-1])
@@ -116,7 +119,12 @@ def _periods_from_companyfacts(
 ) -> tuple[tuple[int, int], ...]:
     available: set[tuple[int, int]] = set()
     for fact in facts:
-        if acceptance_upper is not None and fact.filed > acceptance_upper.date():
+        # Candidate selection must admit the SEC filingDate after a late UTC
+        # acceptance. The exact accepted-at cutoff is enforced after joining
+        # submissions; this one-day allowance cannot publish a later filing.
+        if acceptance_upper is not None and fact.filed > acceptance_upper.date() + timedelta(
+            days=1
+        ):
             continue
         if fact.form.startswith("10-Q") and fact.fp in {"Q1", "Q2", "Q3"}:
             if _duration_days(fact) <= 310:

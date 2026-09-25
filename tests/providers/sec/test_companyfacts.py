@@ -148,6 +148,47 @@ def test_companyfacts_parser_rejects_duplicate_keys_and_bad_cik() -> None:
         companyfacts.parse_sec_companyfacts_payload(b'{"cik":999,"facts":{}}', _CIK)
 
 
+def test_companyfacts_accepts_exact_string_cik_and_ignores_instant_flow_rows() -> None:
+    accession = f"{_CIK}-25-000001"
+    duration = _fact(
+        "EPS",
+        "1.25",
+        accn=accession,
+        form="10-Q",
+        fy=2025,
+        fp="Q1",
+        start="2025-01-01",
+        end="2025-03-31",
+        unit="USD/shares",
+    )
+    instant = {**duration, "val": 2, "end": "2025-03-31"}
+    del instant["start"]
+    payload = json.loads(_payload({"eps": [instant, duration]}))
+    payload["cik"] = _CIK
+    parsed = companyfacts.parse_sec_companyfacts_payload(json.dumps(payload).encode(), _CIK)
+    assert len(parsed) == 1
+    assert parsed[0].value == Decimal("1.25")
+    payload["cik"] = "0000000999"
+    with pytest.raises(SchemaMismatchError, match="CIK mismatch"):
+        companyfacts.parse_sec_companyfacts_payload(json.dumps(payload).encode(), _CIK)
+
+
+def test_companyfacts_missing_duration_end_still_fails() -> None:
+    row = _fact(
+        "Revenue",
+        "10",
+        accn=f"{_CIK}-25-000001",
+        form="10-Q",
+        fy=2025,
+        fp="Q1",
+        start="2025-01-01",
+        end="2025-03-31",
+    )
+    del row["end"]
+    with pytest.raises(SchemaMismatchError, match="duration metadata"):
+        companyfacts.parse_sec_companyfacts_payload(_payload({"revenue": [row]}), _CIK)
+
+
 def test_supported_filing_with_broken_fiscal_metadata_fails_explicitly() -> None:
     row = _fact(
         "Revenue",
@@ -689,6 +730,59 @@ def test_newer_sec_filing_without_fiscal_facts_returns_unresolved(monkeypatch, t
     assert not result.periods_resolved
     assert result.slots == ()
     assert result.unresolved_period_accessions == (newer,)
+
+
+def test_companyfacts_filed_date_joins_to_sec_filing_date_not_utc_acceptance_day(
+    monkeypatch, tmp_path
+) -> None:
+    accession = f"{_CIK}-25-000002"
+    row = _filing(accession, "10-Q", "2025-06-30", "2025-07-30T22:11:13.000Z")
+    row["filingDate"] = "2025-07-31"
+    payload = _payload(
+        {
+            "revenue": [
+                _fact(
+                    "Revenue",
+                    "100",
+                    accn=accession,
+                    form="10-Q",
+                    fy=2025,
+                    fp="Q2",
+                    start="2025-04-01",
+                    end="2025-06-30",
+                    filed="2025-07-31",
+                )
+            ]
+        }
+    )
+    store, _, _, client = _setup_api(monkeypatch, tmp_path, payload, _root_payload([row]))
+    result = companyfacts.fetch_sec_canonical_quarters("SYN", client, store, utc_now=lambda: _AT)
+    assert result.coverage_complete and result.periods_resolved
+    q2 = next(slot for slot in result.slots if (slot.fiscal_year, slot.fiscal_quarter) == (2025, 2))
+    assert q2.field(companyfacts.SecCanonicalMetric.REVENUE).value == Decimal(100)
+
+    accepted_cutoff = companyfacts.fetch_sec_canonical_quarters(
+        "SYN",
+        client,
+        store,
+        utc_now=lambda: _AT,
+        acceptance_upper=datetime(2025, 7, 30, 22, 30, tzinfo=UTC),
+    )
+    assert accepted_cutoff.coverage_complete and accepted_cutoff.periods_resolved
+    assert any(
+        slot.field(companyfacts.SecCanonicalMetric.REVENUE).value == Decimal(100)
+        for slot in accepted_cutoff.slots
+    )
+
+    row["filingDate"] = "2025-07-30"
+    store, _, _, client = _setup_api(
+        monkeypatch, tmp_path / "mismatch", payload, _root_payload([row])
+    )
+    unresolved = companyfacts.fetch_sec_canonical_quarters(
+        "SYN", client, store, utc_now=lambda: _AT
+    )
+    assert not unresolved.periods_resolved
+    assert unresolved.unresolved_period_accessions == (accession,)
 
 
 def test_same_day_acceptance_cutoff_targets_alternate_older_window() -> None:

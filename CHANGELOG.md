@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.4.4 — 2026-09-25
+
+- Accept SEC companyfacts CIKs represented as decimal strings while still
+  requiring an exact match with the requested CIK. Ignore instant-context
+  facts under the selected quarterly duration concepts; malformed duration
+  rows still fail explicitly.
+- Join companyfacts `filed` dates against the submissions `filingDate` rather
+  than the UTC acceptance calendar day. This resolves valid late-day filings
+  without changing acceptance-time cutoffs or missing-data policy.
+- Raise the bounded submissions closure and discovery row ceiling from 100,000
+  to 200,000 after verifying a 167,534-row SEC closure. The 64 MiB aggregate
+  byte ceiling and per-source limits still apply.
+- Identify foreign 20-F/6-K evidence as `UNKNOWN` with an explicit unsupported
+  quarterly-contract reason. These filings are not projected as 10-K/Q facts.
+
 ## 0.4.3 — 2026-09-25
 
 - Add `fetch_sec_canonical_quarters`, a SEC-only quarterly financial API for

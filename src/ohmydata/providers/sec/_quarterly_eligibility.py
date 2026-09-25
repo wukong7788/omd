@@ -123,6 +123,13 @@ def _classify_sec_company_eligibility_fields(
             SecCompanyEligibilityStatus.SEC_COMPANY,
             "operating entity, ticker/CIK identity, and SEC 10-K/Q filing evidence match",
         )
+    elif normalized_entity != "operating" and any(
+        form in {"20-F", "20-F/A", "6-K", "6-K/A"} for form in filing_forms
+    ):
+        status, reason = (
+            SecCompanyEligibilityStatus.UNKNOWN,
+            "SEC 20-F/6-K filing evidence is outside this 10-K/Q quarterly contract",
+        )
     else:
         status, reason = (
             SecCompanyEligibilityStatus.UNKNOWN,

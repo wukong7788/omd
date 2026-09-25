@@ -743,6 +743,11 @@ units; no billions conversion is implicit. `GAAP_DILUTED_EPS` is not adjusted
 EPS and must not be put into a consumer's `adj_eps` field. Some issuers,
 including banks that report net revenue through other concepts, will have
 `MISSING` fields until an explicitly versioned mapping covers their semantics.
+`count=8` is a maximum, not a minimum required filing history. Foreign
+20-F/6-K evidence remains `UNKNOWN` for this 10-K/Q contract; prior consumer
+ADR or currency conversion paths do not establish SEC quarterly facts here.
+Companyfacts `filed` dates are checked against the SEC submissions `filingDate`;
+the distinct UTC acceptance timestamp remains the filing cutoff evidence.
 
 Each field reports `PRESENT`, `MISSING`, `AMBIGUOUS` or `COVERAGE_INCOMPLETE`.
 Conflicting aliases or amendments remain alternatives. For additive USD flow

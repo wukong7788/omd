@@ -389,6 +389,21 @@ def test_sec_company_eligibility_replays_root_and_preserves_limitations(tmp_path
     assert result.submissions_observation_id == root_observation.observation_identity
     assert any("does not prove ETF" in item for item in result.limitations)
 
+    root_body["entityType"] = "other"
+    root_body["filings"]["recent"]["form"] = ["20-F"]
+    foreign_observation = store.observe(
+        RequestSpec("sec", "edgar_submissions", {"cik": "0000000001"}),
+        json.dumps(root_body).encode(),
+        datetime(2025, 1, 2, tzinfo=UTC),
+        "json-v1",
+        SnapshotMode.APPEND,
+    )
+    foreign = classify_sec_company_eligibility_from_root(
+        "ACME", mapping, store, SecDiscoverySource(root_url, foreign_observation)
+    )
+    assert foreign.status is SecCompanyEligibilityStatus.UNKNOWN
+    assert "20-F/6-K" in foreign.reason
+
 
 def test_quarterly_projection_rejects_cross_cik_arithmetic() -> None:
     fy = _input(

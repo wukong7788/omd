@@ -22,7 +22,7 @@ from .http import SecHttpClient, validate_sec_url
 
 _SOURCE_LIMIT = 8 * 1024**2
 _TOTAL_LIMIT = 64 * 1024**2
-_ROW_LIMIT = 100_000
+_ROW_LIMIT = 200_000
 _SERIALIZATION = "sec-submissions-json-v1"
 
 

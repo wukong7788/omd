@@ -75,6 +75,7 @@ class SecCompanyFactsFiling:
     accepted_at: datetime
     primary_document: str | None = None
     filing_url: str | None = None
+    filing_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -237,7 +238,18 @@ def parse_sec_companyfacts_payload(
     if type(payload) is not dict:
         raise SchemaMismatchError("SEC companyfacts payload must be an object")
     raw_cik = payload.get("cik")
-    if type(raw_cik) is not int or f"{raw_cik:010d}" != cik:
+    if type(raw_cik) is int and 0 < raw_cik <= 9_999_999_999:
+        payload_cik = f"{raw_cik:010d}"
+    elif (
+        type(raw_cik) is str
+        and raw_cik.isascii()
+        and raw_cik.isdecimal()
+        and 1 <= len(raw_cik) <= 10
+    ):
+        payload_cik = raw_cik.zfill(10)
+    else:
+        payload_cik = None
+    if payload_cik != cik:
         raise SchemaMismatchError("SEC companyfacts CIK mismatch")
     facts = payload.get("facts")
     if type(facts) is not dict or type(facts.get("us-gaap")) is not dict:
@@ -306,8 +318,13 @@ def parse_sec_companyfacts_payload(
                         "SEC companyfacts fiscal or accession metadata is invalid"
                     )
                 filed_date = _date(filed, "filed")
-                if "start" not in row or "end" not in row:
+                if "end" not in row:
                     raise SchemaMismatchError("SEC companyfacts duration metadata is missing")
+                if "start" not in row:
+                    # Companyfacts can carry instant-context rows under a flow
+                    # tag. They cannot establish a quarterly duration value.
+                    _date(row.get("end"), "end")
+                    continue
                 start, end = _date(row.get("start"), "start"), _date(row.get("end"), "end")
                 if start > end:
                     raise SchemaMismatchError("SEC companyfacts duration is reversed")

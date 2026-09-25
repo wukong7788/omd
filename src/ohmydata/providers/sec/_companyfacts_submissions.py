@@ -144,6 +144,7 @@ def _submission_filings(
             accepted_at = _accepted(row.get("acceptanceDateTime"))
             if report_date is None:
                 continue
+            filing_date = _date(row.get("filingDate"), "filingDate")
             if document is not None and (
                 type(document) is not str
                 or not re.fullmatch(r"[A-Za-z0-9._-]{1,256}", document)
@@ -156,7 +157,9 @@ def _submission_filings(
                 if document is not None
                 else None
             )
-            filing = SecCompanyFactsFiling(accession, form, report_date, accepted_at, document, url)
+            filing = SecCompanyFactsFiling(
+                accession, form, report_date, accepted_at, document, url, filing_date
+            )
             old = by_accession.get(accession)
             if old is not None and old != filing:
                 raise SchemaMismatchError("conflicting SEC accession metadata")
