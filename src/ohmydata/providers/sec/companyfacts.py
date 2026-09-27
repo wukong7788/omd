@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from ...core import RequestSpec, SnapshotMode, SnapshotStore
 from ._companyfacts_models import (
@@ -12,6 +12,8 @@ from ._companyfacts_models import (
     SEC_CANONICAL_CONCEPTS,
     SEC_CANONICAL_CONCEPTS_VERSION,
     SEC_COMPANYFACTS_URL,
+    Sec8KReleaseEvidence,
+    SecCanonicalEvidence,
     SecCanonicalFactEvidence,
     SecCanonicalFieldStatus,
     SecCanonicalMetric,
@@ -70,6 +72,7 @@ def fetch_sec_canonical_quarters(
     utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
     acceptance_upper: datetime | None = None,
     count: int = 8,
+    enrich_8k_q4_eps: bool = False,
 ) -> SecCanonicalQuarterlyResult:
     """Fetch retained SEC companyfacts and project up to eight fiscal quarters.
 
@@ -183,8 +186,8 @@ def fetch_sec_canonical_quarters(
             False,
             (),
         )
-    needed, by_period = _target_fact_accessions(raw_facts, initial_periods)
     root_filings, _ = _submission_filings(store, cik, root_source)
+    needed, by_period = _target_fact_accessions(raw_facts, initial_periods, root_filings)
     history_names, uncovered = _history_page_selection(root_payload, cik, needed, set(root_filings))
     if len(history_names) > 256:
         raise ResourceLimitError("targeted SEC history page count exceeds limit")
@@ -200,6 +203,7 @@ def fetch_sec_canonical_quarters(
     filings, submission_observations = _submission_filings(
         store, cik, root_source, tuple(historical_sources)
     )
+    needed, by_period = _target_fact_accessions(raw_facts, initial_periods, filings)
     uncovered = tuple(sorted(set(uncovered) | (set(needed) - set(filings))))
     unresolved_period_accessions = _unmodeled_newer_filings(raw_facts, filings, bound)
     if unresolved_period_accessions:
@@ -250,7 +254,7 @@ def fetch_sec_canonical_quarters(
         requested_periods=requested_periods,
         incomplete_periods=uncovered_periods,
     )
-    return SecCanonicalQuarterlyResult(
+    result = SecCanonicalQuarterlyResult(
         canonical_ticker,
         cik,
         eligibility,
@@ -261,6 +265,32 @@ def fetch_sec_canonical_quarters(
         bool(resolved_periods),
         uncovered,
     )
+    if enrich_8k_q4_eps:
+        from .earnings_8k import (
+            enrich_sec_canonical_quarters_with_8k_eps,
+            fetch_sec_8k_quarterly_eps,
+        )
+
+        missing_q4s: list[tuple[int, int, date]] = []
+        for slot in result.slots:
+            if slot.fiscal_quarter == 4:
+                eps_field = slot.field(SecCanonicalMetric.GAAP_DILUTED_EPS)
+                if eps_field.status is SecCanonicalFieldStatus.MISSING:
+                    rev_field = slot.field(SecCanonicalMetric.REVENUE)
+                    period_end = rev_field.evidence[0].period_end if rev_field.evidence else None
+                    if period_end is not None:
+                        missing_q4s.append((slot.fiscal_year, 4, period_end))
+        if missing_q4s:
+            eps_result = fetch_sec_8k_quarterly_eps(
+                canonical_ticker,
+                client,
+                store,
+                target_quarters=tuple(missing_q4s),
+                acceptance_upper=bound,
+                utc_now=utc_now,
+            )
+            result = enrich_sec_canonical_quarters_with_8k_eps(result, eps_result)
+    return result
 
 
 def _exact_companyfacts_url(expected: str, actual: str) -> str:
@@ -273,6 +303,8 @@ __all__ = [
     "SEC_CANONICAL_CONCEPTS",
     "SEC_CANONICAL_CONCEPTS_VERSION",
     "SEC_COMPANYFACTS_URL",
+    "Sec8KReleaseEvidence",
+    "SecCanonicalEvidence",
     "SecCanonicalFactEvidence",
     "SecCanonicalFieldStatus",
     "SecCanonicalMetric",

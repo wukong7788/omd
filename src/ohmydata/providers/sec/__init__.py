@@ -1,5 +1,6 @@
 """Offline-testable SEC N-PORT provider primitives."""
 
+from ._earnings_8k_parse import parse_sec_8k_earnings_release
 from ._statement_parser import SecUnitEvidenceError
 from .artifacts import SecArtifactRef, SecArtifactStore, SecReplaySession
 from .batch import (
@@ -25,6 +26,8 @@ from .companyfacts import (
     SEC_CANONICAL_CONCEPTS,
     SEC_CANONICAL_CONCEPTS_VERSION,
     SEC_COMPANYFACTS_URL,
+    Sec8KReleaseEvidence,
+    SecCanonicalEvidence,
     SecCanonicalFactEvidence,
     SecCanonicalFieldStatus,
     SecCanonicalMetric,
@@ -73,6 +76,14 @@ from .document_source import (
     SecDocumentSourcePackage,
     produce_sec_document_source_package,
     restore_sec_document_source_package,
+)
+from .earnings_8k import (
+    Sec8KEpsAmbiguousError,
+    Sec8KEpsStatus,
+    Sec8KQuarterlyEpsItem,
+    Sec8KQuarterlyEpsResult,
+    enrich_sec_canonical_quarters_with_8k_eps,
+    fetch_sec_8k_quarterly_eps,
 )
 from .edgar import (
     SecPayloadReceipt,
@@ -356,6 +367,11 @@ __all__ = [
     "Deadline",
     "QualificationProgress",
     "Quarter",
+    "Sec8KEpsAmbiguousError",
+    "Sec8KEpsStatus",
+    "Sec8KQuarterlyEpsItem",
+    "Sec8KQuarterlyEpsResult",
+    "Sec8KReleaseEvidence",
     "SecAccountingApplicability",
     "SecAccountingCheckResult",
     "SecAccountingRule",
@@ -366,6 +382,7 @@ __all__ = [
     "SecArtifactRef",
     "SecArtifactStore",
     "SecAvailabilityPolicy",
+    "SecCanonicalEvidence",
     "SecCanonicalFactEvidence",
     "SecCanonicalFieldStatus",
     "SecCanonicalMetric",
@@ -551,6 +568,7 @@ __all__ = [
     "diagnose_sec_fy_ytd_ttm",
     "discover_sec_filing_events",
     "discover_sec_incremental_events_from_root",
+    "enrich_sec_canonical_quarters_with_8k_eps",
     "enrich_vintages",
     "ensure_edgar_available",
     "enumerate_receipts",
@@ -560,6 +578,7 @@ __all__ = [
     "evaluate_sec_structural_quality",
     "execute_sec_metric_recompute",
     "extract_from_artifact",
+    "fetch_sec_8k_quarterly_eps",
     "fetch_sec_canonical_quarters",
     "fetch_sec_company_eligibility",
     "fetch_sec_discovery_batch",
@@ -577,6 +596,7 @@ __all__ = [
     "load_sec_pit_bundle",
     "load_universe",
     "logical_table_hash",
+    "parse_sec_8k_earnings_release",
     "parse_sec_companyfacts_payload",
     "parse_sec_date",
     "parse_sec_tsm_6k_release",

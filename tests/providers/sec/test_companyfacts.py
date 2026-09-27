@@ -935,3 +935,508 @@ def test_companyfacts_and_history_body_read_errors_are_transient(monkeypatch, tm
         companyfacts._fetch_history_page(
             client, store, _CIK, f"CIK{_CIK}-submissions-001.json", lambda: _AT
         )
+
+
+def test_chronological_period_resolution_fixes_crm_10k_year_tagging() -> None:
+    accn_q3 = f"{_CIK}-25-000238"
+    accn_10k = f"{_CIK}-26-000060"
+    accn_q1 = f"{_CIK}-26-000127"
+    facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(30_000),
+            date(2025, 2, 1),
+            date(2025, 10, 31),
+            2026,
+            "Q3",
+            "10-Q",
+            date(2025, 12, 4),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(40_000),
+            date(2025, 2, 1),
+            date(2026, 1, 31),
+            2025,  # CRM anomaly: DocumentFiscalYearFocus 2025 on 10-K ending Jan 2026
+            "FY",
+            "10-K",
+            date(2026, 3, 2),
+            accn_10k,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(11_000),
+            date(2026, 2, 1),
+            date(2026, 4, 30),
+            2027,
+            "Q1",
+            "10-Q",
+            date(2026, 5, 28),
+            accn_q1,
+            None,
+        ),
+    )
+    filings = {
+        accn_q3: companyfacts.SecCompanyFactsFiling(
+            accn_q3, "10-Q", date(2025, 10, 31), datetime(2025, 12, 4, 2, tzinfo=UTC)
+        ),
+        accn_10k: companyfacts.SecCompanyFactsFiling(
+            accn_10k, "10-K", date(2026, 1, 31), datetime(2026, 3, 2, 21, tzinfo=UTC)
+        ),
+        accn_q1: companyfacts.SecCompanyFactsFiling(
+            accn_q1, "10-Q", date(2026, 4, 30), datetime(2026, 5, 28, 22, tzinfo=UTC)
+        ),
+    }
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        facts, filings, "obs_crm", requested_periods=((2026, 3), (2026, 4), (2027, 1))
+    )
+    assert len(slots) == 3
+
+    slot_q4 = slots[1]
+    assert slot_q4.fiscal_year == 2026
+    assert slot_q4.fiscal_quarter == 4
+
+    rev = slot_q4.field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert rev.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert rev.value == Decimal(10_000)
+    assert len(rev.evidence) == 1
+    # Parent evidence has canonical period
+    assert rev.evidence[0].fiscal_year_focus == 2026
+    assert rev.evidence[0].fiscal_period_focus == "Q4"
+    # Source annual evidence preserves native fact.fy == 2025
+    annual_source = rev.evidence[0].source_evidence[0]
+    assert annual_source.accession_number == accn_10k
+    assert annual_source.fiscal_year_focus == 2025
+
+    # EPS stays non-derived
+    eps = slot_q4.field(companyfacts.SecCanonicalMetric.GAAP_DILUTED_EPS)
+    assert eps.status is companyfacts.SecCanonicalFieldStatus.MISSING
+    assert eps.value is None
+
+
+def test_chronological_period_resolution_fixes_crwd_discontinuous_year_sequence() -> None:
+    accn_q3 = f"{_CIK}-24-000026"
+    accn_10k = f"{_CIK}-25-000009"
+    accn_q1 = f"{_CIK}-25-000019"
+    accn_q2 = f"{_CIK}-25-000025"
+    accn_q3_next = f"{_CIK}-25-000033"
+    facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(2500),
+            date(2024, 2, 1),
+            date(2024, 10, 31),
+            2025,
+            "Q3",
+            "10-Q",
+            date(2024, 11, 27),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(3500),
+            date(2024, 2, 1),
+            date(2025, 1, 31),
+            2024,  # CRWD anomaly: tagged fy=2024 on 10-K ending Jan 2025
+            "FY",
+            "10-K",
+            date(2025, 3, 10),
+            accn_10k,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(1000),
+            date(2025, 2, 1),
+            date(2025, 4, 30),
+            2025,  # CRWD anomaly: tagged fy=2025 on Q1 ending Apr 2025
+            "Q1",
+            "10-Q",
+            date(2025, 6, 4),
+            accn_q1,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(1100),
+            date(2025, 5, 1),
+            date(2025, 7, 31),
+            2026,
+            "Q2",
+            "10-Q",
+            date(2025, 8, 28),
+            accn_q2,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(1200),
+            date(2025, 8, 1),
+            date(2025, 10, 31),
+            2026,
+            "Q3",
+            "10-Q",
+            date(2025, 12, 3),
+            accn_q3_next,
+            None,
+        ),
+    )
+    filings = {
+        accn_q3: companyfacts.SecCompanyFactsFiling(
+            accn_q3, "10-Q", date(2024, 10, 31), datetime(2024, 11, 27, 2, tzinfo=UTC)
+        ),
+        accn_10k: companyfacts.SecCompanyFactsFiling(
+            accn_10k, "10-K", date(2025, 1, 31), datetime(2025, 3, 10, 2, tzinfo=UTC)
+        ),
+        accn_q1: companyfacts.SecCompanyFactsFiling(
+            accn_q1, "10-Q", date(2025, 4, 30), datetime(2025, 6, 4, 2, tzinfo=UTC)
+        ),
+        accn_q2: companyfacts.SecCompanyFactsFiling(
+            accn_q2, "10-Q", date(2025, 7, 31), datetime(2025, 8, 28, 2, tzinfo=UTC)
+        ),
+        accn_q3_next: companyfacts.SecCompanyFactsFiling(
+            accn_q3_next, "10-Q", date(2025, 10, 31), datetime(2025, 12, 3, 2, tzinfo=UTC)
+        ),
+    }
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        facts,
+        filings,
+        "obs_crwd",
+        requested_periods=((2025, 3), (2025, 4), (2026, 1), (2026, 2)),
+    )
+    assert len(slots) == 4
+
+    # FY2025Q4 flow derived (3500 - 2500)
+    slot_q4 = slots[1]
+    assert (slot_q4.fiscal_year, slot_q4.fiscal_quarter) == (2025, 4)
+    rev_q4 = slot_q4.field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert rev_q4.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert rev_q4.value == Decimal(1000)
+
+    # FY2026Q1 discrete 10-Q fact
+    slot_q1 = slots[2]
+    assert (slot_q1.fiscal_year, slot_q1.fiscal_quarter) == (2026, 1)
+    rev_q1 = slot_q1.field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert rev_q1.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert rev_q1.value == Decimal(1000)
+    # Native fact.fy preserved
+    assert rev_q1.evidence[0].fiscal_year_focus == 2025
+
+    # FY2026Q2 discrete 10-Q fact
+    slot_q2 = slots[3]
+    assert (slot_q2.fiscal_year, slot_q2.fiscal_quarter) == (2026, 2)
+    rev_q2 = slot_q2.field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert rev_q2.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert rev_q2.value == Decimal(1100)
+
+
+def test_q4_flow_derivation_incompatible_cohort_boundaries() -> None:
+    accn_q3 = f"{_CIK}-25-000003"
+    accn_fy = f"{_CIK}-26-000001"
+    filings = {
+        accn_q3: companyfacts.SecCompanyFactsFiling(
+            accn_q3, "10-Q", date(2025, 9, 30), datetime(2025, 11, 10, tzinfo=UTC)
+        ),
+        accn_fy: companyfacts.SecCompanyFactsFiling(
+            accn_fy, "10-K", date(2025, 12, 31), datetime(2026, 2, 15, tzinfo=UTC)
+        ),
+    }
+
+    # Incompatible start date: annual starts 2025-01-01, Q3 YTD starts 2025-02-01
+    bad_start_facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(650),
+            date(2025, 2, 1),
+            date(2025, 9, 30),
+            2025,
+            "Q3",
+            "10-Q",
+            date(2025, 11, 10),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(1000),
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            2025,
+            "FY",
+            "10-K",
+            date(2026, 2, 15),
+            accn_fy,
+            None,
+        ),
+    )
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        bad_start_facts, filings, "obs_start", requested_periods=((2025, 4),)
+    )
+    assert (
+        slots[0].field(companyfacts.SecCanonicalMetric.REVENUE).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+    # Incompatible unit: annual USD, Q3 YTD EUR
+    bad_unit_facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "EUR",
+            Decimal(650),
+            date(2025, 1, 1),
+            date(2025, 9, 30),
+            2025,
+            "Q3",
+            "10-Q",
+            date(2025, 11, 10),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(1000),
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            2025,
+            "FY",
+            "10-K",
+            date(2026, 2, 15),
+            accn_fy,
+            None,
+        ),
+    )
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        bad_unit_facts, filings, "obs_unit", requested_periods=((2025, 4),)
+    )
+    assert (
+        slots[0].field(companyfacts.SecCanonicalMetric.REVENUE).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+    # Never derive annual EPS from 12M minus 9M: remains MISSING
+    eps_facts = (
+        companyfacts.SecCompanyFactsFact(
+            "EarningsPerShareDiluted",
+            "USD/shares",
+            Decimal("1.80"),
+            date(2025, 1, 1),
+            date(2025, 9, 30),
+            2025,
+            "Q3",
+            "10-Q",
+            date(2025, 11, 10),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "EarningsPerShareDiluted",
+            "USD/shares",
+            Decimal("2.50"),
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            2025,
+            "FY",
+            "10-K",
+            date(2026, 2, 15),
+            accn_fy,
+            None,
+        ),
+    )
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        eps_facts, filings, "obs_eps", requested_periods=((2025, 4),)
+    )
+    assert (
+        slots[0].field(companyfacts.SecCanonicalMetric.GAAP_DILUTED_EPS).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+
+def test_coverage_complete_distinction_from_field_completeness(monkeypatch, tmp_path) -> None:
+    accession = f"{_CIK}-26-000001"
+    root = _root_payload([_filing(accession, "10-K", "2025-12-31", "2026-02-15T16:00:00.000Z")])
+    revenue_fact = _fact(
+        "Revenue",
+        "1000",
+        accn=accession,
+        form="10-K",
+        fy=2025,
+        fp="FY",
+        start="2025-01-01",
+        end="2025-12-31",
+    )
+    store, _, _, client = _setup_api(
+        monkeypatch,
+        tmp_path,
+        _payload({"revenue": [revenue_fact]}),
+        root,
+    )
+    result = companyfacts.fetch_sec_canonical_quarters("SYN", client, store, utc_now=lambda: _AT)
+    # Transport coverage is complete (all target accessions found in submissions)
+    assert result.coverage_complete is True
+    assert result.periods_resolved is True
+    # But individual fields lacking source facts remain MISSING, not COVERAGE_INCOMPLETE
+    slot = result.slots[-1]
+    assert (
+        slot.field(companyfacts.SecCanonicalMetric.GAAP_DILUTED_EPS).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+
+def test_chronology_fails_closed_on_multi_year_contradiction() -> None:
+    accn_q1 = f"{_CIK}-25-000001"
+    accn_q2 = f"{_CIK}-25-000002"
+    accn_q3 = f"{_CIK}-25-000003"
+    facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(100),
+            date(2025, 1, 1),
+            date(2025, 3, 31),
+            2025,
+            "Q1",
+            "10-Q",
+            date(2025, 5, 1),
+            accn_q1,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(110),
+            date(2025, 4, 1),
+            date(2025, 6, 30),
+            2030,  # Contradiction: jumps to 2030
+            "Q2",
+            "10-Q",
+            date(2025, 8, 1),
+            accn_q2,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(120),
+            date(2025, 7, 1),
+            date(2025, 9, 30),
+            2030,  # Majority would be 2030 (2 vs 1), but gap is 5 years (> 1)
+            "Q3",
+            "10-Q",
+            date(2025, 11, 1),
+            accn_q3,
+            None,
+        ),
+    )
+    filings = {
+        accn_q1: companyfacts.SecCompanyFactsFiling(
+            accn_q1, "10-Q", date(2025, 3, 31), datetime(2025, 5, 1, 16, tzinfo=UTC)
+        ),
+        accn_q2: companyfacts.SecCompanyFactsFiling(
+            accn_q2, "10-Q", date(2025, 6, 30), datetime(2025, 8, 1, 16, tzinfo=UTC)
+        ),
+        accn_q3: companyfacts.SecCompanyFactsFiling(
+            accn_q3, "10-Q", date(2025, 9, 30), datetime(2025, 11, 1, 16, tzinfo=UTC)
+        ),
+    }
+    # Resolver must fail closed and NOT override Q1 to FY2030Q1
+    slots = companyfacts.project_sec_companyfacts_quarters(
+        facts, filings, "obs_multi_year", requested_periods=((2030, 1),)
+    )
+    # Slot (2030, 1) has no fact because Q1 is FY2025, not FY2030
+    assert (
+        slots[0].field(companyfacts.SecCanonicalMetric.REVENUE).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+
+def test_chronology_respects_acceptance_upper_cutoff() -> None:
+    accn_q2 = f"{_CIK}-25-000100"
+    accn_q3 = f"{_CIK}-25-000238"
+    accn_10k = f"{_CIK}-26-000060"
+    facts = (
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(20_000),
+            date(2025, 2, 1),
+            date(2025, 7, 31),
+            2026,
+            "Q2",
+            "10-Q",
+            date(2025, 9, 4),
+            accn_q2,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(30_000),
+            date(2025, 2, 1),
+            date(2025, 10, 31),
+            2026,
+            "Q3",
+            "10-Q",
+            date(2025, 12, 4),
+            accn_q3,
+            None,
+        ),
+        companyfacts.SecCompanyFactsFact(
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "USD",
+            Decimal(40_000),
+            date(2025, 2, 1),
+            date(2026, 1, 31),
+            2025,  # 10-K with fy=2025 accepted later
+            "FY",
+            "10-K",
+            date(2026, 3, 2),
+            accn_10k,
+            None,
+        ),
+    )
+    filings = {
+        accn_q2: companyfacts.SecCompanyFactsFiling(
+            accn_q2, "10-Q", date(2025, 7, 31), datetime(2025, 9, 4, 2, tzinfo=UTC)
+        ),
+        accn_q3: companyfacts.SecCompanyFactsFiling(
+            accn_q3, "10-Q", date(2025, 10, 31), datetime(2025, 12, 4, 2, tzinfo=UTC)
+        ),
+        accn_10k: companyfacts.SecCompanyFactsFiling(
+            accn_10k, "10-K", date(2026, 1, 31), datetime(2026, 3, 2, 21, tzinfo=UTC)
+        ),
+    }
+
+    # As of 2025-12-31, the 10-K is not yet accepted. It must be excluded from chronology and projection.
+    cutoff = datetime(2025, 12, 31, 23, 59, 59, tzinfo=UTC)
+    slots_before = companyfacts.project_sec_companyfacts_quarters(
+        facts, filings, "obs_pit", acceptance_upper=cutoff, requested_periods=((2026, 4),)
+    )
+    assert (
+        slots_before[0].field(companyfacts.SecCanonicalMetric.REVENUE).status
+        is companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+    # After acceptance, the 10-K is included in chronology and resolves to (2026, 4)
+    slots_after = companyfacts.project_sec_companyfacts_quarters(
+        facts, filings, "obs_pit", requested_periods=((2026, 4),)
+    )
+    assert (
+        slots_after[0].field(companyfacts.SecCanonicalMetric.REVENUE).status
+        is companyfacts.SecCanonicalFieldStatus.PRESENT
+    )
+    assert slots_after[0].field(companyfacts.SecCanonicalMetric.REVENUE).value == Decimal(10_000)

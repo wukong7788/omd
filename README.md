@@ -760,6 +760,23 @@ fiscal focus, accession, filing acceptance time, companyfacts observation ID
 and the official filing URL when the submissions document name is usable.
 Derived Q4 values retain both source facts in `source_evidence`.
 
+When companyfacts lacks an explicit three-month Q4 EPS fact, callers can pass
+`enrich_8k_q4_eps=True` to `fetch_sec_canonical_quarters` or invoke
+`fetch_sec_8k_quarterly_eps` and `enrich_sec_canonical_quarters_with_8k_eps`.
+This performs a targeted search across qualifying Form 8-K/8-K-A Item 2.02
+earnings release exhibits (such as `EX-99.1`) for direct GAAP diluted EPS
+matching the exact target quarter period-end date. Guidance, non-GAAP / adjusted
+metrics, operating EPS, basic EPS, and annual-minus-9M derivation are strictly
+excluded. Provenance is preserved in `Sec8KReleaseEvidence` (native label, unit,
+value, discrete `period_end`, accession, form, `accepted_at`, URLs, and snapshot
+observation identities) without fabricating a start date. Existing explicit
+10-K facts always take precedence. If a clean search across qualifying 8-K
+exhibits finds no matching GAAP diluted EPS, the field remains `MISSING` with
+`coverage_complete=True`; conflicting values within or across exhibits yield
+`AMBIGUOUS` with alternatives and reason. The search window covers history
+pages overlapping $[T, T + 90\text{ days}]$ from the quarter end and strictly
+respects `acceptance_upper`.
+
 Check `coverage_complete`, `periods_resolved`, `uncovered_accessions` and
 `unresolved_period_accessions` before publishing any result. `NON_SEC` means
 absent from the specific retained SEC ticker mapping, not a universal proof

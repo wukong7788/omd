@@ -97,12 +97,42 @@ class SecCanonicalFactEvidence:
 
 
 @dataclass(frozen=True)
+class Sec8KReleaseEvidence:
+    """Direct Form 8-K Item 2.02 earnings release exhibit financial fact evidence."""
+
+    native_label: str
+    unit: str
+    value: Decimal
+    period_end: date
+    fiscal_year_focus: int
+    fiscal_period_focus: str
+    accession_number: str
+    form: str
+    accepted_at: datetime
+    filing_url: str
+    exhibit_url: str
+    index_observation_id: str
+    exhibit_observation_id: str
+
+    @property
+    def native_tag(self) -> str:
+        return self.native_label
+
+    @property
+    def source_evidence(self) -> tuple[SecCanonicalFactEvidence, ...]:
+        return ()
+
+
+SecCanonicalEvidence = SecCanonicalFactEvidence | Sec8KReleaseEvidence
+
+
+@dataclass(frozen=True)
 class SecCanonicalQuarterField:
     metric: SecCanonicalMetric
     status: SecCanonicalFieldStatus
     value: Decimal | None
     unit: str | None
-    evidence: tuple[SecCanonicalFactEvidence, ...]
+    evidence: tuple[SecCanonicalFactEvidence | Sec8KReleaseEvidence, ...]
 
 
 @dataclass(frozen=True)
@@ -343,6 +373,8 @@ __all__ = [
     "SEC_CANONICAL_CONCEPTS",
     "SEC_CANONICAL_CONCEPTS_VERSION",
     "SEC_COMPANYFACTS_URL",
+    "Sec8KReleaseEvidence",
+    "SecCanonicalEvidence",
     "SecCanonicalFactEvidence",
     "SecCanonicalFieldStatus",
     "SecCanonicalMetric",

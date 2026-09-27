@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.4.6 — 2026-09-27
+
+- Resolve canonical fiscal quarter sequence from SEC filing and report-period
+  chronology in companyfacts projection instead of assuming raw `fact.fy` matches
+  display year. Corrects non-calendar filers (such as CRM and CRWD) whose annual
+  or quarterly XBRL metadata contains off-by-one `DocumentFiscalYearFocus` values,
+  while retaining native `fact.fy` in evidence and falling back to native `fact.fy`
+  when distinct implied base years are non-adjacent (>1 year) or lack a unique strict majority.
+- Add direct GAAP diluted EPS discovery from SEC Form 8-K / 8-K-A Item 2.02 earnings
+  release exhibits (`fetch_sec_8k_quarterly_eps`) and opt-in canonical quarter
+  enrichment (`enrich_8k_q4_eps=True` in `fetch_sec_canonical_quarters` or
+  `enrich_sec_canonical_quarters_with_8k_eps`). Extracts direct, non-derived GAAP diluted EPS
+  disclosed for discrete target quarter ends, strictly rejecting guidance, non-GAAP / adjusted
+  metrics, basic EPS, and annual-minus-9M derivation. Preserves complete provenance
+  in `Sec8KReleaseEvidence` without fabricating period starts, enforces `acceptance_upper` cutoffs,
+  enforces $[T, T + 90\text{ days}]$ target filing windows before fetching index/exhibit documents,
+  fails closed with `CoverageError` on unestablished historical filing ranges or incomplete 8-K coverage,
+  retains immutable index observations even when no EX-99 document matches, preserves candidate alternatives
+  and filing provenance under `AMBIGUOUS` results across exhibits/filings, exposes `submissions_observation_ids`
+  tuple, retains existing 10-K explicit Q4 facts as first priority, and leaves non-MISSING companyfacts
+  fields unchanged during enrichment.
+
 ## 0.4.5 — 2026-09-25
 
 - Add a bounded SEC-only TSMC 6-K quarterly earnings-release API. It verifies

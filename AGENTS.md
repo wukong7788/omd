@@ -232,6 +232,9 @@ version after `v1.0.0`.
   `uv.lock`, the exact version assertion in `tests/test_package.py`, and
   `CHANGELOG.md`. Documentation describing changed public behavior must be
   updated in that commit as well.
+- Unless the user explicitly names another publication branch, promote the
+  release to `main`. Verify that remote `main` points to the exact release
+  commit before running the publication workflow from `main`.
 - Before committing, run the canonical test, Ruff, format, ty check, build, and
   `git diff --check` gates; inspect the built wheel/sdist version and the
   staged diff, and run the secret scan. Never publish a version that is
@@ -268,11 +271,11 @@ Resolve routine choices within the user's authorized scope and continue work.
 Ask only when missing information materially affects correctness or scope, or
 an action requires authorization not already provided in the conversation.
 
-Use `.agents/skills/sol-luna-workflow/SKILL.md` only for an explicit Sol–Luna
-execution request. Task size or a plan/spec does not activate it. The skill
-owns role, contract-freeze, delegation, and acceptance details. Explanation,
+For an explicit Sol–Luna execution request, use the installed `boss-agent`
+skill's `sol-luna` route: Sol scopes and accepts the work, and Luna executes
+it. A task size or plan/spec alone does not activate the route. Explanation,
 document-only work, trivial edits, publishing, secrets, and live provider
-operations do not activate this workflow.
+operations do not activate it.
 
 ## Review Priorities
 
