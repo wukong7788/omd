@@ -89,6 +89,10 @@ _QUARTER_DATE_PATTERN = re.compile(
     r"(?:three\s+months|quarter|fourth\s+quarter|4th\s+quarter|q4)\s+ended\s*([a-z]+)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})",
     re.IGNORECASE,
 )
+_COMBINED_BASIC_DILUTED_PATTERN = re.compile(
+    r"\bbasic\s+(?:and|&)\s+diluted\b|\bdiluted\s+(?:and|&)\s+basic\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -211,7 +215,10 @@ def parse_sec_8k_earnings_release(
 ) -> dict[date, tuple[Decimal, str]]:
     """Parse direct GAAP diluted EPS from an SEC 8-K Item 2.02 earnings exhibit.
 
-    Extracts GAAP diluted EPS matching expected discrete quarter ends.
+    Extracts GAAP diluted EPS matching expected discrete quarter ends. A row
+    explicitly reported as both basic and diluted is a candidate. When both
+    forms report the same value, the explicitly diluted-only label is retained;
+    conflicting values remain ambiguous.
     Raises:
     - Sec8KEpsAmbiguousError (subclass of SchemaMismatchError) if multiple
       candidate tables or rows yield conflicting GAAP diluted EPS values for the
@@ -297,7 +304,8 @@ def parse_sec_8k_earnings_release(
             # The row label itself must indicate a diluted per-share metric
             is_diluted = "diluted" in label_lower
             is_basic = "basic" in label_lower
-            if not is_diluted or is_basic:
+            is_combined_basic_diluted = bool(_COMBINED_BASIC_DILUTED_PATTERN.search(label_lower))
+            if not is_diluted or (is_basic and not is_combined_basic_diluted):
                 continue
             # Must not be share count or non-per-share row
             if any(
@@ -355,7 +363,15 @@ def parse_sec_8k_earnings_release(
                 period_dt,
                 tuple(cand_list),
             )
-        winner = cand_list[0]
+        # Identical values from duplicated statement/reconciliation tables
+        # collapse to one result. Prefer the label that explicitly says
+        # diluted-only; retain a combined label when it is the only evidence.
+        preferred = [
+            c for c in cand_list if not _COMBINED_BASIC_DILUTED_PATTERN.search(c.native_label)
+        ]
+        if not preferred:
+            preferred = cand_list
+        winner = preferred[0]
         resolved[period_dt] = (winner.value, winner.native_label)
 
     return resolved

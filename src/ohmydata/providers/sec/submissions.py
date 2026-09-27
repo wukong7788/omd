@@ -17,7 +17,11 @@ from .errors import (
     SchemaMismatchError,
     TransientProviderError,
 )
-from .event_discovery import _strict_json, _submission_rows
+from .event_discovery import (
+    _history_pages_for_acceptance_window,
+    _strict_json,
+    _submission_rows,
+)
 from .http import SecHttpClient, validate_sec_url
 
 _SOURCE_LIMIT = 8 * 1024**2
@@ -29,6 +33,15 @@ _SERIALIZATION = "sec-submissions-json-v1"
 @dataclass(frozen=True)
 class SecSubmissionsClosure:
     """A retained root and every history page named by that exact root."""
+
+    cik: str
+    root_source: SecDiscoverySource
+    historical_sources: tuple[SecDiscoverySource, ...]
+
+
+@dataclass(frozen=True)
+class SecSubmissionsWindow:
+    """A retained root and only the history pages that can overlap a window."""
 
     cik: str
     root_source: SecDiscoverySource
@@ -174,8 +187,74 @@ def fetch_sec_submissions_root(
     return SecDiscoverySource(root_url, observation)
 
 
+def fetch_sec_submissions_window(
+    store: SnapshotStore,
+    client: SecHttpClient,
+    cik: str,
+    *,
+    acceptance_lower: datetime,
+    acceptance_upper: datetime,
+    utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> SecSubmissionsWindow:
+    """Fetch only history pages whose filing-date ranges may contain window events."""
+    if type(cik) is not str or re.fullmatch(r"[0-9]{10}", cik) is None:
+        raise ValueError("CIK must be ten digits")
+    if not isinstance(store, SnapshotStore) or not isinstance(client, SecHttpClient):
+        raise TypeError("invalid submissions fetch dependencies")
+    for bound in (acceptance_lower, acceptance_upper):
+        if not isinstance(bound, datetime) or bound.tzinfo is None or bound.utcoffset() is None:
+            raise ValueError("acceptance window bounds must be timezone-aware")
+    lower, upper = acceptance_lower.astimezone(UTC), acceptance_upper.astimezone(UTC)
+    if lower > upper:
+        raise ValueError("acceptance window is inverted")
+
+    root_source = fetch_sec_submissions_root(store, client, cik, utc_now=utc_now)
+    root_replay = store.replay_observation(root_source.observation, max_payload_bytes=_SOURCE_LIMIT)
+    root = _strict_json(root_replay.payload)
+    names = _history_pages_for_acceptance_window(root, cik, lower, upper)
+    observed = len(root_replay.payload)
+    rows: dict[str, dict[str, object]] = {}
+    row_count = 0
+
+    def validate_rows(payload: dict[str, Any], *, child: bool) -> None:
+        nonlocal row_count
+        for row in _submission_rows(payload, cik, child=child):
+            row_count += 1
+            if row_count > _ROW_LIMIT:
+                raise ResourceLimitError("aggregate filing row limit exceeded")
+            accession = row["accessionNumber"]
+            if (
+                not isinstance(accession, str)
+                or re.fullmatch(r"[0-9]{10}-[0-9]{2}-[0-9]{6}", accession) is None
+            ):
+                raise SchemaMismatchError("invalid accession")
+            old = rows.setdefault(accession, row)
+            if old != row:
+                raise SchemaMismatchError("conflicting submission metadata")
+
+    validate_rows(root, child=False)
+    sources: list[SecDiscoverySource] = []
+    for name in names:
+        url = historical_submission_url(cik, name)
+        body = _fetch(client, url, _TOTAL_LIMIT - observed)
+        observed += len(body)
+        child = _strict_json(body)
+        validate_rows(child, child=True)
+        observation = store.observe(
+            RequestSpec("sec", "edgar_submissions_history", {"cik": cik, "basename": name}),
+            body,
+            utc_now(),
+            _SERIALIZATION,
+            SnapshotMode.APPEND,
+        )
+        sources.append(SecDiscoverySource(url, observation))
+    return SecSubmissionsWindow(cik, root_source, tuple(sources))
+
+
 __all__ = [
     "SecSubmissionsClosure",
+    "SecSubmissionsWindow",
     "fetch_sec_submissions_closure",
     "fetch_sec_submissions_root",
+    "fetch_sec_submissions_window",
 ]

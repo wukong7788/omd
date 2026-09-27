@@ -15,7 +15,7 @@ from ._event_discovery_models import (
 )
 from .event_discovery import discover_sec_filing_events, discover_sec_incremental_events_from_root
 from .http import SecHttpClient
-from .submissions import fetch_sec_submissions_closure, fetch_sec_submissions_root
+from .submissions import fetch_sec_submissions_root, fetch_sec_submissions_window
 
 
 def fetch_sec_discovery_batch(
@@ -47,7 +47,14 @@ def fetch_sec_discovery_batch(
     ):
         raise ValueError("incremental window excludes declared overlap")
 
-    closure = fetch_sec_submissions_closure(store, client, policy.cik.zfill(10), utc_now=clock)
+    closure = fetch_sec_submissions_window(
+        store,
+        client,
+        policy.cik.zfill(10),
+        acceptance_lower=policy.acceptance_lower,
+        acceptance_upper=policy.acceptance_upper,
+        utc_now=clock,
+    )
     return discover_sec_filing_events(
         store,
         closure.root_source,

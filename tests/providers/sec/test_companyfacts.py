@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal, localcontext
 from types import MappingProxyType
@@ -11,7 +12,10 @@ import pytest
 from ohmydata.core import RequestSpec, SnapshotMode, SnapshotStore
 from ohmydata.providers.sec import companyfacts
 from ohmydata.providers.sec._event_discovery_models import SecDiscoverySource
+from ohmydata.providers.sec._filing_xbrl import SecFilingXbrlFact, SecFilingXbrlSource
+from ohmydata.providers.sec.companyfacts import _incomplete_xbrl_amendments
 from ohmydata.providers.sec.errors import (
+    CoverageError,
     ResourceLimitError,
     SchemaMismatchError,
     TransientProviderError,
@@ -282,15 +286,144 @@ def test_revenue_alias_projects_and_conflicting_aliases_are_ambiguous() -> None:
         accession,
         "CY2025Q1",
     )
-    ambiguous = companyfacts.project_sec_companyfacts_quarters(
+    prioritized = companyfacts.project_sec_companyfacts_quarters(
         (primary, conflicting),
         {accession: filing},
         "d" * 64,
         requested_periods=((2025, 1),),
     )
-    revenue = ambiguous[0].field(companyfacts.SecCanonicalMetric.REVENUE)
-    assert revenue.status is companyfacts.SecCanonicalFieldStatus.AMBIGUOUS
-    assert {item.native_tag for item in revenue.evidence} == {primary.tag, conflicting.tag}
+    revenue = prioritized[0].field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert revenue.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert revenue.value == Decimal(99)
+    assert [item.native_tag for item in revenue.evidence] == ["Revenues", primary.tag]
+
+    other_accession = f"{_CIK}-25-000099"
+    cross_filing = replace(conflicting, accn=other_accession)
+    cross_filing_ambiguous = companyfacts.project_sec_companyfacts_quarters(
+        (primary, cross_filing),
+        {
+            accession: filing,
+            other_accession: companyfacts.SecCompanyFactsFiling(
+                other_accession,
+                "10-Q",
+                date(2025, 3, 31),
+                datetime(2025, 5, 2, tzinfo=UTC),
+            ),
+        },
+        "d" * 64,
+        requested_periods=((2025, 1),),
+    )[0].field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert cross_filing_ambiguous.status is companyfacts.SecCanonicalFieldStatus.AMBIGUOUS
+    assert {item.accession_number for item in cross_filing_ambiguous.evidence} == {
+        accession,
+        other_accession,
+    }
+
+
+def test_be_total_revenue_priority_keeps_contract_subset_evidence() -> None:
+    accession = f"{_CIK}-26-000001"
+    filing = companyfacts.SecCompanyFactsFiling(
+        accession,
+        "10-Q",
+        date(2026, 6, 30),
+        datetime(2026, 7, 28, 17, 27, 3, tzinfo=UTC),
+    )
+    end = date(2026, 6, 30)
+    start = date(2026, 4, 1)
+    total = companyfacts.SecCompanyFactsFact(
+        "Revenues",
+        "USD",
+        Decimal(1_065_365_000),
+        start,
+        end,
+        2026,
+        "Q2",
+        "10-Q",
+        date(2026, 7, 28),
+        accession,
+        "CY2026Q2",
+    )
+    contract_subset = replace(
+        total,
+        tag="RevenueFromContractWithCustomerExcludingAssessedTax",
+        value=Decimal(1_060_746_000),
+    )
+    field = companyfacts.project_sec_companyfacts_quarters(
+        (total, contract_subset),
+        {accession: filing},
+        "d" * 64,
+        requested_periods=((2026, 2),),
+    )[0].field(companyfacts.SecCanonicalMetric.REVENUE)
+
+    assert field.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert field.value == Decimal(1_065_365_000)
+    assert [item.native_tag for item in field.evidence] == [
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+    ]
+
+
+def test_be_total_revenue_priority_spans_proven_amendment_chain() -> None:
+    base_accession = f"{_CIK}-26-000001"
+    amendment_accession = f"{_CIK}-26-000002"
+    report_date = date(2026, 6, 30)
+    filings = {
+        base_accession: companyfacts.SecCompanyFactsFiling(
+            base_accession,
+            "10-Q",
+            report_date,
+            datetime(2026, 7, 28, 17, tzinfo=UTC),
+        ),
+        amendment_accession: companyfacts.SecCompanyFactsFiling(
+            amendment_accession,
+            "10-Q/A",
+            report_date,
+            datetime(2026, 7, 29, 17, tzinfo=UTC),
+        ),
+    }
+    common = {
+        "unit": "USD",
+        "start": date(2026, 4, 1),
+        "end": report_date,
+        "fy": 2026,
+        "fp": "Q2",
+        "filed": date(2026, 7, 28),
+        "frame": "CY2026Q2",
+    }
+    base_contract = companyfacts.SecCompanyFactsFact(
+        tag="RevenueFromContractWithCustomerExcludingAssessedTax",
+        value=Decimal(1_060_746_000),
+        form="10-Q",
+        accn=base_accession,
+        **common,
+    )
+    amended_total = replace(
+        base_contract,
+        tag="Revenues",
+        value=Decimal(1_065_365_000),
+        form="10-Q/A",
+        accn=amendment_accession,
+    )
+    amended_contract = replace(
+        base_contract,
+        form="10-Q/A",
+        accn=amendment_accession,
+    )
+
+    field = companyfacts.project_sec_companyfacts_quarters(
+        (base_contract, amended_total, amended_contract),
+        filings,
+        "d" * 64,
+        requested_periods=((2026, 2),),
+    )[0].field(companyfacts.SecCanonicalMetric.REVENUE)
+
+    assert field.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert field.value == Decimal(1_065_365_000)
+    assert field.evidence[0].accession_number == amendment_accession
+    assert {item.accession_number for item in field.evidence[1:]} == {
+        base_accession,
+        amendment_accession,
+    }
 
 
 def test_q4_exact_subtraction_evidence_and_q4_eps_direct_frame() -> None:
@@ -726,10 +859,165 @@ def test_newer_sec_filing_without_fiscal_facts_returns_unresolved(monkeypatch, t
         }
     )
     store, _, _, client = _setup_api(monkeypatch, tmp_path, payload, _root_payload(root_rows))
+    monkeypatch.setattr(
+        companyfacts,
+        "fetch_sec_filing_xbrl_source",
+        lambda **kwargs: (_ for _ in ()).throw(CoverageError("missing source")),
+    )
     result = companyfacts.fetch_sec_canonical_quarters("SYN", client, store, utc_now=lambda: _AT)
     assert not result.periods_resolved
     assert result.slots == ()
     assert result.unresolved_period_accessions == (newer,)
+
+
+def test_companyfacts_lag_uses_distinct_exact_filing_xbrl_evidence(monkeypatch, tmp_path) -> None:
+    q1 = f"{_CIK}-26-000001"
+    q2 = f"{_CIK}-26-000002"
+    root_rows = [
+        _filing(q1, "10-Q", "2026-03-31", "2026-05-10T16:00:00.000Z"),
+        _filing(q2, "10-Q", "2026-06-30", "2026-08-01T16:00:00.000Z"),
+    ]
+    payload = _payload(
+        {
+            "revenue": [
+                _fact(
+                    "Revenue",
+                    "100",
+                    accn=q1,
+                    form="10-Q",
+                    fy=2026,
+                    fp="Q1",
+                    start="2026-01-01",
+                    end="2026-03-31",
+                    filed="2026-05-10",
+                )
+            ]
+        }
+    )
+    store, _, _, client = _setup_api(monkeypatch, tmp_path, payload, _root_payload(root_rows))
+    captured = datetime(2026, 9, 1, tzinfo=UTC)
+    xbrl_fact = SecFilingXbrlFact(
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "USD",
+        Decimal(120),
+        date(2026, 4, 1),
+        date(2026, 6, 30),
+        2026,
+        "Q2",
+        q2,
+        "10-Q",
+        date(2026, 8, 1),
+        datetime(2026, 8, 1, 16, tzinfo=UTC),
+    )
+
+    def load_xbrl(**kwargs):
+        index = store.observe(
+            RequestSpec("sec", "company-filing-directory", {"cik": _CIK, "accession_number": q2}),
+            b'{"directory":{"name":"synthetic"}}',
+            captured,
+            "sec-filing-directory-json-v1",
+            SnapshotMode.APPEND,
+        )
+        instance = store.observe(
+            RequestSpec(
+                "sec",
+                "company-filing-document",
+                {"cik": _CIK, "accession_number": q2, "filename": "instance.xml"},
+            ),
+            b"<synthetic />",
+            captured,
+            "sec-filing-document-bytes-v1",
+            SnapshotMode.APPEND,
+        )
+        return SecFilingXbrlSource(
+            (xbrl_fact,),
+            index,
+            instance,
+            f"https://www.sec.gov/Archives/edgar/data/123/{q2.replace('-', '')}/instance.xml",
+        )
+
+    monkeypatch.setattr(companyfacts, "fetch_sec_filing_xbrl_source", load_xbrl)
+    result = companyfacts.fetch_sec_canonical_quarters(
+        "SYN", client, store, utc_now=lambda: captured, count=1
+    )
+    assert result.coverage_complete and result.periods_resolved
+    assert result.companyfacts_observation_id is not None
+    assert len(result.filing_xbrl_observation_ids) == 2
+    slot = result.slots[0]
+    assert (slot.fiscal_year, slot.fiscal_quarter) == (2026, 2)
+    revenue = slot.field(companyfacts.SecCanonicalMetric.REVENUE)
+    assert revenue.status is companyfacts.SecCanonicalFieldStatus.PRESENT
+    assert revenue.value == Decimal(120)
+    evidence = revenue.evidence[0]
+    from ohmydata.providers.sec import SecFilingXbrlFactEvidence
+
+    assert isinstance(evidence, SecFilingXbrlFactEvidence)
+    assert evidence.accession_number == q2
+    assert evidence.accepted_at == datetime(2026, 8, 1, 16, tzinfo=UTC)
+    assert evidence.index_observation_id in result.filing_xbrl_observation_ids
+    assert evidence.instance_observation_id in result.filing_xbrl_observation_ids
+    assert not hasattr(evidence, "companyfacts_observation_id")
+    assert slot.field(companyfacts.SecCanonicalMetric.GROSS_PROFIT).status is (
+        companyfacts.SecCanonicalFieldStatus.MISSING
+    )
+
+
+def test_partial_xbrl_amendment_marks_period_coverage_incomplete() -> None:
+    base = f"{_CIK}-26-000010"
+    amended = f"{_CIK}-26-000011"
+    amended_at = datetime(2026, 8, 3, 16, tzinfo=UTC)
+    filings = {
+        base: companyfacts.SecCompanyFactsFiling(
+            base, "10-Q", date(2026, 6, 30), datetime(2026, 8, 1, 16, tzinfo=UTC)
+        ),
+        amended: companyfacts.SecCompanyFactsFiling(
+            amended, "10-Q/A", date(2026, 6, 30), amended_at
+        ),
+    }
+    revenue = SecFilingXbrlFact(
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "USD",
+        Decimal(120),
+        date(2026, 4, 1),
+        date(2026, 6, 30),
+        2026,
+        "Q2",
+        base,
+        "10-Q",
+        date(2026, 8, 1),
+        filings[base].accepted_at,
+    )
+    eps = SecFilingXbrlFact(
+        "EarningsPerShareDiluted",
+        "USD/shares",
+        Decimal("0.5"),
+        date(2026, 4, 1),
+        date(2026, 6, 30),
+        2026,
+        "Q2",
+        base,
+        "10-Q",
+        date(2026, 8, 1),
+        filings[base].accepted_at,
+    )
+    amended_revenue = SecFilingXbrlFact(
+        revenue.tag,
+        revenue.unit,
+        revenue.value,
+        revenue.start,
+        revenue.end,
+        revenue.fiscal_year_focus,
+        revenue.fiscal_period_focus,
+        amended,
+        "10-Q/A",
+        date(2026, 8, 3),
+        amended_at,
+    )
+    periods, accessions = _incomplete_xbrl_amendments(
+        (revenue, eps, amended_revenue), filings, None, {amended}
+    )
+    assert periods == frozenset({(2026, 2)})
+    assert accessions == (amended,)
 
 
 def test_companyfacts_filed_date_joins_to_sec_filing_date_not_utc_acceptance_day(
@@ -777,6 +1065,11 @@ def test_companyfacts_filed_date_joins_to_sec_filing_date_not_utc_acceptance_day
     row["filingDate"] = "2025-07-30"
     store, _, _, client = _setup_api(
         monkeypatch, tmp_path / "mismatch", payload, _root_payload([row])
+    )
+    monkeypatch.setattr(
+        companyfacts,
+        "fetch_sec_filing_xbrl_source",
+        lambda **kwargs: (_ for _ in ()).throw(CoverageError("missing source")),
     )
     unresolved = companyfacts.fetch_sec_canonical_quarters(
         "SYN", client, store, utc_now=lambda: _AT

@@ -712,8 +712,14 @@ final_metric = metrics.final
 `fetch_sec_canonical_quarters` accepts an injected SEC HTTP client and snapshot
 store. It resolves a ticker through a retained SEC mapping, checks the issuer's
 submissions root, retains its companyfacts response, and fetches only history
-pages needed to verify the target filings. It returns up to eight chronological
-fiscal quarter slots so the last four can be displayed alongside the prior-year
+pages needed to verify the target filings. If a newer 10-Q or 10-Q/A is present
+in submissions but omitted from companyfacts, it also retains that filing's SEC
+index and XBRL instance and parses only undimensioned, exact three-month
+canonical facts. Such facts are exposed as `SecFilingXbrlFactEvidence` with
+separate index/instance observation IDs; they are never labeled as
+companyfacts evidence. A missing or unresolvable filing source leaves coverage
+incomplete; a malformed source raises a schema error. It returns up to eight chronological fiscal
+quarter slots so the last four can be displayed alongside the prior-year
 comparables. The caller remains responsible for its universe, decision cutoff,
 storage and publication.
 
@@ -749,16 +755,33 @@ ADR or currency conversion paths do not establish SEC quarterly facts here.
 Companyfacts `filed` dates are checked against the SEC submissions `filingDate`;
 the distinct UTC acceptance timestamp remains the filing cutoff evidence.
 
+The current revenue mapping is `sec-us-gaap-quarterly-v2`. For a Revenue
+fact set from one accession, or its proven 10-Q to 10-Q/A amendment chain, with
+the same period dates and unit, `Revenues` denotes the unqualified consolidated
+top-line total and takes precedence over `RevenueFromContractWithCustomer*`
+facts, which report the customer-contract subset. This distinction is visible
+in Bloom Energy's June 2026 quarter: its
+statement of operations reports total revenue, while the revenue note breaks
+out the smaller customer-contract amount and separate lease revenue. A
+`PRESENT` field keeps all those native candidates in `evidence`, with the
+selected fact first; `value` and `evidence[0].value` agree. Candidates from
+different accessions or different units remain `AMBIGUOUS`; this rule does not
+resolve filing or unit conflicts. The mapping version is included in the result.
+
 Each field reports `PRESENT`, `MISSING`, `AMBIGUOUS` or `COVERAGE_INCOMPLETE`.
-Conflicting aliases or amendments remain alternatives. For additive USD flow
+Other conflicting aliases or amendments remain alternatives. For additive USD flow
 metrics, Q4 uses a matched 10-K fiscal year fact minus a Q3 year-to-date 10-Q
 fact with the same native concept, unit and start date. This high-level API
 keeps amendments as alternatives and does not pair them in that subtraction.
 Diluted EPS is never subtracted; it appears for Q4 only when SEC supplies an
-explicit three-month fact. Field evidence retains native tag, unit, start/end dates,
-fiscal focus, accession, filing acceptance time, companyfacts observation ID
-and the official filing URL when the submissions document name is usable.
+explicit three-month fact. Evidence retains native tag, unit, start/end dates,
+fiscal focus, accession, filing acceptance time, and source-specific observation
+IDs. Companyfacts facts retain their companyfacts observation ID and filing URL;
+filing-level XBRL facts retain separate directory and instance observation IDs.
 Derived Q4 values retain both source facts in `source_evidence`.
+Facts parsed from a filing-level XBRL instance instead retain the directory and
+instance observation IDs. For a 10-Q/A, equal facts prefer the latest accepted
+amendment; conflicting original and amendment values remain `AMBIGUOUS`.
 
 When companyfacts lacks an explicit three-month Q4 EPS fact, callers can pass
 `enrich_8k_q4_eps=True` to `fetch_sec_canonical_quarters` or invoke
@@ -845,15 +868,21 @@ new quarter is due, or establish point-in-time public availability from SEC
 acceptance time alone. It does not reconcile 6-K/A amendments or search
 historical submissions pages. A changed release layout fails explicitly.
 
-`discover_sec_filing_events` replays a retained SEC submissions root and every
-historical file declared by that root. The caller supplies a CIK, selected forms,
-UTC acceptance window, overlap duration and incremental/reconciliation mode.
-It preserves acceptance metadata, emits filing events and exact 8-K item 2.02
-events, and fails on missing pages or conflicting facts. Acceptance is not proof
-of the website's first publication time.
+`discover_sec_filing_events` replays a retained SEC submissions root and the
+historical pages selected for the requested UTC acceptance window. Pages are
+selected from the root's advertised filing-date ranges with a one-day pad on
+either side; if any range is absent, the full advertised closure is required.
+The caller supplies a CIK, selected forms, UTC acceptance window, overlap
+duration and incremental/reconciliation mode. It preserves acceptance metadata,
+emits filing events and exact 8-K item 2.02 events, and fails on missing pages
+or conflicting facts. Acceptance is not proof of the website's first
+publication time.
 
-`fetch_sec_submissions_closure` obtains that complete root and every advertised
-history page with an injected `SecHttpClient` and `SnapshotStore`. The client
+`fetch_sec_submissions_closure` obtains the complete root and every advertised
+history page. `fetch_sec_submissions_window`, used by
+`fetch_sec_discovery_batch`, retains the root and only the date-ranged history
+pages that can overlap its requested window (or all pages when a safe subset
+cannot be proven). Both use an injected `SecHttpClient` and `SnapshotStore`. The client
 requires a caller supplied SEC User-Agent and applies its request spacing and
 retry policy for transient connection and HTTP status failures. A response body
 read failure is classified as transient; the caller retries the full closure.

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from typing import Any, Never, cast
 
@@ -96,6 +96,50 @@ def _strict_json(payload: bytes) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SchemaMismatchError("submissions payload must be an object")
     return value
+
+
+def _history_pages_for_acceptance_window(
+    root: Mapping[str, Any], cik: str, lower: datetime, upper: datetime
+) -> tuple[str, ...]:
+    """Select every archived page whose filing-date range could overlap a UTC window.
+
+    SEC's history descriptors carry filing dates, while discovery is bounded by
+    acceptance timestamps. The one-day pad on either side covers the SEC-local
+    filing date versus UTC acceptance date boundary. If any descriptor omits its
+    range, use the complete advertised closure because a safe subset cannot be
+    proven from the root.
+    """
+    names = historical_basenames(dict(root), cik)
+    filings = root.get("filings")
+    files = filings.get("files") if isinstance(filings, Mapping) else None
+    if not isinstance(files, (list, tuple)):
+        raise SchemaMismatchError("historical submissions references missing")
+    ranges: dict[str, tuple[date, date]] = {}
+    for raw in files:
+        if not isinstance(raw, Mapping):
+            raise SchemaMismatchError("invalid historical reference")
+        name = raw.get("name")
+        if type(name) is not str or name not in names:
+            raise SchemaMismatchError("invalid historical reference")
+        filed_from, filed_to = raw.get("filingFrom"), raw.get("filingTo")
+        if filed_from is None and filed_to is None:
+            return names
+        if type(filed_from) is not str or type(filed_to) is not str:
+            return names
+        try:
+            start, end = date.fromisoformat(filed_from), date.fromisoformat(filed_to)
+        except ValueError as exc:
+            raise SchemaMismatchError("invalid historical filing date range") from exc
+        if start.isoformat() != filed_from or end.isoformat() != filed_to or start > end:
+            raise SchemaMismatchError("invalid historical filing date range")
+        ranges[name] = (start, end)
+    if len(ranges) != len(names):
+        raise SchemaMismatchError("historical filing date range identity mismatch")
+    lower_day = (lower.astimezone(UTC) - timedelta(days=1)).date()
+    upper_day = (upper.astimezone(UTC) + timedelta(days=1)).date()
+    return tuple(
+        name for name in names if ranges[name][0] <= upper_day and ranges[name][1] >= lower_day
+    )
 
 
 def _json_preflight(payload: bytes) -> None:
@@ -294,7 +338,7 @@ def discover_sec_filing_events(
     _replay_cache: _DiscoveryReplayCache | None = None,
     _root_only: bool = False,
 ) -> SecDiscoveryBatch:
-    """Replay a complete retained SEC submissions closure and emit selected events."""
+    """Replay the exact retained root/history closure for the requested window."""
     if (
         not isinstance(store, SnapshotStore)
         or type(policy) is not SecDiscoveryPolicy
@@ -323,13 +367,16 @@ def discover_sec_filing_events(
         raise SchemaMismatchError("historical submissions references missing")
     names = historical_basenames(root, padded)
     if not _root_only:
-        if len(names) != len(children):
-            raise CoverageError("historical submissions closure mismatch")
-        expected = tuple(historical_submission_url(padded, name) for name in names)
+        expected_names = _history_pages_for_acceptance_window(
+            root, padded, policy.acceptance_lower, policy.acceptance_upper
+        )
+        expected = tuple(historical_submission_url(padded, name) for name in expected_names)
+        if len(expected_names) != len(children):
+            raise CoverageError("historical submissions window closure mismatch")
         if tuple(sorted(source.url for source in children)) != tuple(sorted(expected)) or len(
             {source.url for source in children}
         ) != len(children):
-            raise CoverageError("historical submissions closure mismatch")
+            raise CoverageError("historical submissions window closure mismatch")
     children = tuple(sorted(children, key=lambda source: source.url))
     names_by_url = {historical_submission_url(padded, name): name for name in names}
     payloads = [(root_source, root, False, root_bytes)]

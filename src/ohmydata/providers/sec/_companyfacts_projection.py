@@ -18,8 +18,11 @@ from ._companyfacts_models import (
     SecCanonicalQuarterSlot,
     SecCompanyFactsFact,
     SecCompanyFactsFiling,
+    SecFilingXbrlFactEvidence,
 )
 from ._companyfacts_periods import _resolve_filing_periods
+from ._companyfacts_selection import finalize_canonical_candidates
+from ._filing_xbrl import SecFilingXbrlFact
 from ._metric_arithmetic import exact_sum
 from .errors import ResourceLimitError, SchemaMismatchError
 
@@ -29,16 +32,19 @@ _MAX_PAIR_ROWS = 4_096
 _MAX_PAIR_ATTEMPTS = 10_000
 
 
-def _duration_days(fact: SecCompanyFactsFact) -> int:
+Fact = SecCompanyFactsFact | SecFilingXbrlFact
+
+
+def _duration_days(fact: Fact) -> int:
     return (fact.end - fact.start).days + 1
 
 
-def _valid_quarter_frame(fact: SecCompanyFactsFact) -> bool:
+def _valid_quarter_frame(fact: Fact) -> bool:
     return fact.frame is None or _QUARTER_FRAME.fullmatch(fact.frame) is not None
 
 
 def _fiscal_period(
-    fact: SecCompanyFactsFact,
+    fact: Fact,
     filing: SecCompanyFactsFiling,
     resolved_periods: Mapping[str, tuple[int, int]] | None = None,
 ) -> tuple[int, int] | None:
@@ -65,7 +71,7 @@ def _fiscal_period(
 
 
 def _ordered_periods(
-    facts: tuple[SecCompanyFactsFact, ...],
+    facts: tuple[Fact, ...],
     filings: Mapping[str, SecCompanyFactsFiling],
     acceptance_upper: datetime | None,
 ) -> tuple[tuple[int, int], ...]:
@@ -97,7 +103,7 @@ def _ordered_periods(
 
 
 def _unmodeled_newer_filings(
-    facts: tuple[SecCompanyFactsFact, ...],
+    facts: tuple[Fact, ...],
     filings: Mapping[str, SecCompanyFactsFiling],
     acceptance_upper: datetime | None,
 ) -> tuple[str, ...]:
@@ -128,7 +134,7 @@ def _unmodeled_newer_filings(
 
 
 def _periods_from_companyfacts(
-    facts: tuple[SecCompanyFactsFact, ...], acceptance_upper: datetime | None, count: int
+    facts: tuple[Fact, ...], acceptance_upper: datetime | None, count: int
 ) -> tuple[tuple[int, int], ...]:
     resolved = _resolve_filing_periods(facts, acceptance_upper=acceptance_upper)
     available: set[tuple[int, int]] = set()
@@ -174,7 +180,7 @@ def _periods_from_companyfacts(
 
 
 def _target_fact_accessions(
-    facts: tuple[SecCompanyFactsFact, ...],
+    facts: tuple[Fact, ...],
     periods: tuple[tuple[int, int], ...],
     filings: Mapping[str, SecCompanyFactsFiling] | None = None,
 ) -> tuple[dict[str, date], dict[tuple[int, int], set[str]]]:
@@ -249,7 +255,7 @@ def _evidence(
 
 
 def project_sec_companyfacts_quarters(
-    facts: tuple[SecCompanyFactsFact, ...],
+    facts: tuple[Fact, ...],
     filings: Mapping[str, SecCompanyFactsFiling],
     observation_id: str,
     *,
@@ -257,6 +263,7 @@ def project_sec_companyfacts_quarters(
     count: int = 8,
     requested_periods: tuple[tuple[int, int], ...] | None = None,
     incomplete_periods: frozenset[tuple[int, int]] = frozenset(),
+    filing_xbrl_observations: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[SecCanonicalQuarterSlot, ...]:
     """Pure projection helper; only facts joined to exact SEC submission records count."""
     if type(count) is not int or not 1 <= count <= 8:
@@ -268,6 +275,32 @@ def project_sec_companyfacts_quarters(
     ):
         raise ValueError("acceptance_upper must be timezone-aware")
     bound = acceptance_upper.astimezone(UTC) if acceptance_upper is not None else None
+    xbrl_observations = filing_xbrl_observations or {}
+
+    def evidence_for(
+        fact: Fact, filing: SecCompanyFactsFiling
+    ) -> SecCanonicalFactEvidence | SecFilingXbrlFactEvidence:
+        if isinstance(fact, SecFilingXbrlFact):
+            observation_pair = xbrl_observations.get(fact.accn)
+            if observation_pair is None:
+                raise SchemaMismatchError("SEC filing XBRL evidence identity is missing")
+            return SecFilingXbrlFactEvidence(
+                fact.tag,
+                fact.unit,
+                fact.value,
+                fact.start,
+                fact.end,
+                fact.fiscal_year_focus,
+                fact.fiscal_period_focus,
+                fact.accession_number,
+                fact.form,
+                filing.accepted_at,
+                observation_pair[0],
+                observation_pair[1],
+                filing.filing_url,
+            )
+        return _evidence(fact, filing, observation_id)
+
     resolved = _resolve_filing_periods(facts, filings, bound)
     periods = requested_periods or _ordered_periods(facts, filings, bound)
     if len(periods) > 8 or any(
@@ -283,12 +316,15 @@ def project_sec_companyfacts_quarters(
 
     def candidates(
         metric: SecCanonicalMetric, year: int, quarter: int
-    ) -> tuple[list[SecCanonicalFactEvidence], bool]:
+    ) -> tuple[
+        list[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence],
+        bool,
+        tuple[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence, ...],
+    ]:
         tags = SEC_CANONICAL_CONCEPTS[metric.value]
-        valid: list[SecCanonicalFactEvidence] = []
-        incompatible_amendment = False
+        valid: list[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence] = []
 
-        def add_candidate(evidence: SecCanonicalFactEvidence) -> None:
+        def add_candidate(evidence: SecCanonicalFactEvidence | SecFilingXbrlFactEvidence) -> None:
             if len(valid) >= _MAX_FIELD_ALTERNATIVES:
                 raise ResourceLimitError("SEC quarterly field alternative limit exceeded")
             valid.append(evidence)
@@ -307,12 +343,10 @@ def project_sec_companyfacts_quarters(
                 duration = _duration_days(fact)
                 if not 60 <= duration <= 120 or fact.unit not in _UNITS[metric.value]:
                     continue
-                if fact.form.endswith("/A"):
-                    incompatible_amendment = True
-                add_candidate(_evidence(fact, filing, observation_id))
+                add_candidate(evidence_for(fact, filing))
         elif metric.value in _FLOW_METRICS:
-            fy_rows: list[SecCompanyFactsFact] = []
-            ytd_rows: list[SecCompanyFactsFact] = []
+            fy_rows: list[Fact] = []
+            ytd_rows: list[Fact] = []
             for fact in facts:
                 filing = filings.get(fact.accn)
                 if filing is None or (bound is not None and filing.accepted_at > bound):
@@ -336,13 +370,11 @@ def project_sec_companyfacts_quarters(
                     ytd_rows.append(fact)
             for annual in fy_rows:
                 if annual.form.endswith("/A"):
-                    incompatible_amendment = True
-                    add_candidate(_evidence(annual, filings[annual.accn], observation_id))
+                    add_candidate(evidence_for(annual, filings[annual.accn]))
             for ytd in ytd_rows:
                 if ytd.form.endswith("/A"):
-                    incompatible_amendment = True
-                    add_candidate(_evidence(ytd, filings[ytd.accn], observation_id))
-            ytd_by_key: dict[tuple[str, str, date], list[SecCompanyFactsFact]] = {}
+                    add_candidate(evidence_for(ytd, filings[ytd.accn]))
+            ytd_by_key: dict[tuple[str, str, date], list[Fact]] = {}
             for ytd in ytd_rows:
                 ytd_by_key.setdefault((ytd.tag, ytd.unit, ytd.start), []).append(ytd)
             pair_attempts = 0
@@ -378,8 +410,8 @@ def project_sec_companyfacts_quarters(
                             observation_id,
                             filing_fy.filing_url,
                             (
-                                _evidence(annual, filing_fy, observation_id),
-                                _evidence(ytd, filing_ytd, observation_id),
+                                evidence_for(annual, filing_fy),
+                                evidence_for(ytd, filing_ytd),
                             ),
                         )
                     )
@@ -400,27 +432,23 @@ def project_sec_companyfacts_quarters(
                     and 60 <= _duration_days(fact) <= 120
                     and _valid_quarter_frame(fact)
                 ):
-                    if fact.form.endswith("/A"):
-                        incompatible_amendment = True
-                    add_candidate(_evidence(fact, filing, observation_id))
-        # Two tags or two filing accessions are retained as ambiguous alternatives.
-        # Every retained source accession and unit is part of the alternative.
-        # Equal Q4 values from different Q3 filings are still distinct evidence.
-        dedup = {item: item for item in valid}
-        return list(dedup.values()), incompatible_amendment
+                    add_candidate(evidence_for(fact, filing))
+        # Every retained source accession and unit remains visible even when a
+        # versioned semantic rule selects one canonical value.
+        return finalize_canonical_candidates(metric, valid, filings)
 
     slots: list[SecCanonicalQuarterSlot] = []
     for year, quarter in periods:
         fields: list[SecCanonicalQuarterField] = []
         for metric in SecCanonicalMetric:
-            found, incompatible_amendment = candidates(metric, year, quarter)
+            found, incompatible_amendment, supporting = candidates(metric, year, quarter)
             if (year, quarter) in incomplete_periods:
                 field = SecCanonicalQuarterField(
                     metric,
                     SecCanonicalFieldStatus.COVERAGE_INCOMPLETE,
                     None,
                     None,
-                    tuple(found),
+                    supporting,
                 )
             elif not found:
                 field = SecCanonicalQuarterField(
@@ -428,7 +456,7 @@ def project_sec_companyfacts_quarters(
                 )
             elif len(found) > 1 or incompatible_amendment:
                 field = SecCanonicalQuarterField(
-                    metric, SecCanonicalFieldStatus.AMBIGUOUS, None, None, tuple(found)
+                    metric, SecCanonicalFieldStatus.AMBIGUOUS, None, None, supporting
                 )
             else:
                 field = SecCanonicalQuarterField(
@@ -436,7 +464,7 @@ def project_sec_companyfacts_quarters(
                     SecCanonicalFieldStatus.PRESENT,
                     found[0].value,
                     found[0].unit,
-                    tuple(found),
+                    supporting,
                 )
             fields.append(field)
         slots.append(SecCanonicalQuarterSlot(year, quarter, tuple(fields)))

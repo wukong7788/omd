@@ -159,6 +159,46 @@ def test_fails_closed_for_missing_history_and_naive_acceptance(tmp_path) -> None
         discover_sec_filing_events(store, no_tz, (), policy=_policy(), prior_cursor=None)
 
 
+def test_window_closure_requires_all_overlapping_history_pages(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 5))
+    dates = ("2024-04-29", "2024-04-30", "2024-05-01", "2024-05-02")
+    root = _source(
+        store,
+        "edgar_submissions",
+        {"cik": "0000000001", "required_accessions": ["0000000001-24-000001"]},
+        "https://data.sec.gov/submissions/CIK0000000001.json",
+        {
+            "cik": "0000000001",
+            "filings": {
+                "recent": _row("0000000001-24-000001"),
+                "files": [
+                    {"name": name, "filingFrom": filed, "filingTo": filed}
+                    for name, filed in zip(names, dates, strict=True)
+                ],
+            },
+        },
+    )
+    policy = SecDiscoveryPolicy(
+        "1",
+        ("8-K",),
+        datetime(2024, 5, 1, 8, tzinfo=UTC),
+        datetime(2024, 5, 1, 20, tzinfo=UTC),
+        timedelta(0),
+        SecDiscoveryMode.RECONCILE,
+        "window-closure-v1",
+    )
+    first_required = _source(
+        store,
+        "edgar_submissions_history",
+        {"cik": "0000000001", "basename": names[1]},
+        f"https://data.sec.gov/submissions/{names[1]}",
+        {"cik": "0000000001", **_row("0000000001-24-000002")},
+    )
+    with pytest.raises(CoverageError, match="window closure"):
+        discover_sec_filing_events(store, root, (first_required,), policy=policy, prior_cursor=None)
+
+
 @pytest.mark.parametrize("items, expected", [("2.02", 2), ("2.020", 1), (" 2.02", 0), (None, 1)])
 def test_8k_items_are_exact_tokens_and_missing_is_unknown(tmp_path, items, expected) -> None:
     store = SnapshotStore(tmp_path)

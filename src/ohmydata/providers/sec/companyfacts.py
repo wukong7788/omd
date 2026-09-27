@@ -22,8 +22,10 @@ from ._companyfacts_models import (
     SecCanonicalQuarterSlot,
     SecCompanyFactsFact,
     SecCompanyFactsFiling,
+    SecFilingXbrlFactEvidence,
     parse_sec_companyfacts_payload,
 )
+from ._companyfacts_periods import _resolve_filing_periods
 from ._companyfacts_projection import (
     _ordered_periods,
     _periods_from_companyfacts,
@@ -38,7 +40,8 @@ from ._companyfacts_submissions import (
     _submission_filings,
 )
 from ._event_discovery_models import SecDiscoverySource
-from .errors import ResourceLimitError, SchemaMismatchError, TransientProviderError
+from ._filing_xbrl import SecFilingXbrlFact, fetch_sec_filing_xbrl_source
+from .errors import CoverageError, ResourceLimitError, SchemaMismatchError, TransientProviderError
 from .http import SecHttpClient, validate_sec_url
 from .quarterly import (
     SecCompanyEligibilityStatus,
@@ -62,6 +65,53 @@ def _empty_result(ticker: str, eligibility: SecQuarterlyEligibility) -> SecCanon
         None,
         tuple(item for item in (eligibility.submissions_observation_id,) if item is not None),
     )
+
+
+def _incomplete_xbrl_amendments(
+    facts: tuple[SecCompanyFactsFact | SecFilingXbrlFact, ...],
+    filings: dict[str, SecCompanyFactsFiling],
+    acceptance_upper: datetime | None,
+    filing_xbrl_accessions: set[str],
+) -> tuple[frozenset[tuple[int, int]], tuple[str, ...]]:
+    """Find retained amendments that omit canonical fact classes from their base filing."""
+    resolved = _resolve_filing_periods(facts, filings, acceptance_upper)
+    amendment_accessions = {
+        fact.accn
+        for fact in facts
+        if fact.form == "10-Q/A" and fact.accn in filings and fact.accn in filing_xbrl_accessions
+    }
+    incomplete_periods: set[tuple[int, int]] = set()
+    incomplete_accessions: set[str] = set()
+    for amended_accession in amendment_accessions:
+        amended_filing = filings[amended_accession]
+        if acceptance_upper is not None and amended_filing.accepted_at > acceptance_upper:
+            continue
+        bases = [
+            filing
+            for filing in filings.values()
+            if filing.form == "10-Q"
+            and filing.report_date == amended_filing.report_date
+            and filing.accepted_at < amended_filing.accepted_at
+        ]
+        if not bases:
+            continue
+        base = max(bases, key=lambda filing: filing.accepted_at)
+
+        def metric_classes(accession: str) -> set[str]:
+            return {
+                metric
+                for fact in facts
+                if fact.accn == accession
+                for metric, tags in SEC_CANONICAL_CONCEPTS.items()
+                if fact.tag in tags
+            }
+
+        if metric_classes(base.accession_number) - metric_classes(amended_accession):
+            period = resolved.get(amended_accession)
+            if period is not None:
+                incomplete_periods.add(period)
+                incomplete_accessions.add(amended_accession)
+    return frozenset(incomplete_periods), tuple(sorted(incomplete_accessions))
 
 
 def fetch_sec_canonical_quarters(
@@ -203,10 +253,47 @@ def fetch_sec_canonical_quarters(
     filings, submission_observations = _submission_filings(
         store, cik, root_source, tuple(historical_sources)
     )
-    needed, by_period = _target_fact_accessions(raw_facts, initial_periods, filings)
+    filing_xbrl_facts: list[SecFilingXbrlFact] = []
+    filing_xbrl_observations: dict[str, tuple[str, str]] = {}
+    unresolved_before_xbrl = _unmodeled_newer_filings(raw_facts, filings, bound)
+    for accession in unresolved_before_xbrl:
+        filing = filings.get(accession)
+        if (
+            filing is None
+            or filing.form not in {"10-Q", "10-Q/A"}
+            or filing.primary_document is None
+        ):
+            continue
+        try:
+            source = fetch_sec_filing_xbrl_source(
+                client=client,
+                store=store,
+                cik=cik,
+                accession_number=accession,
+                form=filing.form,
+                report_date=filing.report_date,
+                filing_date=filing.filing_date or filing.accepted_at.date(),
+                accepted_at=filing.accepted_at,
+                primary_document=filing.primary_document,
+                utc_now=utc_now,
+            )
+        except CoverageError:
+            # A 404 for this filing's index/instance is incomplete evidence; it
+            # must not be treated as an empty filing or as resolved coverage.
+            continue
+        filing_xbrl_observations[accession] = (
+            source.index_observation.observation_identity,
+            source.instance_observation.observation_identity,
+        )
+        if not source.facts:
+            continue
+        filing_xbrl_facts.extend(source.facts)
+    combined_facts = raw_facts + tuple(filing_xbrl_facts)
+    needed, by_period = _target_fact_accessions(combined_facts, initial_periods, filings)
     uncovered = tuple(sorted(set(uncovered) | (set(needed) - set(filings))))
-    unresolved_period_accessions = _unmodeled_newer_filings(raw_facts, filings, bound)
+    unresolved_period_accessions = _unmodeled_newer_filings(combined_facts, filings, bound)
     if unresolved_period_accessions:
+        uncovered = tuple(sorted(set(uncovered) | set(unresolved_period_accessions)))
         return SecCanonicalQuarterlyResult(
             canonical_ticker,
             cik,
@@ -218,10 +305,24 @@ def fetch_sec_canonical_quarters(
             False,
             uncovered,
             unresolved_period_accessions,
+            filing_xbrl_observation_ids=tuple(
+                observation_id
+                for pair in filing_xbrl_observations.values()
+                for observation_id in pair
+            ),
         )
-    resolved_periods = _ordered_periods(raw_facts, filings, bound)
+    resolved_periods = _ordered_periods(combined_facts, filings, bound)
+    incomplete_amendment_periods, incomplete_amendment_accessions = _incomplete_xbrl_amendments(
+        combined_facts, filings, bound, set(filing_xbrl_observations)
+    )
     requested_periods = resolved_periods[-count:]
-    if not set(requested_periods).issubset(initial_periods):
+    xbrl_resolved = _resolve_filing_periods(combined_facts, filings, bound)
+    xbrl_periods = {
+        xbrl_resolved[accession]
+        for accession in filing_xbrl_observations
+        if accession in xbrl_resolved
+    }
+    if not set(requested_periods).issubset(set(initial_periods) | xbrl_periods):
         # A same-day filing (or revision) can move the accepted-time anchor
         # farther back than the candidate window. Its older accessions were
         # not selected for historical replay, so no complete projection exists.
@@ -240,19 +341,21 @@ def fetch_sec_canonical_quarters(
         accession for period in requested_periods for accession in by_period.get(period, ())
     }
     uncovered = tuple(accession for accession in uncovered if accession in required_accessions)
+    uncovered = tuple(sorted(set(uncovered) | set(incomplete_amendment_accessions)))
     uncovered_periods = frozenset(
         period
         for period in requested_periods
         if by_period.get(period, set()).intersection(uncovered)
-    )
+    ) | frozenset(period for period in requested_periods if period in incomplete_amendment_periods)
     slots = project_sec_companyfacts_quarters(
-        raw_facts,
+        combined_facts,
         filings,
         observation.observation_identity,
         acceptance_upper=bound,
         count=count,
         requested_periods=requested_periods,
         incomplete_periods=uncovered_periods,
+        filing_xbrl_observations=filing_xbrl_observations,
     )
     result = SecCanonicalQuarterlyResult(
         canonical_ticker,
@@ -264,6 +367,9 @@ def fetch_sec_canonical_quarters(
         not uncovered,
         bool(resolved_periods),
         uncovered,
+        filing_xbrl_observation_ids=tuple(
+            observation_id for pair in filing_xbrl_observations.values() for observation_id in pair
+        ),
     )
     if enrich_8k_q4_eps:
         from .earnings_8k import (
@@ -313,6 +419,7 @@ __all__ = [
     "SecCanonicalQuarterlyResult",
     "SecCompanyFactsFact",
     "SecCompanyFactsFiling",
+    "SecFilingXbrlFactEvidence",
     "fetch_sec_canonical_quarters",
     "parse_sec_companyfacts_payload",
     "project_sec_companyfacts_quarters",

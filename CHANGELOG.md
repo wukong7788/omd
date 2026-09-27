@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.4.8 — 2026-09-27
+
+- Resolve newer SEC 10-Q/10-Q/A filings omitted from companyfacts through their
+  retained filing index and XBRL instance. Keep this source as distinct
+  `SecFilingXbrlFactEvidence` with exact filing and period checks; unavailable
+  or fact-free filings remain unresolved, malformed data raises a schema error,
+  and conflicting amendment values remain ambiguous.
+- Bound SEC filing-event discovery to the history pages whose advertised filing
+  date ranges can overlap the requested UTC acceptance window, with a one-day
+  pad on each side for filing-date/UTC boundaries. Missing ranges retain the
+  conservative full-closure requirement; selected-page mismatches remain
+  coverage failures. Version the canonical revenue precedence so a `Revenues`
+  total can take priority over its contract-revenue subset within one accession
+  or a proven 10-Q to 10-Q/A amendment chain, while retaining every native fact
+  candidate.
+- Accept direct GAAP diluted EPS disclosures labeled “basic and diluted” when
+  the period and per-share row match; prefer an equivalent diluted-only label
+  while preserving ambiguity when otherwise eligible values conflict.
 
 ## 0.4.7 — 2026-09-27
 

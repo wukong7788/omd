@@ -296,19 +296,57 @@ def test_8k_parser_reads_split_period_headers_after_statement_title_rows() -> No
     assert result == {date(2025, 12, 31): (Decimal("-0.03"), "GAAP net loss per share, diluted")}
 
 
-def test_8k_parser_rejects_combined_basic_and_adjusted_diluted_rows() -> None:
+def test_8k_parser_prefers_diluted_label_and_rejects_basic_only_and_adjusted_rows() -> None:
     html = b"""
     <table>
       <tr><th></th><th>Three Months Ended January 31, 2026</th></tr>
-      <tr><td>Net income per share, basic and diluted</td><td>0.03</td></tr>
-      <tr><td>GAAP EPS, Diluted</td><td>0.03</td></tr>
+      <tr><td>Net loss per share, basic only</td><td>0.05</td></tr>
+      <tr><td>Net loss per share, basic and diluted</td><td>(0.03)</td></tr>
+      <tr><td>GAAP EPS, Diluted</td><td>(0.03)</td></tr>
       <tr><td>Earnings per share when excluding one-time items, diluted</td><td>0.07</td></tr>
     </table>
     """
 
     result = earnings_8k.parse_sec_8k_earnings_release(html, expected_period_end=date(2026, 1, 31))
 
-    assert result == {date(2026, 1, 31): (Decimal("0.03"), "GAAP EPS, Diluted")}
+    assert result == {date(2026, 1, 31): (Decimal("-0.03"), "GAAP EPS, Diluted")}
+
+
+def test_8k_parser_accepts_combined_basic_diluted_gaap_as_fallback() -> None:
+    html = b"""
+    <table>
+      <tr><th></th><th colspan="2">Three Months Ended January 31, 2026</th>
+          <th colspan="2">Three Months Ended January 31, 2025</th></tr>
+      <tr><td>Net loss per share attributable to Snowflake Inc. common stockholders&mdash;basic and diluted</td>
+          <td>$</td><td>(0.90)</td><td>$</td><td>(0.99)</td></tr>
+    </table>
+    """
+
+    result = earnings_8k.parse_sec_8k_earnings_release(html)
+
+    assert result == {
+        date(2026, 1, 31): (
+            Decimal("-0.90"),
+            "Net loss per share attributable to Snowflake Inc. common stockholders—basic and diluted",
+        ),
+        date(2025, 1, 31): (
+            Decimal("-0.99"),
+            "Net loss per share attributable to Snowflake Inc. common stockholders—basic and diluted",
+        ),
+    }
+
+
+def test_8k_parser_keeps_combined_vs_diluted_value_conflicts_ambiguous() -> None:
+    html = b"""
+    <table>
+      <tr><th></th><th>Three Months Ended January 31, 2026</th></tr>
+      <tr><td>Net loss per share, basic and diluted</td><td>(0.90)</td></tr>
+      <tr><td>GAAP net loss per share, diluted</td><td>(0.91)</td></tr>
+    </table>
+    """
+
+    with pytest.raises(Sec8KEpsAmbiguousError):
+        earnings_8k.parse_sec_8k_earnings_release(html)
 
 
 def test_8k_non_gaap_and_guidance_rejection(monkeypatch, tmp_path) -> None:

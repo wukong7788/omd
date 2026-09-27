@@ -17,7 +17,11 @@ from .errors import ResourceLimitError, SchemaMismatchError
 from .quarterly import SecQuarterlyEligibility
 
 SEC_COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-SEC_CANONICAL_CONCEPTS_VERSION = "sec-us-gaap-quarterly-v1"
+SEC_CANONICAL_CONCEPTS_VERSION = "sec-us-gaap-quarterly-v2"
+# In v2, the unqualified US-GAAP Revenues concept is the total-revenue tier.
+# Contract-specific revenue concepts remain eligible fallbacks but do not
+# override a same-period, same-context total-revenue fact.
+SEC_CANONICAL_REVENUE_PRIORITY = ("Revenues",)
 SEC_CANONICAL_CONCEPTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "REVENUE": (
@@ -93,7 +97,30 @@ class SecCanonicalFactEvidence:
     accepted_at: datetime
     companyfacts_observation_id: str
     filing_url: str | None = None
-    source_evidence: tuple[SecCanonicalFactEvidence, ...] = ()
+    source_evidence: tuple[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence, ...] = ()
+
+
+@dataclass(frozen=True)
+class SecFilingXbrlFactEvidence:
+    """Canonical fact parsed from the exact retained XBRL filing instance."""
+
+    native_tag: str
+    unit: str
+    value: Decimal
+    period_start: date
+    period_end: date
+    fiscal_year_focus: int
+    fiscal_period_focus: str
+    accession_number: str
+    form: str
+    accepted_at: datetime
+    index_observation_id: str
+    instance_observation_id: str
+    filing_url: str | None = None
+
+    @property
+    def source_evidence(self) -> tuple[SecCanonicalFactEvidence, ...]:
+        return ()
 
 
 @dataclass(frozen=True)
@@ -123,7 +150,7 @@ class Sec8KReleaseEvidence:
         return ()
 
 
-SecCanonicalEvidence = SecCanonicalFactEvidence | Sec8KReleaseEvidence
+SecCanonicalEvidence = SecCanonicalFactEvidence | SecFilingXbrlFactEvidence | Sec8KReleaseEvidence
 
 
 @dataclass(frozen=True)
@@ -132,7 +159,9 @@ class SecCanonicalQuarterField:
     status: SecCanonicalFieldStatus
     value: Decimal | None
     unit: str | None
-    evidence: tuple[SecCanonicalFactEvidence | Sec8KReleaseEvidence, ...]
+    evidence: tuple[
+        SecCanonicalFactEvidence | SecFilingXbrlFactEvidence | Sec8KReleaseEvidence, ...
+    ]
 
 
 @dataclass(frozen=True)
@@ -161,6 +190,7 @@ class SecCanonicalQuarterlyResult:
     uncovered_accessions: tuple[str, ...] = ()
     unresolved_period_accessions: tuple[str, ...] = ()
     concept_mapping_version: str = SEC_CANONICAL_CONCEPTS_VERSION
+    filing_xbrl_observation_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

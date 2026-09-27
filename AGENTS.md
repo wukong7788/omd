@@ -232,13 +232,13 @@ version after `v1.0.0`.
   `uv.lock`, the exact version assertion in `tests/test_package.py`, and
   `CHANGELOG.md`. Documentation describing changed public behavior must be
   updated in that commit as well.
-- Unless the user explicitly names another publication branch, promote the
-  release to `main`. Verify that remote `main` points to the exact release
-  commit before running the publication workflow from `main`.
 - Before committing, run the canonical test, Ruff, format, ty check, build, and
   `git diff --check` gates; inspect the built wheel/sdist version and the
   staged diff, and run the secret scan. Never publish a version that is
   inconsistent across those files or already exists on PyPI.
+- Unless the user explicitly names another publication branch, merge and push
+  the release commit to `main`, verify that remote `main` resolves to that exact
+  release commit, and dispatch `.github/workflows/publish.yml` from `main`.
 - After the release commit is committed and pushed to the intended public
   branch, the user may authorize execution of `.github/workflows/publish.yml`
   via GitHub Actions `workflow_dispatch`. Confirm the workflow uses the
@@ -266,16 +266,53 @@ version after `v1.0.0`.
 Keep final responses concise: lead with the result, then relevant validation
 and unresolved risks. Omit empty sections, repeated summaries, and checklist
 matrices unless requested. Brevity must not hide failures or missing evidence.
+Output verbosity settings affect narration only. `verbose=false`, terse output,
+or compact agent handoffs must never reduce investigation depth, implementation
+scope, test coverage, or acceptance evidence.
 
 Resolve routine choices within the user's authorized scope and continue work.
 Ask only when missing information materially affects correctness or scope, or
 an action requires authorization not already provided in the conversation.
 
-For an explicit Sol–Luna execution request, use the installed `boss-agent`
-skill's `sol-luna` route: Sol scopes and accepts the work, and Luna executes
-it. A task size or plan/spec alone does not activate the route. Explanation,
-document-only work, trivial edits, publishing, secrets, and live provider
-operations do not activate it.
+### Unresolved Data Outcomes
+
+When the requested outcome is to repair, complete, update, or validate data,
+`AMBIGUOUS`, `MISSING`, `COVERAGE_INCOMPLETE`, skipped symbols, resource-limit
+errors, and provider failures are intermediate diagnostic states, not completion
+evidence by themselves. Do not stop after reporting the status label.
+
+For every affected symbol, period, and required field within scope:
+
+1. trace the result through retained provider-native evidence, source metadata,
+   parser/projection decisions, retry or resource limits, and consumer skip or
+   cache policy;
+2. inspect the issuer's filing, issuer release, or other authoritative primary
+   source when source semantics or competing facts are unclear; yfinance or a
+   reputable financial site may corroborate the conclusion but must not silently
+   override contradictory primary evidence;
+3. classify the root cause as a true economic absence or inapplicability, source
+   lag, ingestion/coverage gap, taxonomy or context mismatch, competing scope,
+   amendment lineage, consumer policy, or implementation defect;
+4. where provider semantics support a reusable resolution, implement a narrow,
+   typed, versioned rule or named derivation that retains all native evidence and
+   add a regression covering the real filing shape; never add a ticker-specific
+   guess merely to remove an unresolved status; and
+5. rerun the affected live read-only path and relevant consumer path when
+   available, then report the resolved value or the precise reason no safe value
+   exists, the evidence inspected, and the consumer consequence.
+
+A truly absent or economically inapplicable field may remain `MISSING`, and a
+genuine unresolved conflict may remain `AMBIGUOUS`, but only after the above
+investigation shows that filling it would invent data or erase a material
+semantic distinction. In a boss-executor route, the boss must include unresolved
+outcomes in acceptance criteria and initiate the investigation or repair cycle
+without waiting for the user to point out each symbol.
+
+An explicit Sol–Luna execution request refers to the installed `boss-agent`
+`sol-luna` route: Sol owns scope and acceptance, and Luna executes the bounded
+implementation-test-repair cycle. Task size or a plan/spec does not activate
+that route. Explanation, document-only work, trivial edits, publishing,
+secrets, and live provider operations do not activate it.
 
 ## Review Priorities
 

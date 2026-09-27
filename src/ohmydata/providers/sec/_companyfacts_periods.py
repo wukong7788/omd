@@ -12,6 +12,7 @@ from ._companyfacts_models import (
     SecCompanyFactsFact,
     SecCompanyFactsFiling,
 )
+from ._filing_xbrl import SecFilingXbrlFact
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class _PeriodDateGroup:
 
 
 def _resolve_filing_periods(
-    facts: tuple[SecCompanyFactsFact, ...],
+    facts: tuple[SecCompanyFactsFact | SecFilingXbrlFact, ...],
     filings: Mapping[str, SecCompanyFactsFiling] | None = None,
     acceptance_upper: datetime | None = None,
 ) -> dict[str, tuple[int, int]]:
@@ -75,7 +76,7 @@ def _resolve_filing_periods(
             tagged_fy = fys.pop() if len(fys) == 1 else None
             periodic.append(_PeriodicFilingFactGroup(fil.report_date, accn, fil.form, q, tagged_fy))
     else:
-        by_accn: dict[str, list[SecCompanyFactsFact]] = {}
+        by_accn: dict[str, list[SecCompanyFactsFact | SecFilingXbrlFact]] = {}
         for f in facts:
             if f.form not in _ALLOWED_FORMS:
                 continue

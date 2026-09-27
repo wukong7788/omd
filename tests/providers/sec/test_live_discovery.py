@@ -135,6 +135,60 @@ def test_fetches_more_than_sixteen_history_pages_for_reconciliation(tmp_path):
     assert len(client.calls) == 18
 
 
+def test_jpm_sized_history_uses_only_pages_overlapping_acceptance_window(tmp_path):
+    store = SnapshotStore(tmp_path / "snapshots")
+    root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
+    start = datetime(2024, 3, 1, tzinfo=UTC).date()
+    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 71))
+    files = []
+    pages = {root_url: {"cik": "0000000001", "filings": {"recent": _rows([], []), "files": files}}}
+    urls = []
+    target_date = start + timedelta(days=9)
+    for index, name in enumerate(names):
+        filed = start + timedelta(days=index)
+        files.append({"name": name, "filingFrom": filed.isoformat(), "filingTo": filed.isoformat()})
+        url = f"https://data.sec.gov/submissions/{name}"
+        urls.append(url)
+        row = _rows(["0000000001-24-000777"], ["8-K"], items=["2.02,9.01"])
+        row["filingDate"] = [filed.isoformat()]
+        row["acceptanceDateTime"] = [f"{filed.isoformat()}T12:00:00Z"]
+        pages[url] = (
+            {"cik": "0000000001", **row}
+            if filed == target_date
+            else {
+                "cik": "0000000001",
+                **_rows([], []),
+            }
+        )
+    client = FakeClient(pages)
+    policy = SecDiscoveryPolicy(
+        "1",
+        ("8-K",),
+        datetime.combine(target_date, datetime.min.time(), tzinfo=UTC),
+        datetime.combine(target_date, datetime.max.time(), tzinfo=UTC),
+        timedelta(0),
+        SecDiscoveryMode.RECONCILE,
+        "jpm-window-v1",
+    )
+
+    batch = fetch_sec_discovery_batch(
+        client,
+        store,
+        policy=policy,
+        prior_cursor=None,
+        clock=lambda: datetime(2024, 6, 1, tzinfo=UTC),
+    )
+
+    expected_dates = {target_date - timedelta(days=1), target_date, target_date + timedelta(days=1)}
+    expected_urls = {
+        url for index, url in enumerate(urls) if start + timedelta(days=index) in expected_dates
+    }
+    assert {call[0] for call in client.calls[1:]} == expected_urls
+    assert len(batch.sources) == 4
+    assert len(batch.events) == 2
+    assert {event.accession for event in batch.events} == {"0000000001-24-000777"}
+
+
 def test_failed_history_does_not_advance_ledger(tmp_path):
     store = SnapshotStore(tmp_path / "snapshots")
     root_url = "https://data.sec.gov/submissions/CIK0000000001.json"
