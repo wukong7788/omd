@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.7 — 2026-09-27
+
+- Fix direct GAAP diluted EPS matching for SEC earnings exhibits whose
+  quarterly date headers omit whitespace after “Ended” or follow statement
+  title rows. Exclude combined basic/diluted and explicit one-time-adjusted
+  EPS rows so only period-matched diluted GAAP candidates can enrich Q4.
+
 ## 0.4.6 — 2026-09-27
 
 - Resolve canonical fiscal quarter sequence from SEC filing and report-period

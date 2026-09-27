@@ -67,6 +67,9 @@ _EXCLUDED_LABEL_TERMS = frozenset(
     {
         "non-gaap",
         "adjusted",
+        "excluding",
+        "exclusion",
+        "one-time",
         "guidance",
         "outlook",
         "forecast",
@@ -83,7 +86,7 @@ _EXCLUDED_LABEL_TERMS = frozenset(
 )
 
 _QUARTER_DATE_PATTERN = re.compile(
-    r"(?:three\s+months|quarter|fourth\s+quarter|4th\s+quarter|q4)\s+ended\s+([a-z]+)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})",
+    r"(?:three\s+months|quarter|fourth\s+quarter|4th\s+quarter|q4)\s+ended\s*([a-z]+)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})",
     re.IGNORECASE,
 )
 
@@ -245,7 +248,7 @@ def parse_sec_8k_earnings_release(
         col_periods: dict[int, date] = {}
         for c in range(max_cols):
             header_parts = [
-                grid[r][c] for r in range(min(6, len(grid))) if c < len(grid[r]) and grid[r][c]
+                grid[r][c] for r in range(min(12, len(grid))) if c < len(grid[r]) and grid[r][c]
             ]
             col_text = " ".join(header_parts)
             col_lower = col_text.lower()
@@ -293,7 +296,7 @@ def parse_sec_8k_earnings_release(
 
             # The row label itself must indicate a diluted per-share metric
             is_diluted = "diluted" in label_lower
-            is_basic = "basic" in label_lower and "diluted" not in label_lower
+            is_basic = "basic" in label_lower
             if not is_diluted or is_basic:
                 continue
             # Must not be share count or non-per-share row

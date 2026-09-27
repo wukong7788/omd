@@ -278,6 +278,39 @@ def test_8k_parser_keeps_currency_and_parenthesized_values_within_period() -> No
     assert result == {date(2026, 1, 31): (Decimal("-0.37"), "Diluted net income per share")}
 
 
+def test_8k_parser_reads_split_period_headers_after_statement_title_rows() -> None:
+    html = b"""
+    <table>
+      <tr><th>Preliminary Condensed Consolidated Statements of Operations</th></tr>
+      <tr><th>(In millions, except per share data)</th></tr>
+      <tr><th>(Unaudited)</th></tr>
+      <tr></tr><tr></tr><tr></tr>
+      <tr><th></th><th colspan="2">Three Months EndedDecember 31,</th></tr>
+      <tr><th></th><th colspan="2">2025</th></tr>
+      <tr><td>GAAP net loss per share, diluted</td><td>$</td><td>(0.03)</td></tr>
+    </table>
+    """
+
+    result = earnings_8k.parse_sec_8k_earnings_release(html, expected_period_end=date(2025, 12, 31))
+
+    assert result == {date(2025, 12, 31): (Decimal("-0.03"), "GAAP net loss per share, diluted")}
+
+
+def test_8k_parser_rejects_combined_basic_and_adjusted_diluted_rows() -> None:
+    html = b"""
+    <table>
+      <tr><th></th><th>Three Months Ended January 31, 2026</th></tr>
+      <tr><td>Net income per share, basic and diluted</td><td>0.03</td></tr>
+      <tr><td>GAAP EPS, Diluted</td><td>0.03</td></tr>
+      <tr><td>Earnings per share when excluding one-time items, diluted</td><td>0.07</td></tr>
+    </table>
+    """
+
+    result = earnings_8k.parse_sec_8k_earnings_release(html, expected_period_end=date(2026, 1, 31))
+
+    assert result == {date(2026, 1, 31): (Decimal("0.03"), "GAAP EPS, Diluted")}
+
+
 def test_8k_non_gaap_and_guidance_rejection(monkeypatch, tmp_path) -> None:
     accn = f"{CIK}-26-000056"
     base = f"https://www.sec.gov/Archives/edgar/data/{int(CIK)}/{accn.replace('-', '')}"
