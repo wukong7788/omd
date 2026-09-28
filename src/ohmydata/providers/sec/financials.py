@@ -199,6 +199,19 @@ class SecCompanyFinancialVintage:
     def filter_statement(self, statement_type: StatementType) -> tuple[SecStatementRow, ...]:
         return tuple(r for r in self.rows if r.statement_type == statement_type)
 
+    @property
+    def base_filing_accession_number(self) -> str | None:
+        """Original filing linked by an amendment, when the provider proves one."""
+        prefix = "AMENDMENT_BASE_ACCESSION:"
+        values = [
+            flag.removeprefix(prefix) for flag in self.quality_flags if flag.startswith(prefix)
+        ]
+        if not values:
+            return None
+        if not self.is_amendment or len(values) != 1 or not values[0]:
+            raise ValueError("invalid amendment base accession evidence")
+        return values[0]
+
 
 @dataclass(frozen=True)
 class SecFinancialsRequest:

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.9 — 2026-09-28
+
+- Replay pre-0.4.8 SEC event-ledger batches that retained the exact complete
+  advertised submissions history closure while continuing to require either
+  that full closure or the exact date-window closure. Arbitrary partial sets
+  and extra pages remain coverage failures.
+- Mark amendments that contain no parsed financial statements with
+  `AMENDMENT_WITHOUT_FINANCIAL_STATEMENTS` and expose their proven original
+  filing through `base_filing_accession_number`. Statement rows remain bound
+  to their actual filing; OMD does not silently inherit rows from the base.
+
 ## 0.4.8 — 2026-09-27
 
 - Resolve newer SEC 10-Q/10-Q/A filings omitted from companyfacts through their

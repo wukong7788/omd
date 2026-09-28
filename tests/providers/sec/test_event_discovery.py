@@ -161,8 +161,8 @@ def test_fails_closed_for_missing_history_and_naive_acceptance(tmp_path) -> None
 
 def test_window_closure_requires_all_overlapping_history_pages(tmp_path) -> None:
     store = SnapshotStore(tmp_path)
-    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 5))
-    dates = ("2024-04-29", "2024-04-30", "2024-05-01", "2024-05-02")
+    names = tuple(f"CIK0000000001-submissions-{index:03}.json" for index in range(1, 6))
+    dates = ("2024-04-28", "2024-04-29", "2024-04-30", "2024-05-01", "2024-05-02")
     root = _source(
         store,
         "edgar_submissions",
@@ -191,12 +191,36 @@ def test_window_closure_requires_all_overlapping_history_pages(tmp_path) -> None
     first_required = _source(
         store,
         "edgar_submissions_history",
-        {"cik": "0000000001", "basename": names[1]},
-        f"https://data.sec.gov/submissions/{names[1]}",
+        {"cik": "0000000001", "basename": names[2]},
+        f"https://data.sec.gov/submissions/{names[2]}",
         {"cik": "0000000001", **_row("0000000001-24-000002")},
     )
     with pytest.raises(CoverageError, match="window closure"):
         discover_sec_filing_events(store, root, (first_required,), policy=policy, prior_cursor=None)
+
+    complete_legacy_sources = tuple(
+        _source(
+            store,
+            "edgar_submissions_history",
+            {"cik": "0000000001", "basename": name},
+            f"https://data.sec.gov/submissions/{name}",
+            {"cik": "0000000001", **_row(f"0000000001-24-{index:06}")},
+        )
+        for index, name in enumerate(names, start=10)
+    )
+    legacy = discover_sec_filing_events(
+        store, root, complete_legacy_sources, policy=policy, prior_cursor=None
+    )
+    assert len(legacy.sources) == 1 + len(names)
+
+    with pytest.raises(CoverageError, match="window closure"):
+        discover_sec_filing_events(
+            store,
+            root,
+            complete_legacy_sources[1:],
+            policy=policy,
+            prior_cursor=None,
+        )
 
 
 @pytest.mark.parametrize("items, expected", [("2.02", 2), ("2.020", 1), (" 2.02", 0), (None, 1)])

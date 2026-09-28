@@ -107,6 +107,12 @@ def test_governance_amendment_never_hides_or_substitutes_original(
     if expected == "governance":
         assert result[0].is_amendment
         assert "NO_FINANCIALS_OBJECT" in result[0].quality_flags
+        assert "AMENDMENT_WITHOUT_FINANCIAL_STATEMENTS" in result[0].quality_flags
+        if forms == ("10-K",):
+            assert result[0].base_filing_accession_number == "original"
+            assert "AMENDMENT_BASE_ACCESSION:original" in result[0].quality_flags
+        else:
+            assert result[0].base_filing_accession_number is None
 
 
 @pytest.mark.parametrize(

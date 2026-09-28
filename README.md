@@ -568,6 +568,15 @@ unit evidence raises `SecUnitEvidenceError`; the call does not return a partial
 batch or silently switch versions. The raw instance download has its own byte
 budget; this is not a hard deadline on edgartools' other filing requests.
 
+When an amendment has no parsed financial statements, its vintage includes the
+`AMENDMENT_WITHOUT_FINANCIAL_STATEMENTS` quality flag. If the fetched filing
+collection proves an earlier original filing with the same form family and
+report period, `base_filing_accession_number` exposes that accession. The
+amendment remains an empty amendment vintage: OMD never copies the original
+filing's rows into it. A caller that wants original statements must make that
+choice explicitly, for example with `include_amendments=False`, and retain the
+amendment evidence separately.
+
 Evidenced vintages carry `SecFinancialUnitEvidence` and use v4 identities and
 Parquet partitions. Statement rows in v4 explicitly identify their vintage,
 including mixed old/new results for the same accession. V3-only writes and old
@@ -872,6 +881,10 @@ historical submissions pages. A changed release layout fails explicitly.
 historical pages selected for the requested UTC acceptance window. Pages are
 selected from the root's advertised filing-date ranges with a one-day pad on
 either side; if any range is absent, the full advertised closure is required.
+Replay also accepts a legacy batch containing the exact complete advertised
+history closure, because that set proves the bounded window as well. A source
+set must equal one of those two closures; partial sets and arbitrary supersets
+still fail explicitly.
 The caller supplies a CIK, selected forms, UTC acceptance window, overlap
 duration and incremental/reconciliation mode. It preserves acceptance metadata,
 emits filing events and exact 8-K item 2.02 events, and fails on missing pages

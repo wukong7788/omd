@@ -367,15 +367,19 @@ def discover_sec_filing_events(
         raise SchemaMismatchError("historical submissions references missing")
     names = historical_basenames(root, padded)
     if not _root_only:
-        expected_names = _history_pages_for_acceptance_window(
+        window_names = _history_pages_for_acceptance_window(
             root, padded, policy.acceptance_lower, policy.acceptance_upper
         )
-        expected = tuple(historical_submission_url(padded, name) for name in expected_names)
-        if len(expected_names) != len(children):
-            raise CoverageError("historical submissions window closure mismatch")
-        if tuple(sorted(source.url for source in children)) != tuple(sorted(expected)) or len(
-            {source.url for source in children}
-        ) != len(children):
+        actual = tuple(sorted(source.url for source in children))
+        allowed = {
+            tuple(sorted(historical_submission_url(padded, name) for name in window_names)),
+            tuple(sorted(historical_submission_url(padded, name) for name in names)),
+        }
+        # v1 ledgers retained the root's complete advertised history closure.
+        # Window fetching introduced in v0.4.8 retains an exact bounded subset.
+        # Both are complete for the requested window; arbitrary supersets and
+        # partial subsets remain invalid.
+        if actual not in allowed or len(set(actual)) != len(children):
             raise CoverageError("historical submissions window closure mismatch")
     children = tuple(sorted(children, key=lambda source: source.url))
     names_by_url = {historical_submission_url(padded, name): name for name in names}

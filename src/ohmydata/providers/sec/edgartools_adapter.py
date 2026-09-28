@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ._financials_filing_selection import (
+    amendment_base_accessions,
+    select_financial_filing_candidates,
+)
 from ._live_unit_corroboration import _RAW_INSTANCE_MAX_BYTES
 from ._statement_parser import (
     SecStatementParseError,
@@ -325,32 +329,8 @@ class SecFinancialsClient:
             if not filings:
                 continue
 
-            # Filter the complete collection before applying limit.  latest(1)
-            # returns a Filing while latest(n>1) returns a Filings collection.
-            candidates = list(filings)
-            eligible: list[Any] = []
-            requested_forms = {str(x).upper() for x in request.forms}
-            for candidate in candidates:
-                form = str(getattr(candidate, "form", "")).upper()
-                base_form = form.removesuffix("/A")
-                if form not in requested_forms and not (
-                    request.include_amendments and base_form in requested_forms
-                ):
-                    continue
-                if form.endswith("/A") and not request.include_amendments:
-                    continue
-                try:
-                    candidate_date = date.fromisoformat(str(candidate.filing_date))
-                except (TypeError, ValueError) as err:
-                    raise ValueError(
-                        f"invalid filing date for {symbol}: {getattr(candidate, 'filing_date', None)!r}"
-                    ) from err
-                if request.start_year and candidate_date.year < request.start_year:
-                    continue
-                if request.end_year and candidate_date.year > request.end_year:
-                    continue
-                eligible.append(candidate)
-            eligible.sort(key=lambda f: (str(f.filing_date), str(f.accession_number)), reverse=True)
+            eligible = select_financial_filing_candidates(filings, request, symbol=symbol)
+            amendment_bases = amendment_base_accessions(eligible)
             filings_to_process = (
                 eligible[: request.limit] if request.limit is not None else eligible
             )
@@ -466,6 +446,11 @@ class SecFinancialsClient:
 
                 if not rows:
                     quality_flags.append("NO_FINANCIAL_STATEMENTS")
+                    if is_amend:
+                        quality_flags.append("AMENDMENT_WITHOUT_FINANCIAL_STATEMENTS")
+                base_accession = amendment_bases.get(str(filing.accession_number))
+                if is_amend and base_accession is not None:
+                    quality_flags.append(f"AMENDMENT_BASE_ACCESSION:{base_accession}")
                 if not request.include_dimensions:
                     quality_flags.append("DIMENSIONS_EXCLUDED_BY_REQUEST")
 
