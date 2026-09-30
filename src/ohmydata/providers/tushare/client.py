@@ -292,8 +292,9 @@ class TushareClient:
                 self._limiter.acquire()
             try:
                 return method(**parameters)
-            except Exception as exc:
-                raise classify_tushare_exception(exc) from exc
+            except Exception as exc:  # noqa: BLE001 - normalize all provider failures at this boundary
+                mapped_error = classify_tushare_exception(exc)
+            raise mapped_error
 
         result = execute_with_retry(call, self._retry_policy)
         return result.value, result.attempts

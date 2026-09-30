@@ -9,12 +9,15 @@ from .errors import (
     PermanentProviderError,
     PermissionDeniedError,
     ProviderError,
+    ProviderErrorCategory,
     RateLimitError,
     RetryExhaustedError,
     SchemaMismatchError,
     SnapshotConflictError,
     SnapshotIntegrityError,
     TransientProviderError,
+    UnknownProviderError,
+    UnsupportedProviderError,
 )
 from .facts import RawFactEnvelope, RawFactQualityFlag, RawFactRevisionStatus
 from .instruments import (
@@ -65,6 +68,7 @@ __all__ = [
     "PermanentProviderError",
     "PermissionDeniedError",
     "ProviderError",
+    "ProviderErrorCategory",
     "ProviderInstrumentAlias",
     "RateLimitDecision",
     "RateLimitError",
@@ -91,5 +95,7 @@ __all__ = [
     "SourceFactRevisionRef",
     "SourceResolutionStatus",
     "TransientProviderError",
+    "UnknownProviderError",
+    "UnsupportedProviderError",
     "execute_with_retry",
 ]

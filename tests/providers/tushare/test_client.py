@@ -14,12 +14,15 @@ from ohmydata.core import (
     PaginationError,
     PermanentProviderError,
     PermissionDeniedError,
+    ProviderErrorCategory,
     RateLimiter,
+    RateLimitError,
     RateLimitPolicy,
     RetryExhaustedError,
     RetryPolicy,
     SchemaMismatchError,
     TransientProviderError,
+    UnknownProviderError,
 )
 from ohmydata.core.snapshot import SnapshotStore
 from ohmydata.providers.tushare import (
@@ -402,7 +405,7 @@ def test_transient_retry_exhaustion_and_permanent_no_retry():
     ).fetch_fund_daily(FundDailyRequest(empty_policy=EmptyPolicy.ERROR, ts_code="FAKE"))
     assert len(fake.calls) == 2
     assert result.provenance.attempt_count == 2
-    denied = Fake(errors=[RuntimeError("permission denied for token")])
+    denied = Fake(errors=[RuntimeError("permission denied")])
     with pytest.raises(PermissionDeniedError):
         client(denied).fetch_fund_daily(
             FundDailyRequest(empty_policy=EmptyPolicy.ERROR, ts_code="FAKE")
@@ -871,6 +874,56 @@ def test_retry_exhaustion_cause_redaction_and_passthrough():
     from ohmydata.providers.tushare import classify_tushare_exception
 
     assert classify_tushare_exception(existing) is existing
+
+
+def test_rate_limit_retries_and_exhaustion_keeps_safe_error_metadata():
+    class RateFailure(RuntimeError):
+        code = "R_17"
+
+    fake = Fake(errors=[RateFailure("rate limit exceeded"), RateFailure("rate limit exceeded")])
+    with pytest.raises(RetryExhaustedError) as info:
+        client(
+            fake,
+            retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0),
+        ).fetch_fund_daily(FundDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"))
+    assert len(fake.calls) == 2
+    assert info.value.category is ProviderErrorCategory.RATE_LIMIT
+    assert info.value.provider_code == "R_17"
+    assert isinstance(info.value.__cause__, RateLimitError)
+    assert info.value.__cause__.__context__ is None
+    assert "rate limit exceeded" not in repr(info.value)
+
+
+def test_unknown_provider_failure_has_no_raw_exception_chain():
+    raw_message = "unrecognized private provider payload"
+    fake = Fake(errors=[RuntimeError(raw_message)])
+
+    with pytest.raises(UnknownProviderError) as info:
+        client(fake).fetch_fund_daily(FundDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"))
+
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+    assert raw_message not in repr(info.value)
+    assert len(fake.calls) == 1
+
+
+def test_unprintable_provider_failure_keeps_code_without_raw_exception_chain():
+    class UnprintableFailure(RuntimeError):
+        code = "E_29"
+
+        def __str__(self):
+            raise RuntimeError("private provider details")
+
+    fake = Fake(errors=[UnprintableFailure()])
+    with pytest.raises(UnknownProviderError) as info:
+        client(fake).fetch_fund_daily(FundDailyRequest(empty_policy=EmptyPolicy.ALLOW, ts_code="A"))
+
+    assert info.value.category is ProviderErrorCategory.UNKNOWN
+    assert info.value.provider_code == "E_29"
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+    assert "private provider details" not in repr(info.value)
+    assert len(fake.calls) == 1
 
 
 def test_adjustment_exact_pagination_and_duplicate_failures_and_empty_policy():

@@ -94,7 +94,9 @@ def execute_with_retry(
                     tuple(
                         AttemptRecord(x.attempt, x.exception_type, x.retry_delay_seconds)
                         for x in records
-                    )
+                    ),
+                    category=exc.category,
+                    provider_code=exc.provider_code,
                 )
                 err.__cause__ = exc
                 raise err from exc

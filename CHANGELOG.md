@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.10 — 2026-09-30
+
+- Add a public typed provider error category and safe structured provider-code
+  field. Tushare maps only anchored known synthetic messages; unrecognized
+  errors fail closed as `UnknownProviderError` and are not retried. Retry
+  exhaustion preserves the final mapped transient category and safe code.
+
 ## 0.4.9 — 2026-09-28
 
 - Replay pre-0.4.8 SEC event-ledger batches that retained the exact complete

@@ -5,6 +5,8 @@ import pytest
 from ohmydata.core.errors import (
     AttemptRecord,
     PermanentProviderError,
+    ProviderErrorCategory,
+    RateLimitError,
     RetryExhaustedError,
     TransientProviderError,
 )
@@ -97,6 +99,21 @@ def test_exhaustion_history_exact_and_secret_safe() -> None:
         execute_with_retry(lambda: (_ for _ in ()).throw(exc), RetryPolicy(2), sleep=lambda _: None)
     assert all(isinstance(item, AttemptRecord) for item in raised.value.attempts)
     assert "hidden provider message" not in repr(raised.value)
+
+
+@pytest.mark.parametrize("max_attempts", [1, 3])
+def test_exhaustion_preserves_last_mapped_error_metadata(max_attempts: int) -> None:
+    final = RateLimitError("redacted", provider_code=429)
+    with pytest.raises(RetryExhaustedError) as raised:
+        execute_with_retry(
+            lambda: (_ for _ in ()).throw(final),
+            RetryPolicy(max_attempts=max_attempts, base_delay_seconds=0),
+            sleep=lambda _: None,
+        )
+    assert raised.value.category is ProviderErrorCategory.RATE_LIMIT
+    assert raised.value.provider_code == 429
+    assert raised.value.__cause__ is final
+    assert "redacted" not in str(raised.value)
 
 
 @pytest.mark.parametrize(

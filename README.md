@@ -196,6 +196,31 @@ request = FundDailyRequest(
 result = TushareClient(FakeClient()).fetch_fund_daily(request)
 ```
 
+Tushare failures expose the public `ProviderErrorCategory` taxonomy and retain
+compatible exception inheritance. `provider_code` is kept only from a safe
+structured integer or short-token `code`/`status_code`; OMD does not infer error
+categories from provider codes. Generic exceptions are classified only when
+their complete message matches a known synthetic pattern. Unknown messages map
+to `UnknownProviderError`, a permanent non-retry failure. Mapped messages and
+raw provider exception chains are redacted. `RetryExhaustedError.category` and
+`.provider_code` describe the final mapped transient failure. Empty/missing
+outcomes remain distinct from transient/permanent failures, and successful
+retrieval does not establish point-in-time availability.
+
+```python
+from ohmydata.core import ProviderErrorCategory, RetryExhaustedError
+from ohmydata.providers.tushare import classify_tushare_exception
+
+error = classify_tushare_exception(RuntimeError("opaque provider response"))
+assert error.category is ProviderErrorCategory.UNKNOWN
+assert error.provider_code is None
+
+try:
+    result = TushareClient(FakeClient()).fetch_fund_daily(request)
+except RetryExhaustedError as error:
+    print(error.category, error.provider_code)
+```
+
 The typed `etf_basic` endpoint preserves Tushare's provider-native metadata and
 requires an explicit empty policy. Its official filters are `ts_code`,
 `index_code`, `list_date`, `list_status`, `exchange`, and `mgr`; `market` is

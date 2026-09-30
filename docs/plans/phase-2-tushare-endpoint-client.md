@@ -156,16 +156,41 @@ missing requested codes raise `CoverageError`; it does not select a universe.
 
 - pass through existing `OhMyDataError` instances;
 - classify connection/time-out failures as transient;
-- classify stable Tushare authentication, permission, and rate-limit signals
-  into `AuthenticationError`, `PermissionDeniedError`, and `RateLimitError`;
-- classify every unrecognized provider exception as permanent;
-- never include the original exception message, parameter values, or token in
-  the mapped exception representation.
+- classify only complete, anchored synthetic authentication, permission,
+  rate-limit, unsupported, and invalid-parameter messages; broad substring
+  matches are intentionally not accepted;
+- map every unrecognized exception to `UnknownProviderError`, which subclasses
+  `PermanentProviderError` and is never retried;
+- expose `ProviderErrorCategory` and a `provider_code` obtained only from safe
+  structured integer/short-token `code` or `status_code` attributes. No
+  provider-code-to-category mapping is inferred;
+- never copy the original provider message into mapped errors, retry history,
+  provenance, or logs.
+
+Consumers branch on the typed contract without parsing provider text:
+
+```python
+from ohmydata.core import ProviderErrorCategory, RetryExhaustedError
+from ohmydata.providers.tushare import classify_tushare_exception
+
+mapped = classify_tushare_exception(RuntimeError("opaque provider response"))
+assert mapped.category is ProviderErrorCategory.UNKNOWN
+
+try:
+    # TushareClient fetch call
+    ...
+except RetryExhaustedError as exc:
+    # category/provider_code describe the last mapped transient failure.
+    print(exc.category, exc.provider_code)
+```
 
 Only mapped transient failures are retried. Schema, coverage, empty-policy,
 pagination, validation, authentication, and permission errors are never
-retried. The original provider exception may be preserved only as an exception
-cause; it must not be logged or copied into provenance.
+retried; unsupported, permanent, and unknown failures are also non-retryable.
+`EMPTY`/`MISSING` outcomes stay separate from transient and permanent failures.
+Success does not establish point-in-time availability. Raw provider messages
+are suppressed from mapped exception chains and never logged or copied into
+provenance.
 
 ## Testing Contract
 
