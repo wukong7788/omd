@@ -314,6 +314,8 @@ class TushareClient:
         if not isinstance(raw, pd.DataFrame):
             raise SchemaMismatchError("provider result is not a DataFrame")
         frame = raw.copy(deep=True)
+        if frame.shape == (0, 0):
+            return pd.DataFrame(columns=list(request.fields))
         if any(field not in frame.columns for field in request.fields):
             raise SchemaMismatchError("requested fields missing")
         for key in _NON_NULL_KEYS[request.endpoint]:

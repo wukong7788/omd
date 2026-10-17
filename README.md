@@ -35,6 +35,14 @@ if sessions:
 
 ## Core Architecture (offline & immutable)
 
+The Tushare `TradeCalendarRequest` defaults to the endpoint keys
+`exchange,cal_date`; optional fields such as `is_open` and `pretrade_date`
+must be requested explicitly when consumed. Callers may pass
+`fields=("exchange", "cal_date")` (or rely on the default) and choose
+`EmptyPolicy.ALLOW` or `EmptyPolicy.ERROR` according to their empty-result
+policy. A zero-row, zero-column provider frame follows that policy; nonempty
+responses missing endpoint keys or explicitly requested fields fail closed.
+
 `ohmydata.core` provides canonical request identities, classified retry with
 total-attempt semantics, explicit instance-scoped rate limiters, dataframe-free
 provenance, and immutable APPEND/FROZEN snapshots. Request parameters reject

@@ -801,7 +801,7 @@ def test_all_endpoint_methods_send_exact_kwargs_and_preserve_units_and_order():
                 "start_date": "20240101",
                 "end_date": "20240102",
                 "is_open": "1",
-                "fields": "exchange,cal_date,is_open,pretrade_date",
+                "fields": "exchange,cal_date",
             },
         ),
         ("fund_basic", {"market": "E", "fields": "ts_code"}),
@@ -809,6 +809,128 @@ def test_all_endpoint_methods_send_exact_kwargs_and_preserve_units_and_order():
         ("fund_nav", {"ts_code": "A", "fields": "ts_code,nav_date,ann_date"}),
         ("fund_share", {"market": "E", "fields": "ts_code,trade_date,fd_share"}),
     ]
+
+
+def test_trade_calendar_minimum_default_and_optional_field_projection():
+    class Calendar:
+        def __init__(self, frame):
+            self.frame = frame
+            self.calls = []
+
+        def trade_cal(self, **kwargs):
+            self.calls.append(kwargs)
+            return self.frame
+
+    native = pd.DataFrame(
+        {
+            "exchange": ["SSE"],
+            "cal_date": ["20240101"],
+            "is_open": [1],
+            "pretrade_date": ["20231229"],
+        }
+    )
+    minimal = TradeCalendarRequest(empty_policy=EmptyPolicy.ALLOW)
+    provider = Calendar(native)
+    result = client(provider).fetch_trade_calendar(minimal)
+    assert minimal.fields == ("exchange", "cal_date")
+    assert provider.calls == [{"exchange": "SSE", "fields": "exchange,cal_date"}]
+    assert tuple(result.frame.columns) == minimal.fields
+    assert tuple(result.provenance.columns) == minimal.fields
+    assert result.provenance.requested_fields == minimal.fields
+    assert result.provenance.request_identity == minimal.spec.request_identity
+
+    expanded = TradeCalendarRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        fields=("exchange", "cal_date", "is_open", "pretrade_date"),
+    )
+    expanded_result = client(Calendar(native)).fetch_trade_calendar(expanded)
+    assert tuple(expanded_result.frame.columns) == expanded.fields
+    assert expanded_result.frame.pretrade_date.tolist() == ["20231229"]
+
+    keys_only = pd.DataFrame({"exchange": ["SSE"], "cal_date": ["20240101"]})
+    keys_only_result = client(Calendar(keys_only)).fetch_trade_calendar(minimal)
+    assert tuple(keys_only_result.frame.columns) == minimal.fields
+    assert keys_only_result.frame.to_dict("records") == [
+        {"exchange": "SSE", "cal_date": "20240101"}
+    ]
+
+    explicit_is_open = TradeCalendarRequest(
+        empty_policy=EmptyPolicy.ALLOW,
+        fields=("exchange", "cal_date", "is_open"),
+    )
+    is_open_result = client(
+        Calendar(pd.DataFrame({"exchange": ["SSE"], "cal_date": ["20240101"], "is_open": [1]}))
+    ).fetch_trade_calendar(explicit_is_open)
+    assert tuple(is_open_result.frame.columns) == explicit_is_open.fields
+
+
+def test_trade_calendar_endpoint_keys_and_requested_fields_fail_closed():
+    class Calendar:
+        def __init__(self, frame):
+            self.frame = frame
+            self.calls = 0
+
+        def trade_cal(self, **kwargs):
+            self.calls += 1
+            return self.frame
+
+    missing_requested_key = Calendar(pd.DataFrame(columns=["exchange", "is_open"]))
+    with pytest.raises(SchemaMismatchError):
+        client(missing_requested_key).fetch_trade_calendar(
+            TradeCalendarRequest(
+                empty_policy=EmptyPolicy.ALLOW,
+                fields=("exchange", "is_open"),
+            )
+        )
+    assert missing_requested_key.calls == 0
+
+    for frame in (
+        pd.DataFrame({"cal_date": ["20240101"]}),
+        pd.DataFrame({"exchange": ["SSE"]}),
+    ):
+        with pytest.raises(SchemaMismatchError):
+            client(Calendar(frame)).fetch_trade_calendar(
+                TradeCalendarRequest(empty_policy=EmptyPolicy.ALLOW)
+            )
+
+    for optional_field in ("is_open", "pretrade_date"):
+        request = TradeCalendarRequest(
+            empty_policy=EmptyPolicy.ALLOW,
+            fields=("exchange", "cal_date", optional_field),
+        )
+        with pytest.raises(SchemaMismatchError):
+            client(
+                Calendar(pd.DataFrame({"exchange": ["SSE"], "cal_date": ["20240101"]}))
+            ).fetch_trade_calendar(request)
+
+
+@pytest.mark.parametrize("policy", [EmptyPolicy.ALLOW, EmptyPolicy.ERROR])
+def test_trade_calendar_zero_by_zero_empty_response_uses_empty_policy(policy):
+    class Calendar:
+        def trade_cal(self, **kwargs):
+            return pd.DataFrame()
+
+    request = TradeCalendarRequest(empty_policy=policy)
+    if policy is EmptyPolicy.ERROR:
+        with pytest.raises(EmptyResponseError):
+            client(Calendar()).fetch_trade_calendar(request)
+        return
+    result = client(Calendar()).fetch_trade_calendar(request)
+    assert result.frame.empty
+    assert tuple(result.frame.columns) == request.fields
+    assert result.provenance.empty_disposition is EmptyDisposition.ALLOWED_EMPTY
+    assert result.provenance.columns == request.fields
+
+
+def test_trade_calendar_partial_empty_schema_remains_schema_error():
+    class Calendar:
+        def trade_cal(self, **kwargs):
+            return pd.DataFrame(columns=["exchange"])
+
+    with pytest.raises(SchemaMismatchError):
+        client(Calendar()).fetch_trade_calendar(
+            TradeCalendarRequest(empty_policy=EmptyPolicy.ALLOW)
+        )
 
 
 @pytest.mark.parametrize(

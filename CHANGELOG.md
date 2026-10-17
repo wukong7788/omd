@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.11 — 2026-10-17
+
+- Change the default Tushare trade-calendar fields to the endpoint keys
+  `exchange,cal_date`; the old default over-requested optional provider fields.
+  FunMoney can pass `fields=("exchange", "cal_date")` or rely on the new
+  default, and should request `is_open` or `pretrade_date` explicitly only when
+  consuming those fields. Select `EmptyPolicy.ALLOW` or `EmptyPolicy.ERROR` for
+  the empty-result policy.
+  Nonempty responses missing endpoint keys or any explicitly requested field
+  continue to fail closed. A provider's zero-row, zero-column frame now follows
+  the request's empty policy and, when allowed, returns the requested columns.
+
 ## 0.4.10 — 2026-09-30
 
 - Add a public typed provider error category and safe structured provider-code

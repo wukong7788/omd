@@ -90,8 +90,11 @@ No arbitrary public `fetch(endpoint, params)` API is authorized.
 ## Request Contracts
 
 - `TradeCalendarRequest`: `exchange`, optional date range, optional `is_open`,
-  explicit `empty_policy`; default fields are
-  `exchange,cal_date,is_open,pretrade_date`.
+  explicit `empty_policy`; default fields are the endpoint keys
+  `exchange,cal_date`. Optional ordered fields such as `is_open` and
+  `pretrade_date` must be requested explicitly when consumed. A zero-row,
+  zero-column provider frame follows `empty_policy`; partial empty schemas and
+  nonempty responses missing requested fields remain schema errors.
 - `FundBasicRequest`: optional `ts_code`, `market`, `status`, explicit
   `empty_policy`, optional ordered `required_ts_codes`; default fields cover
   current consumer metadata including `ts_code`, name/status/list/delist dates,

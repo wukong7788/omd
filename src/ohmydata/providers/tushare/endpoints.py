@@ -96,7 +96,7 @@ class TradeCalendarRequest(_BaseRequest):
         object.__setattr__(
             self,
             "fields",
-            _fields(self.fields, ("exchange", "cal_date", "is_open", "pretrade_date")),
+            _fields(self.fields, ("exchange", "cal_date")),
         )
 
     @property
