@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from ._bulk_zip_io import SecBulkSubmissionMeta
 from ._bulk_zip_models import (
@@ -13,9 +15,11 @@ from ._bulk_zip_models import (
     SecBulkFundamentalRow,
     SecBulkJoinedFact,
     SecBulkProjectionResult,
+    SecPrimaryCurrencySelection,
     _currency_from_unit,
     select_dei_shares,
     select_metric_fact,
+    select_primary_currency,
     summarize_currency,
     summarize_taxonomy,
 )
@@ -36,29 +40,40 @@ _ADDITIVE_FLOW_METRICS = (
     "ocf",
     "capex",
 )
-_DURATION_FUNDAMENTAL_METRICS = (
-    "revenue",
-    "gross_profit",
-    "operating_income",
-    "net_income",
-    "ocf",
-    "capex",
-    "diluted_shares",
-    "eps_diluted",
-)
+_DURATION_FUNDAMENTAL_METRICS = (*_ADDITIVE_FLOW_METRICS, "diluted_shares", "eps_diluted")
 _INSTANT_BS_METRICS = ("total_assets", "total_debt")
 
 
 def _duration_days(fact: SecCompanyFactsFact) -> int | None:
-    if fact.start is None:
-        return None
-    return (fact.end - fact.start).days + 1
+    return None if fact.start is None else (fact.end - fact.start).days + 1
+
+
+def _duration_window(
+    facts: list[SecCompanyFactsFact],
+    fps: set[str],
+    min_days: int,
+    max_days: int,
+) -> list[SecCompanyFactsFact]:
+    return [
+        f
+        for f in facts
+        if f.fp in fps and (days := _duration_days(f)) is not None and min_days <= days <= max_days
+    ]
 
 
 def _year_in_range(year: int, start_year: int | None, end_year: int | None) -> bool:
     if start_year is not None and year < start_year:
         return False
     return not (end_year is not None and year > end_year)
+
+
+def _fact_provenance(fact: SecCompanyFactsFact) -> dict[str, str]:
+    return {
+        "namespace": fact.namespace,
+        "tag": fact.tag,
+        "unit": fact.unit,
+        "value": str(fact.value),
+    }
 
 
 def _build_fundamental_row(
@@ -72,42 +87,42 @@ def _build_fundamental_row(
     duration_facts: list[SecCompanyFactsFact],
     instant_facts: list[SecCompanyFactsFact],
     dei_facts: list[SecCompanyFactsFact],
+    currency_selection: SecPrimaryCurrencySelection | None = None,
 ) -> SecBulkFundamentalRow | None:
+    resolved_ccy = currency_selection or select_primary_currency(
+        duration_facts + instant_facts,
+        form=filing.form,
+    )
+    allow_ccy = resolved_ccy.basis != "ambiguous_tie"
     values: dict[str, Decimal | None] = {}
-    provenance: dict[str, dict[str, str]] = {}
+    provenance: dict[str, dict[str, Any]] = {}
     selected_starts: set[date] = set()
     used_facts: list[SecCompanyFactsFact] = []
-    for metric in _DURATION_FUNDAMENTAL_METRICS:
-        chosen = select_metric_fact(metric, duration_facts)
-        values[metric] = chosen.value if chosen is not None else None
-        if chosen is not None:
-            used_facts.append(chosen)
-            if chosen.start is not None:
-                selected_starts.add(chosen.start)
-            provenance[metric] = {
-                "namespace": chosen.namespace,
-                "tag": chosen.tag,
-                "unit": chosen.unit,
-                "value": str(chosen.value),
-            }
-    for metric in _INSTANT_BS_METRICS:
-        chosen = select_metric_fact(metric, instant_facts)
-        values[metric] = chosen.value if chosen is not None else None
-        if chosen is not None:
-            used_facts.append(chosen)
-            provenance[metric] = {
-                "namespace": chosen.namespace,
-                "tag": chosen.tag,
-                "unit": chosen.unit,
-                "value": str(chosen.value),
-            }
+    for metrics, pool, track_start in (
+        (_DURATION_FUNDAMENTAL_METRICS, duration_facts, True),
+        (_INSTANT_BS_METRICS, instant_facts, False),
+    ):
+        for metric in metrics:
+            if not allow_ccy and metric != "diluted_shares":
+                values[metric] = None
+                continue
+            chosen = select_metric_fact(metric, pool, currency=resolved_ccy.selected)
+            values[metric] = chosen.value if chosen is not None else None
+            if chosen is not None:
+                used_facts.append(chosen)
+                if track_start and chosen.start is not None:
+                    selected_starts.add(chosen.start)
+                provenance[metric] = _fact_provenance(chosen)
     dei_val, dei_end, dei_meta = select_dei_shares(dei_facts)
     if dei_meta is not None:
         provenance["dei_common_shares_outstanding"] = dei_meta
     if not any(v is not None for v in values.values()) and dei_val is None:
         return None
+    if resolved_ccy.alternate_currencies:
+        provenance["currency_selection"] = resolved_ccy.to_provenance_dict()
     period_start = min(selected_starts) if len(selected_starts) == 1 else None
     all_scope_facts = used_facts or (duration_facts + instant_facts)
+    row_currency = summarize_currency(used_facts) if used_facts else resolved_ccy.selected
     return SecBulkFundamentalRow(
         cik=cik,
         entity_name=submissions.entity_name,
@@ -124,7 +139,7 @@ def _build_fundamental_row(
         period_start=period_start,
         period_end=filing.report_date,
         taxonomy=summarize_taxonomy(all_scope_facts),
-        reporting_currency=summarize_currency(all_scope_facts),
+        reporting_currency=row_currency,
         revenue=values["revenue"],
         gross_profit=values["gross_profit"],
         operating_income=values["operating_income"],
@@ -148,6 +163,7 @@ def _derive_q4_rows(
     resolved: dict[str, tuple[int, int]],
     by_accn_non_dei: dict[str, list[SecCompanyFactsFact]],
     by_accn_dei: dict[str, list[SecCompanyFactsFact]],
+    primary_currencies: Mapping[str, SecPrimaryCurrencySelection],
     start_year: int | None,
     end_year: int | None,
 ) -> list[SecBulkFundamentalRow]:
@@ -160,22 +176,14 @@ def _derive_q4_rows(
             continue
         period = resolved.get(accn)
         if _is_annual_form(filing.form):
-            fy_facts = [
-                f
-                for f in facts
-                if f.fp == "FY" and (days := _duration_days(f)) is not None and 300 <= days <= 430
-            ]
+            fy_facts = _duration_window(facts, {"FY"}, 300, 430)
             if not fy_facts:
                 continue
             year = period[0] if period is not None else fy_facts[0].fy
             if year is not None:
                 fy_by_year.setdefault(year, []).append((filing, fy_facts))
         elif _is_quarterly_form(filing.form):
-            ytd_facts = [
-                f
-                for f in facts
-                if f.fp == "Q3" and (days := _duration_days(f)) is not None and 240 <= days <= 310
-            ]
+            ytd_facts = _duration_window(facts, {"Q3"}, 240, 310)
             if not ytd_facts:
                 continue
             year = period[0] if period is not None else ytd_facts[0].fy
@@ -192,13 +200,18 @@ def _derive_q4_rows(
             continue
         fy_filing, fy_facts = fy_entries[0]
         q3_filing, q3_facts = q3_entries[0]
+        fy_ccy = primary_currencies.get(fy_filing.accession_number)
+        q3_ccy = primary_currencies.get(q3_filing.accession_number)
+        if not (fy_ccy and q3_ccy and fy_ccy.selected and fy_ccy.selected == q3_ccy.selected):
+            continue
+        target_ccy = fy_ccy.selected
         values: dict[str, Decimal | None] = {}
-        provenance: dict[str, dict[str, str]] = {}
+        provenance: dict[str, dict[str, Any]] = {}
         starts: set[date] = set()
         used_facts: list[SecCompanyFactsFact] = []
         for metric in _ADDITIVE_FLOW_METRICS:
-            fy_sel = select_metric_fact(metric, fy_facts)
-            q3_sel = select_metric_fact(metric, q3_facts)
+            fy_sel = select_metric_fact(metric, fy_facts, currency=target_ccy)
+            q3_sel = select_metric_fact(metric, q3_facts, currency=target_ccy)
             if (
                 fy_sel is None
                 or q3_sel is None
@@ -230,20 +243,22 @@ def _derive_q4_rows(
         instant_facts = [f for f in by_accn_non_dei[fy_filing.accession_number] if f.start is None]
         bs_values: dict[str, Decimal | None] = {}
         for metric in _INSTANT_BS_METRICS:
-            chosen = select_metric_fact(metric, instant_facts)
+            chosen = select_metric_fact(metric, instant_facts, currency=target_ccy)
             bs_values[metric] = chosen.value if chosen is not None else None
             if chosen is not None:
-                provenance[metric] = {
-                    "namespace": chosen.namespace,
-                    "tag": chosen.tag,
-                    "unit": chosen.unit,
-                    "value": str(chosen.value),
-                }
+                provenance[metric] = _fact_provenance(chosen)
         dei_val, dei_end, dei_meta = select_dei_shares(
             by_accn_dei.get(fy_filing.accession_number, [])
         )
         if dei_meta is not None:
             provenance["dei_common_shares_outstanding"] = dei_meta
+        if fy_ccy.alternate_currencies or q3_ccy.alternate_currencies:
+            alts = sorted(set(fy_ccy.alternate_currencies) | set(q3_ccy.alternate_currencies))
+            provenance["currency_selection"] = {
+                "selected": target_ccy,
+                "alternate_currencies": alts,
+                "basis": fy_ccy.basis if fy_ccy.alternate_currencies else q3_ccy.basis,
+            }
         derived_rows.append(
             SecBulkFundamentalRow(
                 cik=cik,
@@ -291,6 +306,7 @@ def extract_cik_bulk_records(
 ) -> tuple[list[SecBulkJoinedFact], list[SecBulkFundamentalRow], str | None, str | None]:
     """Join one company's parsed facts strictly to its submissions.zip PIT metadata."""
     by_accn_non_dei: dict[str, list[SecCompanyFactsFact]] = {}
+    by_accn_all_non_dei: dict[str, list[SecCompanyFactsFact]] = {}
     by_accn_dei: dict[str, list[SecCompanyFactsFact]] = {}
     eligible_facts: list[SecCompanyFactsFact] = []
     for fact in raw_facts:
@@ -305,15 +321,16 @@ def extract_cik_bulk_records(
         if fact.namespace == "dei":
             by_accn_dei.setdefault(fact.accn, []).append(fact)
             eligible_facts.append(fact)
-        elif fact.end == filing.report_date:
-            by_accn_non_dei.setdefault(fact.accn, []).append(fact)
-            eligible_facts.append(fact)
+        else:
+            by_accn_all_non_dei.setdefault(fact.accn, []).append(fact)
+            if fact.end == filing.report_date:
+                by_accn_non_dei.setdefault(fact.accn, []).append(fact)
+                eligible_facts.append(fact)
 
     resolved = _resolve_filing_periods(tuple(eligible_facts), submissions.filings, acceptance_upper)
     overall_taxonomy = summarize_taxonomy(eligible_facts) if eligible_facts else None
     if overall_taxonomy == "unknown":
         overall_taxonomy = None
-    overall_currency = summarize_currency(eligible_facts)
 
     joined_facts: list[SecBulkJoinedFact] = []
     for fact in eligible_facts:
@@ -353,20 +370,32 @@ def extract_cik_bulk_records(
         set(by_accn_non_dei) | set(by_accn_dei),
         key=lambda a: (submissions.filings[a].accepted_at, a),
     )
+    primary_currencies: dict[str, SecPrimaryCurrencySelection] = {}
     for accn in all_accns:
         filing = submissions.filings[accn]
         facts = by_accn_non_dei.get(accn, [])
+        issuer_pit_facts = (
+            [
+                f
+                for a, flist in by_accn_all_non_dei.items()
+                if submissions.filings[a].accepted_at <= filing.accepted_at
+                for f in flist
+            ]
+            if len({c for f in facts if (c := _currency_from_unit(f.unit)) is not None}) > 1
+            else None
+        )
+        ccy_sel = select_primary_currency(
+            facts,
+            form=filing.form,
+            filing_facts=by_accn_all_non_dei.get(accn, facts),
+            issuer_facts=issuer_pit_facts,
+        )
+        primary_currencies[accn] = ccy_sel
         dei_facts = by_accn_dei.get(accn, [])
         instant_facts = [f for f in facts if f.start is None]
         accn_period = resolved.get(accn)
         if _is_quarterly_form(filing.form):
-            q_facts = [
-                f
-                for f in facts
-                if f.fp in {"Q1", "Q2", "Q3"}
-                and (days := _duration_days(f)) is not None
-                and 60 <= days <= 120
-            ]
+            q_facts = _duration_window(facts, {"Q1", "Q2", "Q3"}, 60, 120)
             if accn_period is not None:
                 fy, fq = accn_period
                 fp = f"Q{fq}"
@@ -387,20 +416,13 @@ def extract_cik_bulk_records(
                 duration_facts=q_facts,
                 instant_facts=instant_facts,
                 dei_facts=dei_facts,
+                currency_selection=ccy_sel,
             )
             if row is not None:
                 fundamental_rows.append(row)
         elif _is_annual_form(filing.form):
-            fy_facts = [
-                f
-                for f in facts
-                if f.fp == "FY" and (days := _duration_days(f)) is not None and 300 <= days <= 430
-            ]
-            q4_direct_facts = [
-                f
-                for f in facts
-                if f.fp == "FY" and (days := _duration_days(f)) is not None and 60 <= days <= 120
-            ]
+            fy_facts = _duration_window(facts, {"FY"}, 300, 430)
+            q4_direct_facts = _duration_window(facts, {"FY"}, 60, 120)
             if accn_period is not None:
                 fy = accn_period[0]
             else:
@@ -420,6 +442,7 @@ def extract_cik_bulk_records(
                 duration_facts=fy_facts,
                 instant_facts=instant_facts,
                 dei_facts=dei_facts,
+                currency_selection=ccy_sel,
             )
             if fy_row is not None:
                 fundamental_rows.append(fy_row)
@@ -434,6 +457,7 @@ def extract_cik_bulk_records(
                     duration_facts=q4_direct_facts,
                     instant_facts=[],
                     dei_facts=[],
+                    currency_selection=ccy_sel,
                 )
                 if q4_row is not None:
                     fundamental_rows.append(q4_row)
@@ -445,9 +469,18 @@ def extract_cik_bulk_records(
             resolved=resolved,
             by_accn_non_dei=by_accn_non_dei,
             by_accn_dei=by_accn_dei,
+            primary_currencies=primary_currencies,
             start_year=start_year,
             end_year=end_year,
         )
+    )
+    row_currencies = {
+        r.reporting_currency for r in fundamental_rows if r.reporting_currency is not None
+    }
+    overall_currency = (
+        (next(iter(row_currencies)) if len(row_currencies) == 1 else "MULTI")
+        if row_currencies
+        else summarize_currency(eligible_facts)
     )
     return joined_facts, fundamental_rows, overall_taxonomy, overall_currency
 

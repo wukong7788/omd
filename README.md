@@ -574,6 +574,17 @@ uv run omd sec financials bulk-project \
   --output artifacts/sec-bulk-pit \
   --start-year 2018 \
   --end-year 2025 \
+  --workers 8 \
+  --json
+
+# Explicit opt-in PIT-safe FX->USD translation of a bulk fundamentals dataset:
+uv run omd sec financials translate-usd \
+  --bulk-dataset artifacts/sec-bulk-pit \
+  --output artifacts/sec-bulk-pit-usd \
+  --fx-rates /path/to/pit-fx-rates.parquet \
+  --date-policy PERIOD_END_SPOT \
+  --flow-method PERIOD_AVERAGE \
+  --max-staleness-days 10 \
   --json
 
 # Inspect local symbol= or cik= partitions:
@@ -583,6 +594,19 @@ uv run omd sec financials inspect --root artifacts/sec-financials --cik 00010461
 # Validate local Parquet partitions (symbol=, cik=, and incremental batches):
 uv run omd sec financials validate --root artifacts/sec-financials
 ```
+
+Native-currency bulk datasets (`sec-bulk-companyfacts-v1`) remain untouched;
+`project_bulk_companyfacts_zips`, `build_bulk_companyfacts_dataset`, and
+`omd sec financials bulk-project` accept `--workers` / `workers` (`1..64`, default `1`)
+for deterministic multi-process projection with byte-identical Parquet and manifest output.
+Opt-in USD translation (`translate_bulk_fundamentals_to_usd`,
+`translate_bulk_dataset_to_usd`, and `omd sec financials translate-usd`) writes
+a separate immutable `sec-bulk-fundamentals-usd-v1` dataset with per-row FX
+status (`NATIVE_USD`, `TRANSLATED_FILING_IMPLIED`, `TRANSLATED_EXTERNAL_FX`,
+`MISSING_FX_RATE`, `AMBIGUOUS_FX_RATE`, `MISSING_CURRENCY`), separate flow vs.
+balance-sheet rates, strict PIT bounds (`rate_date <= accepted_at.date()` and
+`available_at <= accepted_at`), and untranslated share counts. External FX rate
+tables use the `usd_per_unit` convention (`1 unit of <currency> = usd_per_unit USD`).
 
 Python SDK example with injected credentials:
 

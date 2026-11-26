@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -285,13 +285,121 @@ def _is_valid_fundamental_unit(metric_name: str, unit: str) -> bool:
     return _CURRENCY_UNIT.fullmatch(unit) is not None
 
 
-def select_metric_fact(metric: str, candidates: list[Any]) -> Any | None:
+@dataclass(frozen=True)
+class SecPrimaryCurrencySelection:
+    selected: str | None
+    alternate_currencies: tuple[str, ...]
+    basis: str
+
+    def to_provenance_dict(self) -> dict[str, Any]:
+        return {
+            "selected": self.selected,
+            "alternate_currencies": list(self.alternate_currencies),
+            "basis": self.basis,
+        }
+
+
+_SHARE_COUNT_METRICS = frozenset({"diluted_shares", "dei_common_shares_outstanding"})
+_FPI_CONVENIENCE_FORMS = frozenset({"20-F", "40-F"})
+
+
+def _score_currencies(
+    facts: Sequence[Any],
+    currencies: Sequence[str],
+) -> dict[str, tuple[int, int, int]]:
+    allowed = set(currencies)
+    mon_ends: dict[str, set[date]] = {c: set() for c in currencies}
+    mon_keys: dict[str, set[tuple[Any, ...]]] = {c: set() for c in currencies}
+    all_keys: dict[str, set[tuple[Any, ...]]] = {c: set() for c in currencies}
+    for fact in facts:
+        if fact.namespace == "dei":
+            continue
+        ccy = _currency_from_unit(fact.unit)
+        if ccy not in allowed:
+            continue
+        key = (fact.namespace, fact.tag, fact.unit, fact.start, fact.end)
+        all_keys[ccy].add(key)
+        if _CURRENCY_UNIT.fullmatch(fact.unit) is not None:
+            mon_ends[ccy].add(fact.end)
+            mon_keys[ccy].add(key)
+    return {c: (len(mon_ends[c]), len(mon_keys[c]), len(all_keys[c])) for c in currencies}
+
+
+def select_primary_currency(
+    facts: Sequence[Any],
+    *,
+    form: str | None = None,
+    filing_facts: Sequence[Any] | None = None,
+    issuer_facts: Sequence[Any] | None = None,
+) -> SecPrimaryCurrencySelection:
+    """Deterministically resolve one primary reporting currency without implicit conversion."""
+    scope_currencies = sorted(
+        {
+            ccy
+            for fact in facts
+            if fact.namespace != "dei"
+            for ccy in (_currency_from_unit(fact.unit),)
+            if ccy is not None
+        }
+    )
+    if not scope_currencies:
+        return SecPrimaryCurrencySelection(None, (), "no_currency_facts")
+    if len(scope_currencies) == 1:
+        return SecPrimaryCurrencySelection(scope_currencies[0], (), "single_currency")
+
+    filing_scores = _score_currencies(
+        filing_facts if filing_facts is not None else facts,
+        scope_currencies,
+    )
+    max_filing = max(filing_scores.values())
+    leaders = [c for c in scope_currencies if filing_scores[c] == max_filing]
+    if len(leaders) == 1:
+        winner = leaders[0]
+        runner_up = max(score for c, score in filing_scores.items() if c != winner)
+        if filing_scores[winner][0] > runner_up[0]:
+            basis = "filing_comparative_periods"
+        elif filing_scores[winner][1] > runner_up[1]:
+            basis = "filing_monetary_fact_count"
+        else:
+            basis = "filing_currency_fact_count"
+        alts = tuple(c for c in scope_currencies if c != winner)
+        return SecPrimaryCurrencySelection(winner, alts, basis)
+
+    if issuer_facts:
+        issuer_scores = _score_currencies(issuer_facts, leaders)
+        max_issuer = max(issuer_scores.values())
+        issuer_leaders = [c for c in leaders if issuer_scores[c] == max_issuer]
+        if len(issuer_leaders) == 1:
+            winner = issuer_leaders[0]
+            alts = tuple(c for c in scope_currencies if c != winner)
+            return SecPrimaryCurrencySelection(winner, alts, "issuer_pit_evidence")
+        leaders = issuer_leaders
+
+    base_form = form.strip().upper().removesuffix("/A") if form else ""
+    if base_form in _FPI_CONVENIENCE_FORMS and len(leaders) == 2 and "USD" in leaders:
+        winner = next(c for c in leaders if c != "USD")
+        alts = tuple(c for c in scope_currencies if c != winner)
+        return SecPrimaryCurrencySelection(winner, alts, "fpi_convenience_translation_tiebreak")
+
+    return SecPrimaryCurrencySelection(None, tuple(scope_currencies), "ambiguous_tie")
+
+
+def select_metric_fact(
+    metric: str,
+    candidates: list[Any],
+    *,
+    currency: str | None = None,
+) -> Any | None:
     """Select one unambiguous fact by versioned concept precedence without guessing."""
+    target_currency = (
+        currency.upper() if currency is not None and metric not in _SHARE_COUNT_METRICS else None
+    )
     eligible = [
         fact
         for fact in candidates
         if fact.tag in SEC_FUNDAMENTAL_CONCEPTS[metric].get(fact.namespace, ())
         and _is_valid_fundamental_unit(metric, fact.unit)
+        and (target_currency is None or _currency_from_unit(fact.unit) == target_currency)
     ]
     if not eligible:
         return None
@@ -374,11 +482,13 @@ __all__ = [
     "SecBulkJoinedFact",
     "SecBulkProjectionResult",
     "SecFundamentalMetric",
+    "SecPrimaryCurrencySelection",
     "_currency_from_unit",
     "_is_valid_canonical_unit",
     "_is_valid_fundamental_unit",
     "select_dei_shares",
     "select_metric_fact",
+    "select_primary_currency",
     "summarize_currency",
     "summarize_taxonomy",
 ]

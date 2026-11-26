@@ -10,7 +10,9 @@ from typing import Any, cast
 from .financials import normalize_sec_cik
 from .financials_sync import load_cik_universe
 
-BOOL_CONFIG_KEYS = frozenset({"json", "quiet", "rows", "latest", "no_amendments"})
+BOOL_CONFIG_KEYS = frozenset(
+    {"json", "quiet", "rows", "latest", "no_amendments", "no_filing_implied", "no_spot_fallback"}
+)
 PARSER_VERSIONS = (
     "sec-live-financial-parser-v1-edgartools-6.4.0",
     "sec-live-financial-parser-v2-edgartools-6.4.0",
@@ -96,8 +98,26 @@ def add_financials_commands(sec_subparsers: Any) -> None:
             "--forms",
             "--acceptance-upper",
         ),
-        int_flags=("--start-year", "--end-year", "--max-entry-bytes", "--max-total-bytes"),
+        int_flags=(
+            "--start-year",
+            "--end-year",
+            "--max-entry-bytes",
+            "--max-total-bytes",
+            "--workers",
+        ),
         bool_flags=("--no-amendments",),
+    )
+    _add_flags(
+        fin.add_parser("translate-usd"),
+        (
+            "--bulk-dataset",
+            "--output",
+            "--fx-rates",
+            "--date-policy",
+            "--flow-method",
+        ),
+        int_flags=("--max-staleness-days",),
+        bool_flags=("--no-filing-implied", "--no-spot-fallback"),
     )
 
 

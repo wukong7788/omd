@@ -790,3 +790,235 @@ def test_incomplete_xbrl_amendments_detects_missing_ifrs_metric_class() -> None:
     )
     assert periods == frozenset({(2026, 2)})
     assert accessions == (amended,)
+
+
+def test_parse_skips_unfocused_non_dei_rows_and_normalizes_dei_focus() -> None:
+    accn_valid = f"{_CIK}-25-000001"
+    accn_null_fy = f"{_CIK}-20-000002"
+    accn_zero_blank = f"{_CIK}-10-000003"
+    accn_excel_fy = f"{_CIK}-19-000004"
+    accn_both_null = f"{_CIK}-21-000005"
+    accn_cy_fp = f"{_CIK}-15-000006"
+    accn_ifrs_null = f"{_CIK}-24-000007"
+    accn_ifrs_valid = f"{_CIK}-25-000008"
+
+    payload = {
+        "cik": int(_CIK),
+        "entityName": "Synthetic Focus Edge Corp",
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 500,
+                                "accn": accn_valid,
+                                "form": "10-K",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "start": "2024-01-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-20",
+                            },
+                            {
+                                "val": 100,
+                                "accn": accn_null_fy,
+                                "form": "10-Q",
+                                "fy": None,
+                                "fp": "Q1",
+                                "start": "2020-01-01",
+                                "end": "2020-03-31",
+                                "filed": "2020-05-08",
+                            },
+                            {
+                                "val": 110,
+                                "accn": accn_zero_blank,
+                                "form": "10-Q",
+                                "fy": 0,
+                                "fp": "",
+                                "start": "2009-10-01",
+                                "end": "2009-12-31",
+                                "filed": "2010-02-09",
+                            },
+                            {
+                                "val": 120,
+                                "accn": accn_excel_fy,
+                                "form": "10-Q",
+                                "fy": 43646,
+                                "fp": "Q2",
+                                "start": "2019-04-01",
+                                "end": "2019-06-30",
+                                "filed": "2019-07-25",
+                            },
+                            {
+                                "val": 130,
+                                "accn": accn_both_null,
+                                "form": "10-Q",
+                                "fy": None,
+                                "fp": None,
+                                "start": "2021-07-01",
+                                "end": "2021-09-30",
+                                "filed": "2021-11-03",
+                            },
+                            {
+                                "val": 140,
+                                "accn": accn_cy_fp,
+                                "form": "40-F",
+                                "fy": 2014,
+                                "fp": "CY",
+                                "start": "2014-01-01",
+                                "end": "2014-12-31",
+                                "filed": "2015-03-24",
+                            },
+                        ]
+                    }
+                },
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "val": 900,
+                                "accn": accn_cy_fp,
+                                "form": "40-F",
+                                "fy": 2014,
+                                "fp": "CY",
+                                "end": "2014-12-31",
+                                "filed": "2015-03-24",
+                            }
+                        ]
+                    }
+                },
+            },
+            "ifrs-full": {
+                "Revenue": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "val": 700,
+                                "accn": accn_ifrs_valid,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "start": "2024-01-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-03-28",
+                            },
+                            {
+                                "val": 650,
+                                "accn": accn_ifrs_null,
+                                "form": "20-F",
+                                "fy": None,
+                                "fp": None,
+                                "start": "2023-01-01",
+                                "end": "2023-12-31",
+                                "filed": "2024-03-28",
+                            },
+                        ]
+                    }
+                }
+            },
+            "dei": {
+                "EntityCommonStockSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {
+                                "val": 10_000,
+                                "accn": accn_zero_blank,
+                                "form": "10-Q",
+                                "fy": 0,
+                                "fp": "",
+                                "end": "2010-01-31",
+                                "filed": "2010-02-09",
+                            },
+                            {
+                                "val": 20_000,
+                                "accn": accn_excel_fy,
+                                "form": "10-Q",
+                                "fy": 43646,
+                                "fp": "Q2",
+                                "end": "2019-07-18",
+                                "filed": "2019-07-25",
+                            },
+                            {
+                                "val": 30_000,
+                                "accn": accn_cy_fp,
+                                "form": "40-F",
+                                "fy": 2014,
+                                "fp": "CY",
+                                "end": "2014-12-31",
+                                "filed": "2015-03-24",
+                            },
+                        ]
+                    }
+                }
+            },
+        },
+    }
+    parsed = companyfacts.parse_sec_companyfacts_payload(json.dumps(payload).encode(), _CIK)
+    non_dei = [f for f in parsed if f.namespace != "dei"]
+    dei = {f.accn: f for f in parsed if f.namespace == "dei"}
+
+    assert [(f.namespace, f.accn, f.fy, f.fp, f.value) for f in non_dei] == [
+        ("us-gaap", accn_valid, 2024, "FY", Decimal(500)),
+        ("ifrs-full", accn_ifrs_valid, 2024, "FY", Decimal(700)),
+    ]
+    assert set(dei) == {accn_zero_blank, accn_excel_fy, accn_cy_fp}
+    assert (dei[accn_zero_blank].fy, dei[accn_zero_blank].fp) == (None, None)
+    assert (dei[accn_excel_fy].fy, dei[accn_excel_fy].fp) == (None, "Q2")
+    assert (dei[accn_cy_fp].fy, dei[accn_cy_fp].fp) == (2014, None)
+
+
+def test_parse_still_rejects_structural_corruption_and_wrong_focus_types() -> None:
+    accn = f"{_CIK}-25-000001"
+    base_row: dict[str, object] = {
+        "val": 100,
+        "accn": accn,
+        "form": "10-Q",
+        "fy": 2025,
+        "fp": "Q1",
+        "start": "2025-01-01",
+        "end": "2025-03-31",
+        "filed": "2025-05-01",
+    }
+
+    def _wrap(row: dict[str, object]) -> bytes:
+        return json.dumps(
+            {"cik": int(_CIK), "facts": {"us-gaap": {"Revenues": {"units": {"USD": [row]}}}}}
+        ).encode()
+
+    # Missing fy or fp keys on non-DEI rows fail explicitly
+    no_fy = {k: v for k, v in base_row.items() if k != "fy"}
+    with pytest.raises(SchemaMismatchError, match="fiscal or accession"):
+        companyfacts.parse_sec_companyfacts_payload(_wrap(no_fy), _CIK)
+
+    # Wrong fy/fp types and negative fy fail explicitly
+    for bad_fields in (
+        {"fy": "bad"},
+        {"fy": "2025"},
+        {"fy": True},
+        {"fy": False},
+        {"fy": -1},
+        {"fy": 2025.5},
+        {"fp": 123},
+        {"fp": True},
+        {"accn": "bad-accn"},
+    ):
+        with pytest.raises(SchemaMismatchError, match="fiscal or accession"):
+            companyfacts.parse_sec_companyfacts_payload(_wrap({**base_row, **bad_fields}), _CIK)
+
+    # Structural defects on unfocused rows still raise SchemaMismatchError (never silently skipped)
+    with pytest.raises(SchemaMismatchError, match="duration is reversed"):
+        companyfacts.parse_sec_companyfacts_payload(
+            _wrap({**base_row, "fy": None, "fp": None, "start": "2025-04-01", "end": "2025-03-31"}),
+            _CIK,
+        )
+    with pytest.raises(SchemaMismatchError, match="frame is invalid"):
+        companyfacts.parse_sec_companyfacts_payload(
+            _wrap({**base_row, "fy": 0, "fp": "", "frame": "BADFRAME"}),
+            _CIK,
+        )
+    with pytest.raises(SchemaMismatchError, match="fact value is invalid"):
+        companyfacts.parse_sec_companyfacts_payload(
+            _wrap({**base_row, "fy": None, "fp": None, "val": "not-a-number"}),
+            _CIK,
+        )

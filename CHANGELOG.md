@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.1 — 2026-11-26
+
+### Added
+
+- Add an explicit, opt-in, PIT-safe FX-to-USD translation layer
+  (`fx_translation.py`: `SecFxRateTable`, `load_fx_rate_table`,
+  `translate_bulk_fundamentals_to_usd`, `translate_bulk_dataset_to_usd`,
+  `build_usd_translated_fundamentals_dataset`,
+  `write_usd_translated_fundamentals_dataset`,
+  `validate_usd_translated_fundamentals_dataset`) supporting `NATIVE_USD`,
+  `TRANSLATED_FILING_IMPLIED` (dual-currency convenience translation with
+  `<= 2%` spread and 3+-currency debt-tranche guards), and
+  `TRANSLATED_EXTERNAL_FX` (`PERIOD_AVERAGE`/`SPOT` bounded by UTC
+  `accepted_at` and staleness limits), plus CLI `omd sec financials translate-usd`.
+- Add deterministic multiprocessing (`workers: int = 1`, `1..64`) to
+  `project_bulk_companyfacts_zips`, `build_bulk_companyfacts_dataset`, and
+  `omd sec financials bulk-project --workers`, maintaining byte-identical
+  Parquet/manifest SHA-256 outputs and aggregate `BulkZipBombError` limits.
+
+### Changed
+
+- Accelerate strict RFC 8259 SEC companyfacts JSON parsing
+  (`_companyfacts_json.py`) while preserving all byte-size, depth, node-count,
+  duplicate-key, `NaN`/`Infinity`, and exact `Decimal` checks.
+
+### Fixed
+
+- Harden `parse_sec_companyfacts_payload` against real SEC EDGAR omitted or
+  out-of-range fiscal focus values (`fy` in `{None, 0, >9999}` such as Excel
+  serial dates, and `fp` in `{None, "", "CY"}`) on isolated historical or DEI
+  rows while preserving strict `SchemaMismatchError` validation on structural
+  and type corruption.
+- Resolve dual-currency `20-F`/`40-F` convenience translations (such as
+  `CNY`/`TWD`/`INR` alongside `USD`) deterministically to one primary functional
+  currency per `SecBulkFundamentalRow` without mixing currencies, while
+  retaining all native currencies in `facts.parquet` and recording
+  `currency_selection` provenance in `source_tags_json`.
+
 ## 0.5.0 — 2026-11-26
 
 - Add CIK-direct SEC financials fetching (`SecFinancialsRequest.ciks`) and

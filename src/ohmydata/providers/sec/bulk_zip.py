@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import zipfile
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,6 @@ from ._bulk_zip_dataset import (
     validate_bulk_companyfacts_dataset,
     write_bulk_companyfacts_dataset,
 )
-from ._bulk_zip_extract import extract_cik_bulk_records
 from ._bulk_zip_io import (
     DEFAULT_MAX_HISTORY_PAGES_PER_CIK,
     DEFAULT_MAX_ZIP_ENTRY_BYTES,
@@ -25,7 +25,6 @@ from ._bulk_zip_io import (
     BulkZipSecurityError,
     SecBulkArchiveProvenance,
     index_cik_members,
-    load_submissions_from_zip,
     sha256_file_streaming,
     validate_zip_archive_safety,
 )
@@ -36,8 +35,13 @@ from ._bulk_zip_models import (
     SecBulkJoinedFact,
     SecBulkProjectionResult,
 )
-from ._companyfacts_models import normalize_sec_cik, parse_sec_companyfacts_payload
-from .errors import ResourceLimitError, SchemaMismatchError
+from ._bulk_zip_parallel import (
+    process_cik_from_zips,
+    project_ciks_parallel,
+    validate_bulk_workers,
+)
+from ._companyfacts_models import normalize_sec_cik
+from .errors import SchemaMismatchError
 
 DEFAULT_BULK_FORMS: tuple[str, ...] = ("10-K", "10-Q", "20-F", "40-F")
 _SUPPORTED_BASE_FORMS = frozenset({"10-K", "10-Q", "20-F", "40-F"})
@@ -105,6 +109,7 @@ def project_bulk_companyfacts_zips(
     max_total_bytes: int = DEFAULT_MAX_ZIP_TOTAL_BYTES,
     max_history_pages_per_cik: int = DEFAULT_MAX_HISTORY_PAGES_PER_CIK,
     max_zip_members: int = DEFAULT_MAX_ZIP_MEMBERS,
+    workers: int = 1,
 ) -> SecBulkProjectionResult:
     """Parse SEC bulk companyfacts.zip + submissions.zip offline into PIT-joined records."""
     cf_path = Path(companyfacts_zip)
@@ -117,9 +122,7 @@ def project_bulk_companyfacts_zips(
     allowed_forms = _resolve_allowed_forms(forms, include_amendments)
     if type(max_history_pages_per_cik) is not int or max_history_pages_per_cik < 1:
         raise ValueError("max_history_pages_per_cik must be a positive integer")
-
-    cf_prov = sha256_file_streaming(cf_path)
-    sub_prov = sha256_file_streaming(sub_path)
+    worker_count = validate_bulk_workers(workers)
     reader = BoundedZipReader(
         max_entry_bytes=max_entry_bytes,
         max_total_bytes=max_total_bytes,
@@ -128,104 +131,94 @@ def project_bulk_companyfacts_zips(
     outcomes: list[SecBulkCikOutcome] = []
     all_fundamentals: list[SecBulkFundamentalRow] = []
     all_facts: list[SecBulkJoinedFact] = []
+    work_items: list[tuple[str, str, int]] = []
 
-    try:
-        with zipfile.ZipFile(cf_path, "r") as cf_zf, zipfile.ZipFile(sub_path, "r") as sub_zf:
-            cf_index = validate_zip_archive_safety(cf_zf, max_members=max_zip_members)
-            sub_index = validate_zip_archive_safety(sub_zf, max_members=max_zip_members)
-            cf_by_cik = index_cik_members(cf_index)
-            sub_by_cik = index_cik_members(sub_index)
+    with ThreadPoolExecutor(max_workers=2) as hash_pool:
+        cf_hash_future = hash_pool.submit(sha256_file_streaming, cf_path)
+        sub_hash_future = hash_pool.submit(sha256_file_streaming, sub_path)
+        try:
+            with (
+                zipfile.ZipFile(cf_path, "r") as cf_zf,
+                zipfile.ZipFile(sub_path, "r") as sub_zf,
+            ):
+                cf_index = validate_zip_archive_safety(cf_zf, max_members=max_zip_members)
+                sub_index = validate_zip_archive_safety(sub_zf, max_members=max_zip_members)
+                cf_by_cik = index_cik_members(cf_index)
+                sub_by_cik = index_cik_members(sub_index)
 
-            target_ciks = (
-                normalized_ciks if normalized_ciks is not None else tuple(sorted(cf_by_cik.keys()))
-            )
-            for cik in target_ciks:
-                cf_member = cf_by_cik.get(cik)
-                if cf_member is None:
-                    outcomes.append(
-                        SecBulkCikOutcome(
-                            cik=cik,
-                            status=SecBulkCikOutcomeStatus.EMPTY,
-                            error_message="CIK not present in companyfacts.zip",
-                        )
-                    )
-                    continue
-                if cik not in sub_by_cik:
-                    outcomes.append(
-                        SecBulkCikOutcome(
-                            cik=cik,
-                            status=SecBulkCikOutcomeStatus.MISSING_SUBMISSIONS,
-                            error_message="CIK not present in submissions.zip",
-                        )
-                    )
-                    continue
-                try:
-                    cf_body = reader.read_entry(cf_zf, cf_index[cf_member])
-                    sub_meta = load_submissions_from_zip(
-                        sub_zf,
-                        sub_index,
-                        reader,
-                        cik,
-                        allowed_forms=allowed_forms,
-                        acceptance_upper=bound,
-                        max_history_pages=max_history_pages_per_cik,
-                    )
-                    raw_facts = parse_sec_companyfacts_payload(cf_body, cik)
-                    joined_facts, fundamental_rows, taxonomy, currency = extract_cik_bulk_records(
-                        cik,
-                        raw_facts,
-                        sub_meta,
-                        start_year=start_year,
-                        end_year=end_year,
-                        acceptance_upper=bound,
-                    )
-                except (BulkZipSecurityError, BulkZipBombError):
-                    raise
-                except (SchemaMismatchError, ResourceLimitError, ValueError) as exc:
-                    outcomes.append(
-                        SecBulkCikOutcome(
-                            cik=cik,
-                            status=SecBulkCikOutcomeStatus.PARSE_FAILED,
-                            error_type=type(exc).__name__,
-                            error_message=str(exc),
-                        )
-                    )
-                    continue
-
-                if not joined_facts and not fundamental_rows:
-                    outcomes.append(
-                        SecBulkCikOutcome(
-                            cik=cik,
-                            status=SecBulkCikOutcomeStatus.EMPTY,
-                            entity_name=sub_meta.entity_name,
-                            symbols=sub_meta.symbols,
-                            taxonomy=taxonomy,
-                            reporting_currency=currency,
-                            filing_count=len(sub_meta.filings),
-                            history_pages_read=sub_meta.history_pages_read,
-                        )
-                    )
-                    continue
-
-                all_facts.extend(joined_facts)
-                all_fundamentals.extend(fundamental_rows)
-                outcomes.append(
-                    SecBulkCikOutcome(
-                        cik=cik,
-                        status=SecBulkCikOutcomeStatus.OK,
-                        entity_name=sub_meta.entity_name,
-                        symbols=sub_meta.symbols,
-                        taxonomy=taxonomy,
-                        reporting_currency=currency,
-                        filing_count=len(sub_meta.filings),
-                        history_pages_read=sub_meta.history_pages_read,
-                        fact_count=len(joined_facts),
-                        fundamental_row_count=len(fundamental_rows),
-                    )
+                target_ciks = (
+                    normalized_ciks
+                    if normalized_ciks is not None
+                    else tuple(sorted(cf_by_cik.keys()))
                 )
-    except zipfile.BadZipFile as exc:
-        raise SchemaMismatchError("invalid SEC bulk ZIP archive") from exc
+                for cik in target_ciks:
+                    cf_member = cf_by_cik.get(cik)
+                    if cf_member is None:
+                        outcomes.append(
+                            SecBulkCikOutcome(
+                                cik=cik,
+                                status=SecBulkCikOutcomeStatus.EMPTY,
+                                error_message="CIK not present in companyfacts.zip",
+                            )
+                        )
+                        continue
+                    if cik not in sub_by_cik:
+                        outcomes.append(
+                            SecBulkCikOutcome(
+                                cik=cik,
+                                status=SecBulkCikOutcomeStatus.MISSING_SUBMISSIONS,
+                                error_message="CIK not present in submissions.zip",
+                            )
+                        )
+                        continue
+                    work_items.append((cik, cf_member, cf_index[cf_member].file_size))
 
+                if worker_count == 1 or len(work_items) <= 1:
+                    for cik, cf_member, _ in work_items:
+                        outcome, joined_facts, fundamental_rows = process_cik_from_zips(
+                            cik,
+                            cf_zf=cf_zf,
+                            cf_index=cf_index,
+                            cf_member=cf_member,
+                            sub_zf=sub_zf,
+                            sub_index=sub_index,
+                            reader=reader,
+                            allowed_forms=allowed_forms,
+                            start_year=start_year,
+                            end_year=end_year,
+                            acceptance_upper=bound,
+                            max_history_pages_per_cik=max_history_pages_per_cik,
+                        )
+                        outcomes.append(outcome)
+                        if joined_facts:
+                            all_facts.extend(joined_facts)
+                        if fundamental_rows:
+                            all_fundamentals.extend(fundamental_rows)
+                    work_items.clear()
+        except zipfile.BadZipFile as exc:
+            raise SchemaMismatchError("invalid SEC bulk ZIP archive") from exc
+        cf_prov = cf_hash_future.result()
+        sub_prov = sub_hash_future.result()
+
+    if work_items:
+        p_outcomes, p_fundamentals, p_facts = project_ciks_parallel(
+            cf_path,
+            sub_path,
+            work_items,
+            workers=worker_count,
+            allowed_forms=allowed_forms,
+            start_year=start_year,
+            end_year=end_year,
+            acceptance_upper=bound,
+            max_entry_bytes=max_entry_bytes,
+            max_total_bytes=max_total_bytes,
+            max_history_pages_per_cik=max_history_pages_per_cik,
+        )
+        outcomes.extend(p_outcomes)
+        all_fundamentals.extend(p_fundamentals)
+        all_facts.extend(p_facts)
+
+    outcomes.sort(key=lambda o: o.cik)
     all_fundamentals.sort(
         key=lambda r: (
             r.cik,
@@ -280,6 +273,7 @@ def build_bulk_companyfacts_dataset(
     max_entry_bytes: int = DEFAULT_MAX_ZIP_ENTRY_BYTES,
     max_total_bytes: int = DEFAULT_MAX_ZIP_TOTAL_BYTES,
     max_history_pages_per_cik: int = DEFAULT_MAX_HISTORY_PAGES_PER_CIK,
+    workers: int = 1,
 ) -> dict[str, Any]:
     """One-shot CLI/SDK helper: project bulk ZIPs, write immutable dataset, and validate."""
     projection = project_bulk_companyfacts_zips(
@@ -294,6 +288,7 @@ def build_bulk_companyfacts_dataset(
         max_entry_bytes=max_entry_bytes,
         max_total_bytes=max_total_bytes,
         max_history_pages_per_cik=max_history_pages_per_cik,
+        workers=workers,
     )
     write_bulk_companyfacts_dataset(output_dir, projection)
     return validate_bulk_companyfacts_dataset(output_dir)

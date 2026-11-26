@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any
 
@@ -24,6 +24,7 @@ from ._bulk_zip_models import (
     _currency_from_unit,
     _is_valid_canonical_unit,
 )
+from ._companyfacts_json import strict_companyfacts_json
 from ._metric_arithmetic import validate_decimal
 from .errors import ResourceLimitError, SchemaMismatchError
 from .quarterly import SecQuarterlyEligibility
@@ -60,8 +61,10 @@ _CIK = re.compile(r"^[0-9]{10}$")
 _FRAME = re.compile(r"^CY([0-9]{4})(?:Q([1-4]))?(?:I)?$")
 _QUARTER_FRAME = re.compile(r"^CY[0-9]{4}Q[1-4]$")
 _QUARTERLY_FORMS = frozenset({"10-Q", "10-Q/A"})
+_SAFE_INT_BOUND = 10**100
 _ANNUAL_FORMS = frozenset({"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"})
 _ALLOWED_FORMS = _QUARTERLY_FORMS | _ANNUAL_FORMS
+_VALID_FISCAL_PERIODS = frozenset({"Q1", "Q2", "Q3", "Q4", "FY"})
 _FLOW_METRICS = {"REVENUE", "GROSS_PROFIT", "OPERATING_INCOME"}
 
 
@@ -243,68 +246,28 @@ class SecCompanyFactsFact:
 
 
 def _strict_companyfacts_json(body: bytes) -> dict[str, Any]:
-    if type(body) is not bytes or len(body) > _MAX_BODY_BYTES:
-        raise ResourceLimitError("SEC companyfacts response exceeds byte limit")
-    depth = nodes = 0
-    quoted = escaped = False
-    for byte in body:
-        if quoted:
-            if escaped:
-                escaped = False
-            elif byte == 92:
-                escaped = True
-            elif byte == 34:
-                quoted = False
-            continue
-        if byte == 34:
-            quoted = True
-        elif byte in (123, 91):
-            depth += 1
-            nodes += 1
-        elif byte in (125, 93):
-            depth -= 1
-            if depth < 0:
-                raise SchemaMismatchError("malformed SEC companyfacts JSON")
-        elif byte == 44:
-            nodes += 1
-        if depth > _MAX_JSON_DEPTH or nodes > _MAX_JSON_NODES:
-            raise ResourceLimitError("SEC companyfacts JSON structure limit exceeded")
-    if quoted or depth != 0:
-        raise SchemaMismatchError("malformed SEC companyfacts JSON")
+    return strict_companyfacts_json(
+        body,
+        max_body_bytes=_MAX_BODY_BYTES,
+        max_depth=_MAX_JSON_DEPTH,
+        max_nodes=_MAX_JSON_NODES,
+    )
 
-    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise SchemaMismatchError("duplicate key in SEC companyfacts JSON")
-            result[key] = value
-        return result
 
+@lru_cache(maxsize=8192)
+def _parse_iso_date_cached(value: str) -> date | None:
     try:
-        value = json.loads(
-            body.decode("utf-8"),
-            object_pairs_hook=reject_duplicates,
-            parse_float=Decimal,
-            parse_int=int,
-            parse_constant=lambda token: (_ for _ in ()).throw(ValueError(token)),
-        )
-    except (UnicodeDecodeError, ValueError, json.JSONDecodeError, RecursionError) as exc:
-        if isinstance(exc, SchemaMismatchError):
-            raise
-        raise SchemaMismatchError("invalid SEC companyfacts JSON") from exc
-    if type(value) is not dict:
-        raise SchemaMismatchError("SEC companyfacts payload must be an object")
-    return value
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.isoformat() == value else None
 
 
 def _date(value: object, name: str) -> date:
     if type(value) is not str:
         raise SchemaMismatchError(f"SEC companyfacts {name} is invalid")
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError as exc:
-        raise SchemaMismatchError(f"SEC companyfacts {name} is invalid") from exc
-    if parsed.isoformat() != value:
+    parsed = _parse_iso_date_cached(value)
+    if parsed is None:
         raise SchemaMismatchError(f"SEC companyfacts {name} is invalid")
     return parsed
 
@@ -361,6 +324,7 @@ def parse_sec_companyfacts_payload(
     if total_tags > _MAX_TAGS:
         raise ResourceLimitError("SEC companyfacts taxonomy tag limit exceeded")
     result: list[SecCompanyFactsFact] = []
+    valid_accns: set[str] = set()
     row_count = 0
     for namespace in _SUPPORTED_NAMESPACES:
         taxonomy_map = facts.get(namespace)
@@ -391,16 +355,23 @@ def parse_sec_companyfacts_payload(
                     val = row.get("val")
                     if type(val) is int:
                         decimal = Decimal(val)
+                        if not -_SAFE_INT_BOUND < val < _SAFE_INT_BOUND:
+                            try:
+                                validate_decimal(decimal)
+                            except ValueError as exc:
+                                raise ResourceLimitError(
+                                    "SEC companyfacts decimal value exceeds limits"
+                                ) from exc
                     elif type(val) is Decimal and val.is_finite():
                         decimal = val
+                        try:
+                            validate_decimal(decimal)
+                        except ValueError as exc:
+                            raise ResourceLimitError(
+                                "SEC companyfacts decimal value exceeds limits"
+                            ) from exc
                     else:
                         raise SchemaMismatchError("SEC companyfacts fact value is invalid")
-                    try:
-                        validate_decimal(decimal)
-                    except ValueError as exc:
-                        raise ResourceLimitError(
-                            "SEC companyfacts decimal value exceeds limits"
-                        ) from exc
                     fy, fp, form, filed, accn = (
                         row.get("fy"),
                         row.get("fp"),
@@ -412,30 +383,32 @@ def parse_sec_companyfacts_payload(
                         raise SchemaMismatchError("SEC companyfacts form is invalid")
                     if form not in _ALLOWED_FORMS:
                         continue
-                    if type(accn) is not str or not _ACCESSION.fullmatch(accn):
+                    if type(accn) is not str:
                         raise SchemaMismatchError(
                             "SEC companyfacts fiscal or accession metadata is invalid"
                         )
-                    if namespace == "dei":
-                        if fy is not None and (type(fy) is not int or not 1 <= fy <= 9999):
+                    if accn not in valid_accns:
+                        if not _ACCESSION.fullmatch(accn):
                             raise SchemaMismatchError(
                                 "SEC companyfacts fiscal or accession metadata is invalid"
                             )
-                        if fp is not None and (
-                            type(fp) is not str or fp not in {"Q1", "Q2", "Q3", "Q4", "FY"}
-                        ):
-                            raise SchemaMismatchError(
-                                "SEC companyfacts fiscal or accession metadata is invalid"
-                            )
-                    elif (
-                        type(fy) is not int
-                        or not 1 <= fy <= 9999
-                        or type(fp) is not str
-                        or fp not in {"Q1", "Q2", "Q3", "Q4", "FY"}
+                        valid_accns.add(accn)
+                    if (
+                        (namespace != "dei" and ("fy" not in row or "fp" not in row))
+                        or (fy is not None and (type(fy) is not int or fy < 0))
+                        or (fp is not None and type(fp) is not str)
                     ):
                         raise SchemaMismatchError(
                             "SEC companyfacts fiscal or accession metadata is invalid"
                         )
+                    # Real SEC EDGAR rows occasionally carry omitted/placeholder/non-standard
+                    # fiscal focus (fy in {None, 0, >9999} or fp not in Q1..Q4/FY). Keep DEI
+                    # cover facts with normalized None focus and skip unfocused non-DEI rows
+                    # without discarding the rest of the issuer's history.
+                    fy_norm: int | None = fy if type(fy) is int and 1 <= fy <= 9999 else None
+                    fp_norm: str | None = (
+                        fp if type(fp) is str and fp in _VALID_FISCAL_PERIODS else None
+                    )
                     filed_date = _date(filed, "filed")
                     if "end" not in row:
                         raise SchemaMismatchError("SEC companyfacts duration metadata is missing")
@@ -453,6 +426,8 @@ def parse_sec_companyfacts_payload(
                         type(frame) is not str or not _FRAME.fullmatch(frame)
                     ):
                         raise SchemaMismatchError("SEC companyfacts frame is invalid")
+                    if namespace != "dei" and (fy_norm is None or fp_norm is None):
+                        continue
                     result.append(
                         SecCompanyFactsFact(
                             tag,
@@ -460,8 +435,8 @@ def parse_sec_companyfacts_payload(
                             decimal,
                             start,
                             end,
-                            fy,
-                            fp,
+                            fy_norm,
+                            fp_norm,
                             form,
                             filed_date,
                             accn,

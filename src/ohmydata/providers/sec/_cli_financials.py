@@ -34,6 +34,13 @@ from .financials_sync import (
     make_edgartools_filing_fetcher,
     sync_sec_financials_incremental,
 )
+from .fx_translation import (
+    DEFAULT_FX_MAX_STALENESS_DAYS,
+    SecFxDatePolicy,
+    SecFxFlowMethod,
+    build_usd_translated_fundamentals_dataset,
+    load_fx_rate_table,
+)
 
 __all__ = ["add_financials_commands", "run_financials"]
 
@@ -286,6 +293,10 @@ def _run_bulk_project(
     acc_upper = parse_utc_iso(str(acc_raw), "--acceptance-upper") if acc_raw is not None else None
     max_entry = getattr(args, "max_entry_bytes", None)
     max_total = getattr(args, "max_total_bytes", None)
+    workers_raw = getattr(args, "workers", None)
+    if workers_raw is not None and type(workers_raw) is not int:
+        raise ValueError("--workers must be an integer")
+    workers = 1 if workers_raw is None else workers_raw
 
     quiet = getattr(args, "quiet", False)
     log_progress("projecting SEC bulk ZIP archives offline...", quiet)
@@ -301,11 +312,84 @@ def _run_bulk_project(
         acceptance_upper=acc_upper,
         max_entry_bytes=DEFAULT_MAX_ZIP_ENTRY_BYTES if max_entry is None else int(max_entry),
         max_total_bytes=DEFAULT_MAX_ZIP_TOTAL_BYTES if max_total is None else int(max_total),
+        workers=workers,
     )
     payload.update(manifest)
     payload.update({"root": str(output_dir), "output": str(output_dir), "status": "completed"})
     log_progress(
         f"bulk-project completed: total_ciks={manifest.get('counts', {}).get('total_ciks', 0)}",
+        quiet,
+    )
+
+
+def _parse_enum_flag(raw: Any, enum_cls: Any, default: Any, flag_name: str) -> Any:
+    if raw is None:
+        return default
+    if isinstance(raw, enum_cls):
+        return raw
+    if not isinstance(raw, str):
+        raise ValueError(f"{flag_name} must be a string")  # noqa: TRY004
+    token = raw.strip().upper().replace("-", "_")
+    try:
+        return enum_cls[token]
+    except KeyError as exc:
+        allowed = ", ".join(m.value for m in enum_cls)
+        raise ValueError(f"invalid {flag_name}: {raw!r} (expected one of: {allowed})") from exc
+
+
+def _run_translate_usd(
+    args: Any, payload: dict[str, Any], log_progress: Callable[[str, bool], None]
+) -> None:
+    bulk_dataset = getattr(args, "bulk_dataset", None)
+    if not bulk_dataset:
+        raise ValueError("--bulk-dataset is required for translate-usd")
+    out_arg, root_arg = getattr(args, "output", None), getattr(args, "root", None)
+    if out_arg and root_arg and Path(out_arg).resolve() != Path(root_arg).resolve():
+        raise ValueError("--output and --root must match when both are provided")
+    output_dir = out_arg or root_arg
+    if not output_dir:
+        raise ValueError("--output or --root is required for translate-usd")
+    ensure_safe_output_root(output_dir)
+
+    fx_rates_path = getattr(args, "fx_rates", None)
+    fx_table = load_fx_rate_table(fx_rates_path) if fx_rates_path else None
+    date_policy = _parse_enum_flag(
+        getattr(args, "date_policy", None),
+        SecFxDatePolicy,
+        SecFxDatePolicy.PERIOD_END_SPOT,
+        "--date-policy",
+    )
+    flow_method = _parse_enum_flag(
+        getattr(args, "flow_method", None),
+        SecFxFlowMethod,
+        SecFxFlowMethod.PERIOD_AVERAGE,
+        "--flow-method",
+    )
+    max_staleness_raw = getattr(args, "max_staleness_days", None)
+    if type(max_staleness_raw) is bool:
+        raise ValueError("--max-staleness-days must be an integer")
+    max_staleness_days = (
+        DEFAULT_FX_MAX_STALENESS_DAYS if max_staleness_raw is None else int(max_staleness_raw)
+    )
+    use_filing_implied = not bool(getattr(args, "no_filing_implied", False))
+    allow_spot_fallback = not bool(getattr(args, "no_spot_fallback", False))
+
+    quiet = getattr(args, "quiet", False)
+    log_progress("translating SEC bulk fundamentals to USD offline...", quiet)
+    manifest = build_usd_translated_fundamentals_dataset(
+        bulk_dataset,
+        output_dir,
+        fx_table=fx_table,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_spot_fallback=allow_spot_fallback,
+    )
+    payload.update(manifest)
+    payload.update({"root": str(output_dir), "output": str(output_dir), "status": "completed"})
+    log_progress(
+        f"translate-usd completed: total_rows={manifest.get('counts', {}).get('total_rows', 0)}",
         quiet,
     )
 
@@ -325,6 +409,8 @@ def run_financials(
     payload: dict[str, Any] = {"command": f"sec financials {cmd}"}
     if cmd == "bulk-project":
         _run_bulk_project(args, payload, log_progress)
+    elif cmd == "translate-usd":
+        _run_translate_usd(args, payload, log_progress)
     else:
         if not getattr(args, "root", None):
             raise ValueError("--root is required")
