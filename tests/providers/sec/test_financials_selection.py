@@ -14,7 +14,7 @@ from ohmydata.providers.sec.financials import SecFinancialsRequest
 
 def _legacy_request(*args, **kwargs):
     return SecFinancialsRequest(
-        *args, parser_version="sec-live-financial-parser-v1-edgartools-5.56.0", **kwargs
+        *args, parser_version="sec-live-financial-parser-v1-edgartools-6.4.0", **kwargs
     )
 
 
@@ -247,3 +247,86 @@ def test_all_statement_failures_raise_with_original_cause_and_selected_vintage(m
         "NO_FINANCIAL_STATEMENTS",
     }
     assert "synthetic" not in str(caught.value)
+
+
+def test_edgar_6_exceptions_classified_without_swallowing_transport_or_identity(monkeypatch):
+    from edgar.exceptions import (
+        DataObjectError,
+        IdentityError,
+        ParsingError,
+        StatementNotFoundError,
+        TransportError,
+        XBRLProcessingError,
+    )
+
+    good = SimpleNamespace(
+        get_raw_data=lambda: [{"concept": "fake:Assets", "values": {"instant_2024-06-30": 42}}]
+    )
+
+    def missing_stmt():
+        raise StatementNotFoundError("IncomeStatement")
+
+    def bad_xbrl():
+        raise XBRLProcessingError("corrupt xbrl")
+
+    fin = SimpleNamespace(
+        balance_sheet=lambda: good,
+        income_statement=missing_stmt,
+        cash_flow_statement=bad_xbrl,
+    )
+    client, _ = install_company(
+        monkeypatch,
+        [("10-Q", "2024-08-01", "quarter")],
+        {"quarter": SimpleNamespace(financials=fin)},
+    )
+    result = client.fetch_company_financials(_legacy_request(("FAKE",)))[0]
+    assert len(result.rows) == 1
+    assert "INCOME_STATEMENT_MISSING" in result.quality_flags
+    assert "INCOME_STATEMENT_PARSE_FAILED" not in result.quality_flags
+    assert "CASH_FLOW_PARSE_FAILED" in result.quality_flags
+
+    def bad_obj(self):
+        raise DataObjectError("bad data object")
+
+    client, _ = install_company(monkeypatch, [("10-Q", "2024-08-01", "quarter")])
+    monkeypatch.setattr(Filing, "obj", bad_obj)
+    with pytest.raises(SecFinancialsParseError) as obj_caught:
+        client.fetch_company_financials(_legacy_request(("FAKE",)))
+    assert isinstance(obj_caught.value.__cause__, DataObjectError)
+    assert "FILING_PARSE_FAILED" in obj_caught.value.vintage.quality_flags
+    assert "NO_FINANCIALS_OBJECT" in obj_caught.value.vintage.quality_flags
+
+    def bad_parsing():
+        raise ParsingError("parse failed")
+
+    fin_parse = SimpleNamespace(
+        balance_sheet=bad_parsing,
+        income_statement=bad_parsing,
+        cash_flow_statement=bad_parsing,
+    )
+    client, _ = install_company(
+        monkeypatch,
+        [("10-Q", "2024-08-01", "quarter")],
+        {"quarter": SimpleNamespace(financials=fin_parse)},
+    )
+    with pytest.raises(SecFinancialsParseError) as caught:
+        client.fetch_company_financials(_legacy_request(("FAKE",)))
+    assert isinstance(caught.value.__cause__, ParsingError)
+
+    for exc_cls in (TransportError, IdentityError):
+
+        def raise_fatal(cls=exc_cls):
+            raise cls("fatal")
+
+        fin_fatal = SimpleNamespace(
+            balance_sheet=raise_fatal,
+            income_statement=lambda: None,
+            cash_flow_statement=lambda: None,
+        )
+        client, _ = install_company(
+            monkeypatch,
+            [("10-Q", "2024-08-01", "quarter")],
+            {"quarter": SimpleNamespace(financials=fin_fatal)},
+        )
+        with pytest.raises(exc_cls):
+            client.fetch_company_financials(_legacy_request(("FAKE",)))

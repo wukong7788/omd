@@ -594,7 +594,7 @@ Compatibility inputs may supply a separate `standard_concept`, whose semantics
 still require explicit validation before quantitative comparisons.
 
 Live requests default to
-`parser_version="sec-live-financial-parser-v2-edgartools-5.56.0"`. This mode
+`parser_version="sec-live-financial-parser-v2-edgartools-6.4.0"`. This mode
 requires the selected filing's bounded raw XML instance, corroborates native
 facts against it, and preserves complete units. Missing, ambiguous or mismatched
 unit evidence raises `SecUnitEvidenceError`; the call does not return a partial
@@ -620,7 +620,7 @@ Evidence records the original instance identity, without retaining its bytes or
 claiming authenticated origin, financial quality, publication time, or live replay.
 
 For explicit legacy behavior, select
-`sec-live-financial-parser-v1-edgartools-5.56.0` in the request or the financials
+`sec-live-financial-parser-v1-edgartools-6.4.0` in the request or the financials
 CLI's `--parser-version` option. V1 retains its known compound-unit limitations.
 Standalone `parse_statement_rows` retains its legacy default; explicit v2 also
 requires `raw_instance` and a native statement. See the
@@ -1230,8 +1230,8 @@ reproducible parsing, not independent cross-validation. See the
 Both offline producers now default to their own parser v2, preserving complete
 raw unit definitions before building projections. For exact historical source
 reconstruction, explicitly pass the corresponding v1 `parser_version`:
-`sec-sgml-financial-parser-v1-edgartools-5.56.0` or
-`sec-xbrl-package-financial-parser-v1-edgartools-5.56.0`. Their v2 names replace
+`sec-sgml-financial-parser-v1-edgartools-6.4.0` or
+`sec-xbrl-package-financial-parser-v1-edgartools-6.4.0`. Their v2 names replace
 `parser-v1` with `parser-v2`; the returned production exposes the selected version.
 V2 has new adapter/configuration identities even when simple-unit projection
 bytes are unchanged. Old bundles retain their recorded versions, and old quality
@@ -1300,13 +1300,13 @@ Callers that previously constructed production objects directly must now use
 There is no snapshot migration or promotion of old PIT evidence.
 
 New observed productions default to
-`parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0"`.
+`parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-6.4.0"`.
 V2 resolves units directly from the retained instance: simple USD/shares/pure
 units remain strings; compound units use compact JSON containing `type` and
 either `measures` or `numerator`/`denominator` lists. Compound `currency` is
 `None`; a USD numerator does not make USD/share a plain currency amount.
 To reproduce historical v1 output explicitly pass
-`parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"`.
+`parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"`.
 Observed bundle loading selects the version recorded in the retained output
 and rebuilds that complete source chain. V1 retains its known compound-unit
 defect for historical reconstruction. V2 has a distinct configuration and
@@ -1390,7 +1390,7 @@ commit = SecObservedFinancialConsumerCommit(
 )
 replay_policy = SecObservedFinancialReplayPolicy(
     output_schema_version="sec-financial-observed-rows-v1",
-    parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0",
+    parser_version="sec-observed-xbrl-financial-parser-v2-edgartools-6.4.0",
     configuration_version="sec-observed-xbrl-financial-config-v1",
     configuration_identity=expected_configuration_identity,
     quality_policy_version="example-quality-v1",
@@ -1542,7 +1542,7 @@ bundle_ref = write_sec_pit_bundle(
 )
 ```
 
-The SEC extra supports `edgartools==5.56.0`. See the
+The SEC extra supports `edgartools==6.4.0`. See the
 [financial period contract and v2 migration](docs/financial-period-integrity.md)
 before rebuilding existing financial datasets.
 
@@ -1712,7 +1712,7 @@ for request endpoints, serialization identifiers, reference grammar and limits.
 
 
 `produce_sec_financials_from_document_source` builds native financial rows from
-that source package using pinned edgartools 5.56.0 and mandatory raw unit evidence.
+that source package using pinned edgartools 6.4.0 and mandatory raw unit evidence.
 It returns a distinct `SecDocumentFinancialProduction`; old SGML productions and
 identities retain their behavior. The selected request CIK/accession/form must
 match the package; symbol remains a caller label. Missing requested statements,

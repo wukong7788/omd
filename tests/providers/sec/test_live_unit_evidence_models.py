@@ -88,7 +88,7 @@ def test_unit_evidence_is_canonical_and_v2_only() -> None:
     with pytest.raises(ValueError, match="zero-stripped"):
         replace(evidence, cik="0000320193")
     with pytest.raises(ValueError, match="parser v2"):
-        replace(evidence, parser_version="sec-live-financial-parser-v1-edgartools-5.56.0")
+        replace(evidence, parser_version="sec-live-financial-parser-v1-edgartools-6.4.0")
 
 
 @pytest.mark.parametrize(

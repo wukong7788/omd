@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .observed_xbrl_financials import SecObservedFinancialEvidence, SecObservedFinancialVintage
 
 _OUTPUT_SERIALIZATION = "sec-financial-observed-rows-v1"
-_PARSER_VERSION_V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+_PARSER_VERSION_V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"
 _CONFIG_VERSION = "sec-observed-xbrl-financial-config-v1"
 
 

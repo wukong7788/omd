@@ -16,13 +16,13 @@ from .pit import _row_payload
 from .sgml_financials import SecSgmlFinancialsRequest
 
 DOCUMENT_SCHEMA = "sec-document-financial-rows-v1"
-DOCUMENT_PARSER = "sec-document-xbrl-financial-parser-v1-edgartools-5.56.0"
+DOCUMENT_PARSER = "sec-document-xbrl-financial-parser-v1-edgartools-6.4.0"
 DOCUMENT_CONFIG = "sec-document-financial-config-v1"
 DOCUMENT_ENDPOINT = "financial-document-observed-rows"
 DOCUMENT_SOURCE_SCHEMA = "sec-document-source-package-v1"
 DOCUMENT_SOURCE_ENDPOINT = "company-filing-document-source-package"
 EMBEDDED_SCHEMA = "sec-embedded-document-financial-rows-v1"
-EMBEDDED_PARSER = "sec-schema-embedded-financial-parser-v1-edgartools-5.56.0"
+EMBEDDED_PARSER = "sec-schema-embedded-financial-parser-v1-edgartools-6.4.0"
 EMBEDDED_CONFIG = "sec-embedded-document-financial-config-v1"
 EMBEDDED_ENDPOINT = "financial-embedded-document-observed-rows"
 EMBEDDED_SOURCE_SCHEMA = "sec-document-embedded-source-package-v1"

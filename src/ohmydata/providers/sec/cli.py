@@ -167,8 +167,8 @@ def add_nport_commands(subparsers: Any) -> None:
         p_fin.add_argument(
             "--parser-version",
             choices=(
-                "sec-live-financial-parser-v1-edgartools-5.56.0",
-                "sec-live-financial-parser-v2-edgartools-5.56.0",
+                "sec-live-financial-parser-v1-edgartools-6.4.0",
+                "sec-live-financial-parser-v2-edgartools-6.4.0",
             ),
         )
         p_fin.add_argument("--limit", type=int)
@@ -600,7 +600,7 @@ def run_financials(args: Any) -> int:
             else 0,
             limit=limit_val,
             parser_version=getattr(args, "parser_version", None)
-            or "sec-live-financial-parser-v2-edgartools-5.56.0",
+            or "sec-live-financial-parser-v2-edgartools-6.4.0",
         )
 
         _log_progress(f"fetching company financials for {len(symbols)} symbol(s)...", quiet)

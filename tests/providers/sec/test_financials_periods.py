@@ -1,4 +1,4 @@
-"""Synthetic native Edgar 5.56 boundaries and period/vintage roundtrip regressions."""
+"""Synthetic native Edgar 6.4 boundaries and period/vintage roundtrip regressions."""
 
 import hashlib
 import json
@@ -127,7 +127,7 @@ def test_v2_actual_statement_uses_raw_units_without_changing_other_native_fields
     v2 = parse_statement_rows(
         statement,
         "income_statement",
-        parser_version="sec-live-financial-parser-v2-edgartools-5.56.0",
+        parser_version="sec-live-financial-parser-v2-edgartools-6.4.0",
         raw_instance=raw,
     )
     assert [(r.unit_ref, r.unit) for r in v2] == [("u2", "iso4217:EUR"), ("u1", "iso4217:USD")]
@@ -206,7 +206,7 @@ def test_client_returns_all_three_statements_from_real_xbrl_factsview(monkeypatc
             limit=1,
             include_amendments=False,
             include_dimensions=False,
-            parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+            parser_version="sec-live-financial-parser-v1-edgartools-6.4.0",
         )
     )[0]
     assert {row.statement_type for row in result.rows} == {

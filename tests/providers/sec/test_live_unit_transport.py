@@ -53,7 +53,7 @@ def test_v2_requires_raw_bytes_and_custom_runner_evidence() -> None:
         parse_statement_rows(
             None,
             "income_statement",
-            parser_version="sec-live-financial-parser-v2-edgartools-5.56.0",
+            parser_version="sec-live-financial-parser-v2-edgartools-6.4.0",
         )
 
     vintage = SecCompanyFinancialVintage(

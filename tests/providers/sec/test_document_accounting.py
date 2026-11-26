@@ -144,10 +144,10 @@ def test_document_production_binds_output_and_preserves_old_report_algorithm(tmp
     assert replace(old_report).report_identity == old_report.report_identity
     assert (
         old_report.report_identity
-        == "cfae8b298cffae2032a2e4b902277a5ef9d8fa54c3019fe81dea8a27726d82c5"
+        == "3de4c1a3333db4dc060488a16b5f3d2a5874ff31db96dc4a53936308aefddf90"
     )
     assert sha256(encoded(old_report)).hexdigest() == (
-        "4f1fa88f49bc0948d14296d4300ca60fe71c9ae7b9d90d602084635ff8342766"
+        "3cd141e48bdd8466d222ce8af0ceb4352a62863b50da7484daf47023755f9af4"
     )
     assert document_report.report_identity != old_report.report_identity
 

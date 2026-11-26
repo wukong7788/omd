@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-SEC_LIVE_FINANCIAL_PARSER_V2 = "sec-live-financial-parser-v2-edgartools-5.56.0"
+SEC_LIVE_FINANCIAL_PARSER_V2 = "sec-live-financial-parser-v2-edgartools-6.4.0"
 SEC_FINANCIAL_UNIT_EVIDENCE_SCHEMA = "sec-financial-unit-evidence-v1"
 
 _CIK_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z")

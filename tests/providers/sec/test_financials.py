@@ -306,7 +306,7 @@ def test_client_filters_before_limit_and_keeps_financialless_amendment(
             forms=("10-K",),
             include_amendments=False,
             limit=1,
-            parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+            parser_version="sec-live-financial-parser-v1-edgartools-6.4.0",
         )
     )
     assert [v.accession_number for v in result] == ["orig"]
@@ -345,7 +345,7 @@ def test_client_from_config_and_runner_offline() -> None:
         mock_client = SecFinancialsClient("Test (test@example.com)", runner=offline_runner)
         res = mock_client.fetch_company_financials(
             SecFinancialsRequest(
-                symbols=("AAPL",), parser_version="sec-live-financial-parser-v1-edgartools-5.56.0"
+                symbols=("AAPL",), parser_version="sec-live-financial-parser-v1-edgartools-6.4.0"
             )
         )
         assert len(res) == 1
@@ -496,7 +496,7 @@ def test_client_fetch_company_financials_with_mocked_edgar_objects(
     req = SecFinancialsRequest(
         symbols=("AAPL",),
         forms=("10-K",),
-        parser_version="sec-live-financial-parser-v1-edgartools-5.56.0",
+        parser_version="sec-live-financial-parser-v1-edgartools-6.4.0",
     )
     vintages = client.fetch_company_financials(req)
 

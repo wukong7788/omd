@@ -28,10 +28,10 @@ from test_xbrl_package_financials import _inline_raw, _package_observation
 
 from ohmydata.providers.sec.sgml_financials import _documents
 
-SGML_V1 = "sec-sgml-financial-parser-v1-edgartools-5.56.0"
-SGML_V2 = "sec-sgml-financial-parser-v2-edgartools-5.56.0"
-PACKAGE_V1 = "sec-xbrl-package-financial-parser-v1-edgartools-5.56.0"
-PACKAGE_V2 = "sec-xbrl-package-financial-parser-v2-edgartools-5.56.0"
+SGML_V1 = "sec-sgml-financial-parser-v1-edgartools-6.4.0"
+SGML_V2 = "sec-sgml-financial-parser-v2-edgartools-6.4.0"
+PACKAGE_V1 = "sec-xbrl-package-financial-parser-v1-edgartools-6.4.0"
+PACKAGE_V2 = "sec-xbrl-package-financial-parser-v2-edgartools-6.4.0"
 PRODUCED = datetime(2024, 5, 1, 23, tzinfo=UTC)
 
 pytest.importorskip("edgar")

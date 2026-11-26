@@ -25,8 +25,8 @@ from .sgml_financials import SecSgmlFinancialsRequest, _documents, _header, _row
 _OUTPUT_SERIALIZATION = "sec-financial-observed-rows-v1"
 _PACKAGE_SERIALIZATION = "sec-observed-xbrl-package-v1"
 _SOURCE_SERIALIZATION = "sec-filing-sgml-v1"
-_PARSER_VERSION_V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
-_PARSER_VERSION_V2 = "sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0"
+_PARSER_VERSION_V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"
+_PARSER_VERSION_V2 = "sec-observed-xbrl-financial-parser-v2-edgartools-6.4.0"
 _PARSER_VERSIONS = frozenset({_PARSER_VERSION_V1, _PARSER_VERSION_V2})
 _CONFIG_VERSION = "sec-observed-xbrl-financial-config-v1"
 _MAX_BYTES = 8 * 1024 * 1024

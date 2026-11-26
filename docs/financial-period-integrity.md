@@ -1,8 +1,7 @@
 # Financial period integrity and migration
 
-This unreleased change repairs OMD's adapters against `edgartools==5.56.0` and
-keeps `yfinance==1.7.0`. It does not require an upstream upgrade. The core SDK
-still has no runtime dependencies; Edgar remains in `sec-financials`.
+OMD pins `edgartools==6.4.0` in the optional `sec-financials` extra and keeps
+`yfinance==1.7.0` in `yfinance`. The core SDK still has no runtime dependencies.
 
 ## Yahoo financial periods
 
@@ -101,13 +100,23 @@ Missing or empty financials without parsing failure still return explicit flags.
 Consumers that previously accepted a nonempty vintage list must handle this
 exception and check flags; do not treat parsing failures as valid N/A values.
 
-For edgartools 5.56.0 the native access boundary is `XBRL.parser.facts`, a mapping
-of original `Fact` models. `XBRL.facts` is a `FactsView`; its public `get_facts()`
-creates enriched query dictionaries and can rewrite concept identifiers. OMD
-therefore checks the native mapping shape and scans it once per statement, with
-no enriched-view or display fallback. This lower-level dependency is intentional
-and covered using the installed upstream XBRL, FactsView and Statement classes
-with synthetic data; the edgartools version remains pinned.
+For `edgartools==6.4.0` the native access boundary remains `XBRL.parser.facts`,
+a mapping of original `Fact` models. `XBRL.facts` is a `FactsView`; its public
+`get_facts()` creates enriched query dictionaries and can rewrite concept
+identifiers. OMD therefore checks the native mapping shape and scans it once per
+statement, with no enriched-view or display fallback. Because `edgartools 6.x`
+removed `include_dimensions` from `Financials` statement getters in favor of
+`view`, OMD's offline SGML/XBRL path requests `view="detailed"` when
+`include_dimensions=True` and `view="standard"` otherwise, while OMD's native
+XBRL parser enforces exact dimensional filtering directly on `statement.xbrl`.
+In the live adapter, `edgar.exceptions.StatementNotFoundError` maps to
+`*_MISSING` and `ParsingError`/`DataObjectError` map to `*_PARSE_FAILED` without
+swallowing `TransportError`, `TooManyRequestsError`, `IdentityError`, or
+`SecUnitEvidenceError`. Parser-version identities carry `-edgartools-6.4.0` so
+`6.4.0` `configuration_identity` and `evidence_identity` hashes stay isolated
+from earlier `edgartools` pins. This lower-level dependency is intentional and
+covered using the installed upstream `XBRL`, `FactsView`, and `Statement`
+classes with synthetic data; the `edgartools` version remains pinned.
 
 Repeated native facts sharing a concept, context period, dimensions and unit are
 validated before selection. Equal finite `decimals` values must have exactly equal

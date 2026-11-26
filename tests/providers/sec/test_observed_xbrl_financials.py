@@ -177,11 +177,11 @@ def test_fresh_stores_rebuild_identical_result_bytes_and_identity(tmp_path):
 
 def test_parser_versions_are_explicit_and_isolated(tmp_path):
     v1, *_ = _produce(
-        tmp_path / "v1", parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+        tmp_path / "v1", parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"
     )
     v2, *_ = _produce(tmp_path / "v2")
-    assert v1.parser_version.endswith("v1-edgartools-5.56.0")
-    assert v2.parser_version.endswith("v2-edgartools-5.56.0")
+    assert v1.parser_version.endswith("v1-edgartools-6.4.0")
+    assert v2.parser_version.endswith("v2-edgartools-6.4.0")
     assert v1.configuration_identity != v2.configuration_identity
     assert v1.production_identity != v2.production_identity
     with pytest.raises(ValueError, match="parser version"):
@@ -190,7 +190,7 @@ def test_parser_versions_are_explicit_and_isolated(tmp_path):
 
 def test_restore_uses_retained_v1_selector_without_writes(tmp_path, monkeypatch):
     result, source, source_ref, packages, package_ref, _, output = _produce(
-        tmp_path, parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
+        tmp_path, parser_version="sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"
     )
     monkeypatch.setattr(SnapshotStore, "observe", lambda *_: pytest.fail("loader wrote"))
     restored = _restore_sec_observed_financial_production(

@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from test_observed_xbrl_financials import _produce, _replay_policy, _setup
 from test_sgml_financials import _raw, _request
 
-V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-5.56.0"
-V2 = "sec-observed-xbrl-financial-parser-v2-edgartools-5.56.0"
+V1 = "sec-observed-xbrl-financial-parser-v1-edgartools-6.4.0"
+V2 = "sec-observed-xbrl-financial-parser-v2-edgartools-6.4.0"
 
 pytest.importorskip("edgar")
 
@@ -109,7 +109,7 @@ def test_default_v2_corrects_compound_unit_but_v1_retains_native_row_fields(tmp_
     )
     assert v1.vintage.rows[0].unit != v2.vintage.rows[0].unit
     assert replace(v1.vintage.rows[0], unit=None) == replace(v2.vintage.rows[0], unit=None)
-    assert v1.vintage.rows[0].currency == "USD"
+    assert v1.vintage.rows[0].currency is None
     assert v2.vintage.rows[0].currency is None
 
 

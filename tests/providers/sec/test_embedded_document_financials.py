@@ -125,7 +125,7 @@ def build_embedded(root, change=None):
 def test_embedded_producer_has_distinct_output_domain_and_readonly_restore(tmp_path, monkeypatch):
     result, output, mapping = build_embedded(tmp_path)
     assert result.output_schema_version == "sec-embedded-document-financial-rows-v1"
-    assert result.parser_version == "sec-schema-embedded-financial-parser-v1-edgartools-5.56.0"
+    assert result.parser_version == "sec-schema-embedded-financial-parser-v1-edgartools-6.4.0"
     assert result.output_observation.endpoint == "financial-embedded-document-observed-rows"
     monkeypatch.setattr(SnapshotStore, "observe", lambda *_: pytest.fail("restore wrote"))
     restored = restore_sec_document_financial_production(
@@ -323,6 +323,33 @@ def test_embedded_producer_rejects_legacy_source_before_output(tmp_path):
     package = legacy.source_package
     package_store, _ = mapping[package.observation.observation_identity]
     with pytest.raises(ValueError, match="serialization mismatch"):
+        produce_sec_financials_from_embedded_document_source(
+            package_store=package_store,
+            package_observation=package.observation,
+            resolve_observation=mapping.__getitem__,
+            output_store=output,
+            request=_request(),
+            produced_at=CAPTURED + timedelta(hours=1),
+        )
+    assert not list(output.root.rglob("response.bin"))
+
+
+@pytest.mark.parametrize("installed_version", ["5.56.0", "6.3.0", "7.0.0"])
+def test_embedded_pin_guard_rejects_non_6_4_0_edgartools_before_output(
+    tmp_path, monkeypatch, installed_version
+):
+    sources = _embedded_sources(tmp_path)
+    package = produce(tmp_path, sources)
+    package_store = SnapshotStore(tmp_path / "package")
+    mapping = {
+        item.observation.observation_identity: (item.store, item.observation) for item in sources
+    }
+    mapping[package.observation.observation_identity] = (package_store, package.observation)
+    output = SnapshotStore(tmp_path / "financial")
+    monkeypatch.setattr(
+        "ohmydata.providers.sec.sgml_financials.version", lambda _: installed_version
+    )
+    with pytest.raises(RuntimeError, match="requires edgartools 6.4.0"):
         produce_sec_financials_from_embedded_document_source(
             package_store=package_store,
             package_observation=package.observation,

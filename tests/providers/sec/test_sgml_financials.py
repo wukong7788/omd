@@ -1,13 +1,16 @@
 """Offline full-SGML financial production tests using the installed parser."""
 
 import socket
+import warnings
+from dataclasses import replace
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
 
 import pytest
 
 from ohmydata.core import RequestSpec, SnapshotStore
 from ohmydata.providers.sec import SecSgmlFinancialsRequest, produce_sec_financials_from_sgml
-from ohmydata.providers.sec.sgml_financials import _documents, _header
+from ohmydata.providers.sec.sgml_financials import _documents, _financial_rows, _header
 
 pytest.importorskip("edgar")
 
@@ -414,3 +417,147 @@ def test_missing_requested_statement_and_utf8_fail_closed(tmp_path):
             request=_request(),
             produced_at=datetime(2024, 5, 2, tzinfo=UTC),
         )
+
+
+def _raw_with_mixed_dimensions() -> bytes:
+    dim_context = (
+        b'<context id="c2"><entity><identifier scheme="http://www.sec.gov/CIK">0000000001'
+        b'</identifier><segment><xbrldi:explicitMember dimension="us-gaap:ProductOrServiceAxis">'
+        b"us-gaap:ProductMember</xbrldi:explicitMember></segment></entity>"
+        b"<period><startDate>2024-01-01</startDate><endDate>2024-03-31</endDate></period>"
+        b"</context>"
+    )
+    dim_fact = b'<us-gaap:Revenues contextRef="c2" unitRef="usd" decimals="0">45</us-gaap:Revenues>'
+    return (
+        _raw()
+        .replace(
+            b'xmlns:iso4217="http://www.xbrl.org/2003/iso4217">',
+            b'xmlns:iso4217="http://www.xbrl.org/2003/iso4217" '
+            b'xmlns:xbrldi="http://xbrl.org/2006/xbrldi">',
+        )
+        .replace(b"</xbrl>", dim_context + dim_fact + b"</xbrl>")
+    )
+
+
+def test_sgml_view_detailed_vs_standard_dimensional_parity_and_zero_deprecations(
+    tmp_path, monkeypatch
+):
+    from edgar.financials import Financials
+
+    seen_views: list[str | None] = []
+    original_income = Financials.income_statement
+
+    def spy_income(self, *, view=None):
+        seen_views.append(view)
+        return original_income(self, view=view)
+
+    monkeypatch.setattr(socket.socket, "connect", lambda *_: pytest.fail("network access"))
+    monkeypatch.setattr(Financials, "income_statement", spy_income)
+
+    source, observation = _observation(tmp_path, _raw_with_mixed_dimensions())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        standard = produce_sec_financials_from_sgml(
+            source_store=source,
+            source_observation=observation,
+            projection_store=SnapshotStore(tmp_path / "standard"),
+            request=replace(_request(), include_dimensions=False),
+            produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+        )
+        detailed = produce_sec_financials_from_sgml(
+            source_store=source,
+            source_observation=observation,
+            projection_store=SnapshotStore(tmp_path / "detailed"),
+            request=replace(_request(), include_dimensions=True),
+            produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+        )
+
+    assert seen_views == ["standard", "detailed"]
+    assert [r.value_native for r in standard.vintage.rows] == ["123"]
+    assert all(r.dimension is None for r in standard.vintage.rows)
+    assert sorted(r.value_native for r in detailed.vintage.rows) == ["123", "45"]
+    assert sum(r.dimension is not None for r in detailed.vintage.rows) == 1
+    assert sum(r.dimension is None for r in detailed.vintage.rows) == 1
+    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert deprecations == []
+
+
+@pytest.mark.parametrize(
+    ("include_dimensions", "expected_view"),
+    [(False, "standard"), (True, "detailed")],
+)
+def test_financial_rows_calls_statement_getter_with_view_kwarg_only(
+    include_dimensions, expected_view
+):
+    calls: list[str | None] = []
+
+    class _Statement:
+        def get_raw_data(self):
+            return [
+                {
+                    "concept": "us-gaap_Revenues",
+                    "label": "Revenue",
+                    "values": {"duration_2024-01-01_2024-03-31": 123},
+                    "is_dimension": False,
+                }
+            ]
+
+    class _StrictFinancials:
+        def balance_sheet(self, *, view=None):
+            calls.append(view)
+            return _Statement()
+
+        def income_statement(self, *, view=None):
+            calls.append(view)
+            return _Statement()
+
+        def cash_flow_statement(self, *, view=None):
+            calls.append(view)
+            return _Statement()
+
+    rows = _financial_rows(
+        _StrictFinancials(),
+        replace(_request(), include_dimensions=include_dimensions),
+        max_rows=10,
+    )
+    assert calls == [expected_view]
+    assert len(rows) == 1
+
+
+@pytest.mark.parametrize("installed_version", ["5.56.0", "6.3.0", "7.0.0"])
+def test_sgml_pin_guard_rejects_non_6_4_0_edgartools_before_projection_write(
+    tmp_path, monkeypatch, installed_version
+):
+    source, observation = _observation(tmp_path, _raw())
+    projection = SnapshotStore(tmp_path / "projection")
+    monkeypatch.setattr(
+        "ohmydata.providers.sec.sgml_financials.version", lambda _: installed_version
+    )
+    with pytest.raises(RuntimeError, match="requires edgartools 6.4.0"):
+        produce_sec_financials_from_sgml(
+            source_store=source,
+            source_observation=observation,
+            projection_store=projection,
+            request=_request(),
+            produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+        )
+    assert not list(projection.root.rglob("response.bin"))
+
+
+def test_sgml_pin_guard_reports_missing_edgartools_6_4_0(tmp_path, monkeypatch):
+    source, observation = _observation(tmp_path, _raw())
+    projection = SnapshotStore(tmp_path / "projection")
+
+    def missing(_name: str) -> str:
+        raise PackageNotFoundError("edgartools")
+
+    monkeypatch.setattr("ohmydata.providers.sec.sgml_financials.version", missing)
+    with pytest.raises(ImportError, match="edgartools 6.4.0 is required"):
+        produce_sec_financials_from_sgml(
+            source_store=source,
+            source_observation=observation,
+            projection_store=projection,
+            request=_request(),
+            produced_at=datetime(2024, 5, 1, 23, tzinfo=UTC),
+        )
+    assert not list(projection.root.rglob("response.bin"))

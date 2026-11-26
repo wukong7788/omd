@@ -30,8 +30,8 @@ from .sgml_financials import (
 )
 from .xbrl_package import SecXbrlPackageAvailability, decode_sec_xbrl_package
 
-_PACKAGE_PARSER_VERSION_V1 = "sec-xbrl-package-financial-parser-v1-edgartools-5.56.0"
-_PACKAGE_PARSER_VERSION_V2 = "sec-xbrl-package-financial-parser-v2-edgartools-5.56.0"
+_PACKAGE_PARSER_VERSION_V1 = "sec-xbrl-package-financial-parser-v1-edgartools-6.4.0"
+_PACKAGE_PARSER_VERSION_V2 = "sec-xbrl-package-financial-parser-v2-edgartools-6.4.0"
 _PACKAGE_PARSER_VERSIONS = frozenset({_PACKAGE_PARSER_VERSION_V1, _PACKAGE_PARSER_VERSION_V2})
 _PACKAGE_ADAPTER_VERSIONS = {
     _PACKAGE_PARSER_VERSION_V1: "sec-xbrl-package-financial-adapter-v1",

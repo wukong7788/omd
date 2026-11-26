@@ -227,13 +227,13 @@ class SecFinancialsRequest:
     limit: int | None = None
     include_dimensions: bool = field(default=True, kw_only=True)
     parser_version: str = field(
-        default="sec-live-financial-parser-v2-edgartools-5.56.0", kw_only=True
+        default="sec-live-financial-parser-v2-edgartools-6.4.0", kw_only=True
     )
 
     def __post_init__(self) -> None:
         if self.parser_version not in {
-            "sec-live-financial-parser-v1-edgartools-5.56.0",
-            "sec-live-financial-parser-v2-edgartools-5.56.0",
+            "sec-live-financial-parser-v1-edgartools-6.4.0",
+            "sec-live-financial-parser-v2-edgartools-6.4.0",
         }:
             raise ValueError(f"unsupported parser_version: {self.parser_version}")
         if not self.symbols:

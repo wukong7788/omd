@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.12 — 2026-11-26
+
+- Upgrade the optional `sec-financials` dependency pin from `edgartools==5.56.0`
+  to `edgartools==6.4.0`.
+  - Update all SEC parser-version provenance strings and runtime pin guards from
+    `-edgartools-5.56.0` to `-edgartools-6.4.0` across live, SGML, XBRL package,
+    observed XBRL, document-source, and embedded-linkbase producers so `6.4.0`
+    `configuration_identity` and `evidence_identity` hashes remain isolated from
+    prior `5.56.0` projections; old `5.56.0` parser-version strings are rejected.
+  - Migrate offline SGML/XBRL `Financials` statement getters from removed
+    `include_dimensions=...` to `edgartools 6.x` `view="detailed"|"standard"`,
+    while preserving strict native XBRL dimensional filtering in the statement
+    parser with zero `DeprecationWarning`s.
+  - Explicitly classify `edgar.exceptions` parse/missing boundaries in the live
+    SEC adapter (`StatementNotFoundError` to `*_MISSING`, `ParsingError` and
+    `DataObjectError` to `*_PARSE_FAILED`) without swallowing `TransportError`,
+    `TooManyRequestsError`, `IdentityError`, or `SecUnitEvidenceError`.
+
 ## 0.4.11 — 2026-10-17
 
 - Change the default Tushare trade-calendar fields to the endpoint keys

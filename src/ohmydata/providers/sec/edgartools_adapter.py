@@ -28,7 +28,7 @@ from .unit_evidence import SEC_LIVE_FINANCIAL_PARSER_V2, SecFinancialUnitEvidenc
 
 logger = logging.getLogger(__name__)
 _EASTERN_TZ = ZoneInfo("America/New_York")
-_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-5.56.0"
+_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-6.4.0"
 _SAFE_DOCUMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
@@ -314,6 +314,7 @@ class SecFinancialsClient:
 
         ensure_edgar_available()
         from edgar import Company
+        from edgar.exceptions import DataObjectError, ParsingError, StatementNotFoundError
 
         vintages: list[SecCompanyFinancialVintage] = []
         for symbol in request.symbols:
@@ -389,7 +390,15 @@ class SecFinancialsClient:
                     quality_flags.append("ACCEPTED_AT_MISSING")
                 try:
                     report: Any = filing.obj()
-                except (AttributeError, KeyError, ValueError, TypeError, OSError) as err:
+                except (
+                    AttributeError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                    OSError,
+                    ParsingError,
+                    DataObjectError,
+                ) as err:
                     logger.debug("Could not parse filing obj: %s", type(err).__name__)
                     report = None
                     quality_flags.append("FILING_PARSE_FAILED")
@@ -404,6 +413,8 @@ class SecFinancialsClient:
                     TypeError,
                     RuntimeError,
                     OSError,
+                    ParsingError,
+                    DataObjectError,
                 ) as err:
                     logger.debug("Could not access filing financials: %s", type(err).__name__)
                     fin = None
@@ -437,7 +448,16 @@ class SecFinancialsClient:
                                     quality_flags.append(f"{flag}_EMPTY")
                         except SecUnitEvidenceError:
                             raise
-                        except (AttributeError, KeyError, ValueError, TypeError) as err:
+                        except StatementNotFoundError:
+                            quality_flags.append(f"{flag}_MISSING")
+                        except (
+                            AttributeError,
+                            KeyError,
+                            ValueError,
+                            TypeError,
+                            ParsingError,
+                            DataObjectError,
+                        ) as err:
                             logger.debug(
                                 "Could not extract %s: %s", statement_type, type(err).__name__
                             )

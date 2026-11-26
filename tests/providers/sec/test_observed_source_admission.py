@@ -95,21 +95,21 @@ def test_existing_source_boundaries_and_bundle_restore(tmp_path, size, limit, ac
 def test_old_v1_v2_golden_identities_ignore_admission_controls(tmp_path):
     expected = [
         (
-            "0e8b0e409206f5b9579668529e5d36f44fc0c5f82e15e40a102eae108c04522d",
-            "08a31b4a49b97d2dca3fc66a0beaa071ac5f3e010028d10e73768f049eb81aba",
-            "386c7cae5da25d577a6879465ea75fdd508ef40bb5c0b0a3fc696b238753a860",
+            "a3200adee61015b50aae4ab87b2a94a363e5b297acb5f9d4a2226ff269884a2b",
+            "846bd84f45a39017101911f24d2a52d9550cf354d5042dce80c99b280bbf5b17",
+            "878a7b60e8f6c0e62f90e7cbb4f4bf18b0b948a45fa7d0e2d5213bceaf0992f0",
         ),
         (
-            "1f5566f7ac6f0ad476f817f7aeaff16d6d884a723dc881b0f637fe0e6d554ecd",
-            "7e845bcab735d17be9b0b690a5886ac416f8e62367581168479ecbc18f867b62",
-            "ca1d3ad029a11c7e06f934c0ce31de405ca487841fe2be2a245aa91cf1f14f86",
+            "d5b0de9de4cb9a38d6aa549576d2cd2258ead5624a89c8191c3fb1cf30657dbd",
+            "bd05b790ac83e8288fb3d58e182fd301b3deb0f312e23a1a70d49a7fc6a2ce6f",
+            "7cfc76f950acc27514ee8e89e2a12b78b0636a9ac12d734eda4d80c948fca43f",
         ),
     ]
     productions, receipts = [], {}
     for version, golden in enumerate(expected, 1):
         result, source, sr, packages, pr, _, output = _produce(
             tmp_path / str(version),
-            parser_version=f"sec-observed-xbrl-financial-parser-v{version}-edgartools-5.56.0",
+            parser_version=f"sec-observed-xbrl-financial-parser-v{version}-edgartools-6.4.0",
             max_raw_bytes=8 * MIB,
         )
         assert (
@@ -134,7 +134,7 @@ def test_old_v1_v2_golden_identities_ignore_admission_controls(tmp_path):
         captured_at=datetime(2024, 5, 2, tzinfo=UTC),
         resolve_observation=receipts.__getitem__,
     )
-    assert ref.response_sha256 == "7afc6293800bd2941cc261110e13dcaa5d1707e4b0e7dfe5cb28fc094ec327d0"
+    assert ref.response_sha256 == "af14cb203336de9539a7da6527c5f645c64121f7e8f2a165ee96d3bf12d2f385"
     assert (
         len(
             load_sec_observed_financial_bundle(

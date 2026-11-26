@@ -28,8 +28,8 @@ _CIK = re.compile(r"^[0-9]{10}$")
 _FORMS = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
 _STATEMENTS = frozenset({"balance_sheet", "income_statement", "cash_flow"})
 _COMPONENTS = frozenset({"EX-101.SCH", "EX-101.PRE", "EX-101.LAB", "EX-101.INS"})
-_PARSER_VERSION_V1 = "sec-sgml-financial-parser-v1-edgartools-5.56.0"
-_PARSER_VERSION_V2 = "sec-sgml-financial-parser-v2-edgartools-5.56.0"
+_PARSER_VERSION_V1 = "sec-sgml-financial-parser-v1-edgartools-6.4.0"
+_PARSER_VERSION_V2 = "sec-sgml-financial-parser-v2-edgartools-6.4.0"
 _PARSER_VERSIONS = frozenset({_PARSER_VERSION_V1, _PARSER_VERSION_V2})
 _ADAPTER_VERSIONS = {
     _PARSER_VERSION_V1: "sec-sgml-financial-adapter-v1",
@@ -321,9 +321,9 @@ def _rows_from_documents(
     try:
         installed = version("edgartools")
     except PackageNotFoundError as exc:
-        raise ImportError("edgartools 5.56.0 is required for SEC SGML financials") from exc
-    if installed != "5.56.0":
-        raise RuntimeError("SEC SGML financial parser requires edgartools 5.56.0")
+        raise ImportError("edgartools 6.4.0 is required for SEC SGML financials") from exc
+    if installed != "6.4.0":
+        raise RuntimeError("SEC SGML financial parser requires edgartools 6.4.0")
     from edgar.financials import Financials
     from edgar.sgml.sgml_common import FilingSGML
     from edgar.xbrl import XBRL
@@ -355,9 +355,10 @@ def _financial_rows(
         "income_statement": financials.income_statement,
         "cash_flow": financials.cash_flow_statement,
     }
+    view = "detailed" if request.include_dimensions else "standard"
     rows: list[SecStatementRow] = []
     for statement_type in request.statement_types:
-        statement = getters[statement_type](include_dimensions=request.include_dimensions)
+        statement = getters[statement_type](view=view)
         if statement is None:
             raise ValueError(f"requested SEC statement is missing: {statement_type}")
         parsed = parse_statement_rows(
@@ -385,9 +386,9 @@ def _rows_from_embedded_documents(
     try:
         installed = version("edgartools")
     except PackageNotFoundError as exc:
-        raise ImportError("edgartools 5.56.0 is required for SEC SGML financials") from exc
-    if installed != "5.56.0":
-        raise RuntimeError("SEC SGML financial parser requires edgartools 5.56.0")
+        raise ImportError("edgartools 6.4.0 is required for SEC SGML financials") from exc
+    if installed != "6.4.0":
+        raise RuntimeError("SEC SGML financial parser requires edgartools 6.4.0")
     from edgar.financials import Financials
     from edgar.xbrl import XBRL
 

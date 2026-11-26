@@ -1,4 +1,4 @@
-"""Edgar 5.56 statement boundary: native facts first, display frames as compatibility input."""
+"""Edgar 6.4.0 statement boundary: native facts first, display frames as compatibility input."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from typing import Any
 
 from .financials import SecStatementRow, StatementType
 
-_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-5.56.0"
-_LIVE_PARSER_V2 = "sec-live-financial-parser-v2-edgartools-5.56.0"
+_LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-6.4.0"
+_LIVE_PARSER_V2 = "sec-live-financial-parser-v2-edgartools-6.4.0"
 _RAW_UNIT_MAX_ELEMENTS = 200_000
 _RAW_UNIT_MAX_DEPTH = 128
 
@@ -205,7 +205,7 @@ def _select_native_facts(facts: list[Any]) -> list[Any]:
 
 def _native_index(xbrl: Any, concepts: set[str]) -> dict[tuple[str, str, str], list[Any]]:
     """One pass over facts, avoiding a full source scan for each row or period."""
-    # Edgar 5.56 XBRL.facts is FactsView, an enriched query interface whose
+    # Edgar 6.4 XBRL.facts is FactsView, an enriched query interface whose
     # get_facts() may rewrite concept identifiers. The raw Fact objects are
     # owned by XBRLParser.facts (also exposed upstream as XBRL._facts).
     # Keep this version-specific boundary explicit: never use display values

@@ -15,7 +15,7 @@ from ohmydata.providers.sec._statement_parser import parse_statement_rows
 XBRL = pytest.importorskip("edgar.xbrl").XBRL
 Statement = pytest.importorskip("edgar.xbrl.statements").Statement
 PresentationNode = pytest.importorskip("edgar.xbrl.models").PresentationNode
-V2 = "sec-live-financial-parser-v2-edgartools-5.56.0"
+V2 = "sec-live-financial-parser-v2-edgartools-6.4.0"
 
 
 @pytest.fixture(autouse=True)
