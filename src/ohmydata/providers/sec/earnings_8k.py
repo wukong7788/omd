@@ -19,6 +19,14 @@ from ._companyfacts_models import (
     SecCanonicalQuarterSlot,
 )
 from ._companyfacts_submissions import _fetch_history_page, _root_payload
+from ._earnings_8k_batch import (
+    Sec8KBatchItemReceipt,
+    Sec8KBatchOutcomeStatus,
+    Sec8KBatchResult,
+    Sec8KBatchTarget,
+    fetch_sec_8k_metrics_for_discovery_events,
+    fetch_sec_8k_quarterly_batch,
+)
 from ._earnings_8k_discovery import (
     _EXHIBIT_BYTES,
     _INDEX_BYTES,
@@ -32,7 +40,22 @@ from ._earnings_8k_discovery import (
     _targeted_history_pages,
     _validate_target_quarters,
 )
+from ._earnings_8k_metrics import (
+    Sec8KMetric,
+    Sec8KMetricField,
+    Sec8KMetricStatus,
+    Sec8KQuarterlyMetricsItem,
+    Sec8KQuarterlyMetricsResult,
+    fetch_sec_8k_quarterly_metrics,
+)
 from ._earnings_8k_parse import Sec8KEpsAmbiguousError, parse_sec_8k_earnings_release
+from ._earnings_8k_parse_metrics import (
+    Sec8KMetricAmbiguity,
+    Sec8KMetricAmbiguousError,
+    Sec8KMetricCandidate,
+    Sec8KParsedMetrics,
+    parse_sec_8k_earnings_metrics,
+)
 from .errors import CoverageError, ResourceLimitError
 from .event_discovery import _strict_json, _submission_rows
 from .http import SecHttpClient, validate_sec_url
@@ -486,10 +509,27 @@ def enrich_sec_canonical_quarters_with_8k_eps(
 
 
 __all__ = [
+    "Sec8KBatchItemReceipt",
+    "Sec8KBatchOutcomeStatus",
+    "Sec8KBatchResult",
+    "Sec8KBatchTarget",
     "Sec8KEpsAmbiguousError",
     "Sec8KEpsStatus",
+    "Sec8KMetric",
+    "Sec8KMetricAmbiguity",
+    "Sec8KMetricAmbiguousError",
+    "Sec8KMetricCandidate",
+    "Sec8KMetricField",
+    "Sec8KMetricStatus",
+    "Sec8KParsedMetrics",
     "Sec8KQuarterlyEpsItem",
     "Sec8KQuarterlyEpsResult",
+    "Sec8KQuarterlyMetricsItem",
+    "Sec8KQuarterlyMetricsResult",
     "enrich_sec_canonical_quarters_with_8k_eps",
+    "fetch_sec_8k_metrics_for_discovery_events",
+    "fetch_sec_8k_quarterly_batch",
     "fetch_sec_8k_quarterly_eps",
+    "fetch_sec_8k_quarterly_metrics",
+    "parse_sec_8k_earnings_metrics",
 ]

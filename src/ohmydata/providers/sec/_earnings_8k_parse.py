@@ -123,11 +123,17 @@ class _GridTableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.tables: list[list[list[str]]] = []
+        self.table_contexts: list[str] = []
         self._cur_grid: list[list[str]] = []
         self._cur_row = 0
         self._cur_col = 0
         self._cell_text: list[str] = []
         self._in_cell = False
+        self._in_table = False
+        self._in_caption = False
+        self._caption_text: list[str] = []
+        self._pre_table_text: list[str] = []
+        self._cur_table_context = ""
         self._cell_colspan = 1
         self._tags = 0
         self._skip = 0
@@ -142,8 +148,14 @@ class _GridTableParser(HTMLParser):
             if tag == "table":
                 if len(self.tables) >= _MAX_TABLES:
                     raise ResourceLimitError("SEC 8-K exhibit table count limit exceeded")
+                self._in_table = True
                 self._cur_grid = []
                 self._cur_row = 0
+                self._caption_text = []
+                pre = " ".join("".join(self._pre_table_text).split())
+                self._cur_table_context = pre[-400:] if len(pre) > 400 else pre
+            elif tag == "caption" and self._in_table:
+                self._in_caption = True
             elif tag == "tr":
                 self._cur_col = 0
                 if len(self._cur_grid) <= self._cur_row:
@@ -160,14 +172,20 @@ class _GridTableParser(HTMLParser):
                     self._cell_colspan = 1
                 self._cell_text = []
                 self._in_cell = True
+            elif not self._in_table and tag in {"h1", "h2", "h3", "h4", "hr", "section"}:
+                self._pre_table_text = []
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style"}:
             self._skip = max(0, self._skip - 1)
         elif not self._skip:
-            if tag in {"td", "th"}:
+            if tag == "caption":
+                self._in_caption = False
+            elif tag in {"td", "th"}:
                 self._in_cell = False
                 text = " ".join("".join(self._cell_text).split())
+                if len(self._cur_grid) <= self._cur_row:
+                    self._cur_grid.append([])
                 row = self._cur_grid[self._cur_row]
                 while len(row) <= self._cur_col:
                     row.append("")
@@ -180,12 +198,26 @@ class _GridTableParser(HTMLParser):
                 self._cur_row += 1
                 self._cur_col = 0
             elif tag == "table":
+                self._in_table = False
                 if any(any(c for c in r) for r in self._cur_grid):
                     self.tables.append(self._cur_grid)
+                    caption = " ".join("".join(self._caption_text).split())
+                    combined = " ".join(part for part in (self._cur_table_context, caption) if part)
+                    self.table_contexts.append(combined)
+                self._pre_table_text = []
 
     def handle_data(self, data: str) -> None:
-        if self._in_cell and not self._skip:
+        if self._skip:
+            return
+        if self._in_cell:
             self._cell_text.append(data)
+        elif self._in_caption:
+            self._caption_text.append(data)
+        elif not self._in_table:
+            self._pre_table_text.append(data)
+            if len(self._pre_table_text) > 128:
+                joined = " ".join("".join(self._pre_table_text).split())
+                self._pre_table_text = [joined[-400:]]
 
 
 def _parse_decimal_value(text: str) -> Decimal | None:

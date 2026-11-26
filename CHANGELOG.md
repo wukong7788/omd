@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.0 — 2026-11-26
+
+- Add CIK-direct SEC financials fetching (`SecFinancialsRequest.ciks`) and
+  immutable `cik=<10-digit>` v5 partitions (`write_cik_financials_partition`,
+  `validate_cik_financials_partition`, `read_cik_financials_partition`) that
+  retain historical `symbols` in `manifest.json`, while preserving v3/v4
+  `symbol=` partition compatibility.
+- Add foreign ADR / FPI support across `20-F`, `20-F/A`, `40-F`, `40-F/A`, and
+  `6-K` forms with dual `us-gaap` + `ifrs-full` + `dei` parsing that preserves
+  original reporting currencies without implicit USD conversion, and introduce
+  the plugin-based `fpi_6k` architecture (`fetch_sec_fpi_6k_quarters`,
+  `SecFpi6KParserRegistry`, XBRL-first with TSMC registered in
+  `default_fpi_6k_registry()` while keeping `tsm_6k` intact).
+- Uncap `companyfacts` history (`count: int | None`, `start_year`/`end_year`,
+  `fetch_sec_canonical_quarters_by_cik`) and add the offline SEC bulk ZIP
+  consumer (`bulk_zip.py`: `project_bulk_companyfacts_zips`,
+  `write_bulk_companyfacts_dataset`, `validate_bulk_companyfacts_dataset`,
+  `build_bulk_companyfacts_dataset`) joining `companyfacts.zip` and paginated
+  `submissions.zip` for second-level PIT `acceptanceDateTime` with zip-bomb and
+  path-traversal guards.
+- Add end-to-end incremental SEC financials sync (`financials_sync.py`:
+  `load_cik_universe`, injectable `SecRateLimiter`, atomic `SecCursorStore`,
+  auto-reconcile on root overflow, immutable `batches/<batch_id>/` v5 storage,
+  and structured `SYNCED`/`EMPTY`/`TRANSIENT_FAILURE`/`PERMANENT_FAILURE`
+  receipts) plus CLI subcommands `omd sec financials sync-incremental`,
+  `omd sec financials bulk-project`, and `--ciks`/`--cik` on
+  `sync`/`validate`/`inspect`.
+- Expose explicit ADR share-basis & cover-page DEI share metadata
+  (`adr_metadata.py`: `SecShareBasis`, `SecDeiSharesMetadata`,
+  `SecAdrShareMetadata`, and explicit `convert_ordinary_shares_to_adr_equivalent`)
+  without implicit scaling or mutating existing v3/v4 `vintage_identity` when
+  unset.
+- Extend `earnings_8k` metrics (`Sec8KMetric`: `REVENUE`, `GROSS_PROFIT`,
+  `GAAP_DILUTED_EPS`, `fetch_sec_8k_quarterly_metrics`,
+  `fetch_sec_8k_quarterly_batch`, `fetch_sec_8k_metrics_for_discovery_events`)
+  while preserving existing EPS APIs.
+
 ## 0.4.12 — 2026-11-26
 
 - Upgrade the optional `sec-financials` dependency pin from `edgartools==5.56.0`

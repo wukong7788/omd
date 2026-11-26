@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .financials import SecFinancialsRequest
+from .financials import SUPPORTED_FINANCIAL_FORMS, SecFinancialsRequest
 
 
 def select_financial_filing_candidates(
@@ -14,9 +14,11 @@ def select_financial_filing_candidates(
     """Filter the complete provider collection before applying the request limit."""
     candidates = list(filings)
     eligible: list[Any] = []
-    requested_forms = {str(value).upper() for value in request.forms}
+    requested_forms = {str(value).strip().upper() for value in request.forms}
     for candidate in candidates:
-        form = str(getattr(candidate, "form", "")).upper()
+        form = str(getattr(candidate, "form", "")).strip().upper()
+        if form not in SUPPORTED_FINANCIAL_FORMS:
+            continue
         base_form = form.removesuffix("/A")
         if form not in requested_forms and not (
             request.include_amendments and base_form in requested_forms
@@ -53,7 +55,7 @@ def amendment_base_accessions(candidates: list[Any]) -> dict[str, str]:
 
     result: dict[str, str] = {}
     for amendment in candidates:
-        form = str(getattr(amendment, "form", "")).upper()
+        form = str(getattr(amendment, "form", "")).strip().upper()
         if not form.endswith("/A"):
             continue
         period = report_period(amendment)
@@ -63,7 +65,7 @@ def amendment_base_accessions(candidates: list[Any]) -> dict[str, str]:
         bases = [
             candidate
             for candidate in candidates
-            if str(getattr(candidate, "form", "")).upper() == form.removesuffix("/A")
+            if str(getattr(candidate, "form", "")).strip().upper() == form.removesuffix("/A")
             and report_period(candidate) == period
             and (str(candidate.filing_date), str(candidate.accession_number)) < amendment_key
         ]

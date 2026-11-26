@@ -124,11 +124,32 @@ def _exhibit_basenames(body: bytes, cik: str, accession: str) -> tuple[str, ...]
     return tuple(matches)
 
 
+def _normalize_8k_cik(cik: str) -> str:
+    if type(cik) is not str:
+        raise TypeError("cik must be a string")
+    cleaned = cik.strip()
+    if not cleaned or not cleaned.isascii() or not cleaned.isdecimal() or len(cleaned) > 10:
+        raise ValueError("cik must contain 1 to 10 ASCII digits")
+    if int(cleaned) <= 0:
+        raise ValueError("cik must be positive")
+    return cleaned.zfill(10)
+
+
 def _validate_target_quarters(
     target_quarters: tuple[tuple[int, int, date], ...],
+    *,
+    max_quarters: int | None = 8,
 ) -> None:
-    if not isinstance(target_quarters, tuple) or not 1 <= len(target_quarters) <= 8:
-        raise ValueError("target_quarters must be a non-empty tuple of at most 8 quarters")
+    if not isinstance(target_quarters, tuple) or not target_quarters:
+        if max_quarters is not None:
+            raise ValueError(
+                f"target_quarters must be a non-empty tuple of at most {max_quarters} quarters"
+            )
+        raise ValueError("target_quarters must be a non-empty tuple of quarters")
+    if max_quarters is not None and len(target_quarters) > max_quarters:
+        raise ValueError(
+            f"target_quarters must be a non-empty tuple of at most {max_quarters} quarters"
+        )
     seen_keys: set[tuple[int, int]] = set()
     seen_dates: set[date] = set()
     for item in target_quarters:
@@ -245,6 +266,7 @@ __all__ = [
     "_discover_8k_filings",
     "_exhibit_basenames",
     "_fetch_html",
+    "_normalize_8k_cik",
     "_target_windows",
     "_targeted_history_pages",
     "_validate_target_quarters",

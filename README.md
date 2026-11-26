@@ -18,8 +18,9 @@ uv run python -c "import ohmydata; print(ohmydata.__version__)"
 The core has no runtime dependencies. Install `ohmydata[tushare]` for the
 Pandas-backed Tushare adapter, `ohmydata[yfinance]` for US/global market data and
 fundamentals, `ohmydata[sec-cli]` for the SEC N-PORT batch CLI, or
-`ohmydata[sec-financials]` for company 10-K/10-Q financial statements and Parquet
-dataset writer. Provider tests use fake clients and never call a network.
+`ohmydata[sec-financials]` for company financial statements (`10-K`/`10-Q`/`20-F`/`40-F`/`6-K`),
+CIK partitioning, incremental sync, offline bulk ZIP projection, and Parquet
+dataset writing. Provider tests use fake clients and never call a network.
 Install `ohmydata[calendars]` for offline XNYS session dates and actual
 timezone-aware open/close timestamps, including early closes. OMD supplies
 exchange schedule facts; callers retain their own session-selection and
@@ -536,23 +537,50 @@ artifacts or output. Universe classification is caller-reviewed; the intended
 equity-ETF research universe excludes GLD, bond ETFs, and money-market/currency
 ETFs.
 
-### SEC Company Financials (10-K & 10-Q PIT via EdgarTools)
+### SEC Company Financials (10-K/10-Q/20-F/40-F/6-K PIT, Incremental Sync & Bulk ZIP)
 
 The `sec-financials` extra wraps `edgartools` with strict credential injection,
 core isolation, and explicit filing and availability metadata for
 the three core financial statements (**Balance Sheet**, **Income Statement**, and
-**Cash Flow Statement**):
+**Cash Flow Statement**). It supports both domestic forms (`10-K`, `10-Q`, and
+`/A` amendments) and foreign private issuer forms (`20-F`, `40-F`, `/A`, and
+`6-K`), CIK-first resolution including delisted issuers (`ciks=...` and
+`cik=<10-digit>` partitions under schema v5), IFRS (`ifrs-full`) multi-currency
+line items, cover-page DEI share / ADR metadata (`SecAdrShareMetadata`),
+cursor-tracked incremental sync (`sync_sec_financials_incremental`), and
+offline SEC bulk ZIP (`companyfacts.zip` + `submissions.zip`) PIT projection:
 
 ```bash
 uv sync --extra sec-financials
 
-# Sync company financials via an OMD configuration file:
+# Sync company financials via an OMD configuration file or explicit --symbols / --ciks:
 uv run omd sec financials sync --config artifacts/sec-financials.yaml
+uv run omd sec financials sync --root artifacts/sec-financials --ciks 0000320193,0001046179 --forms 10-K,10-Q,20-F --user-agent-file /path/to/private-sec-contact.txt
 
-# Or inspect local partitions:
+# Incremental cursor-tracked sync with SEC rate limiting (<= 10 rps) and immutable batches/receipts:
+uv run omd sec financials sync-incremental \
+  --root artifacts/sec-financials-inc \
+  --universe-ciks artifacts/ciks.txt \
+  --forms 10-K,10-Q,20-F,40-F,6-K \
+  --overlap-hours 24 \
+  --max-rps 6.0 \
+  --user-agent-file /path/to/private-sec-contact.txt \
+  --json
+
+# Offline SEC bulk ZIP PIT projection (companyfacts.zip + submissions.zip -> Parquet dataset):
+uv run omd sec financials bulk-project \
+  --companyfacts-zip /path/to/companyfacts.zip \
+  --submissions-zip /path/to/submissions.zip \
+  --output artifacts/sec-bulk-pit \
+  --start-year 2018 \
+  --end-year 2025 \
+  --json
+
+# Inspect local symbol= or cik= partitions:
 uv run omd sec financials inspect --root artifacts/sec-financials --symbol AAPL --rows
+uv run omd sec financials inspect --root artifacts/sec-financials --cik 0001046179 --rows
 
-# Or validate local Parquet partition checksums:
+# Validate local Parquet partitions (symbol=, cik=, and incremental batches):
 uv run omd sec financials validate --root artifacts/sec-financials
 ```
 
@@ -751,18 +779,20 @@ final_metric = metrics.final
 
 ### SEC-only canonical quarterly facts
 
-`fetch_sec_canonical_quarters` accepts an injected SEC HTTP client and snapshot
-store. It resolves a ticker through a retained SEC mapping, checks the issuer's
-submissions root, retains its companyfacts response, and fetches only history
+`fetch_sec_canonical_quarters` (by ticker) and
+`fetch_sec_canonical_quarters_by_cik` (CIK-direct, including delisted issuers)
+accept an injected SEC HTTP client and snapshot store. They check the issuer's
+submissions root, retain its companyfacts response, and fetch only history
 pages needed to verify the target filings. If a newer 10-Q or 10-Q/A is present
-in submissions but omitted from companyfacts, it also retains that filing's SEC
-index and XBRL instance and parses only undimensioned, exact three-month
+in submissions but omitted from companyfacts, they also retain that filing's SEC
+index and XBRL instance and parse only undimensioned, exact three-month
 canonical facts. Such facts are exposed as `SecFilingXbrlFactEvidence` with
 separate index/instance observation IDs; they are never labeled as
 companyfacts evidence. A missing or unresolvable filing source leaves coverage
-incomplete; a malformed source raises a schema error. It returns up to eight chronological fiscal
-quarter slots so the last four can be displayed alongside the prior-year
-comparables. The caller remains responsible for its universe, decision cutoff,
+incomplete; a malformed source raises a schema error. `count` defaults to `8`
+for backward compatibility and is uncapped (`count=None` or any positive
+integer, with optional `start_year`/`end_year` bounds) for full historical
+backfills. The caller remains responsible for its universe, decision cutoff,
 storage and publication.
 
 ```python
@@ -785,15 +815,19 @@ if result.eligibility.status is SecCompanyEligibilityStatus.SEC_COMPANY:
                 print(quarter.fiscal_year, quarter.fiscal_quarter, revenue.value, revenue.unit)
 ```
 
-The versioned mapping covers SEC `us-gaap` Revenue, Gross Profit, Operating
-Income and **GAAP diluted EPS** concepts. Values retain native USD or USD/shares
-units; no billions conversion is implicit. `GAAP_DILUTED_EPS` is not adjusted
+The versioned mappings cover SEC `us-gaap` and `ifrs-full` Revenue, Gross
+Profit, Operating Income, and **GAAP diluted EPS** concepts (plus extended
+fundamental concepts and `dei` cover-page shares in bulk/multi-taxonomy paths).
+Values retain native currency (ISO-4217) or per-share units; no billions or FX
+conversion is implicit. `GAAP_DILUTED_EPS` is not adjusted
 EPS and must not be put into a consumer's `adj_eps` field. Some issuers,
 including banks that report net revenue through other concepts, will have
 `MISSING` fields until an explicitly versioned mapping covers their semantics.
-`count=8` is a maximum, not a minimum required filing history. Foreign
-20-F/6-K evidence remains `UNKNOWN` for this 10-K/Q contract; prior consumer
-ADR or currency conversion paths do not establish SEC quarterly facts here.
+`count=8` is the default, not a hard ceiling (`count=None` or larger counts and
+`start_year`/`end_year` bounds are supported). Annual `20-F`/`40-F` filings are
+recognized alongside `10-K`/`10-Q`; foreign `6-K` interim disclosures use the
+dedicated plugin-based `fetch_sec_fpi_6k_quarters` API rather than implicit
+currency or ADR conversion.
 Companyfacts `filed` dates are checked against the SEC submissions `filingDate`;
 the distinct UTC acceptance timestamp remains the filing cutoff evidence.
 
@@ -859,9 +893,21 @@ exact, source-backed fiscal-period labels and choose additive USD concepts;
 source cannot prove an independent quarter. This entry point does not
 authenticate arbitrary caller-supplied vintages.
 
-### TSMC SEC 6-K quarterly releases
+For broader Form 8-K Item 2.02 extraction beyond EPS, `fetch_sec_8k_quarterly_metrics`,
+`fetch_sec_8k_quarterly_batch`, and `fetch_sec_8k_metrics_for_discovery_events`
+extract strict-scale GAAP Revenue, Gross Profit, and Diluted EPS (with CIK-first
+resolution, fail-closed scale/non-USD rejection, and failure-isolated batch receipts).
 
-`fetch_sec_tsm_6k_quarters` is a separate, TSMC-specific source API. It resolves
+### Foreign Private Issuer (FPI) 6-K & TSMC quarterly releases
+
+`fetch_sec_fpi_6k_quarters` provides a CIK-first, plugin-based Form 6-K
+extraction framework (`SecFpi6KParserRegistry`) with explicit priority:
+1) retained XBRL / inline-XBRL attachment (`us-gaap` + `ifrs-full` + `dei`,
+preserving native ISO-4217 currencies), 2) registered issuer-specific EX-99.1
+plugin (`default_fpi_6k_registry()` includes `SecTsm6KExhibitParser`), and
+3) explicit `UNSUPPORTED` or `EMPTY` outcomes with retained index provenance.
+
+`fetch_sec_tsm_6k_quarters` remains available as the dedicated TSMC-specific source API. It resolves
 `TSM` through the SEC ticker mapping, verifies CIK `0001046179`, and retains the
 submissions root, filing index, and exact EX-99.1 earnings release for each
 selected 6-K. The parser requires the stated quarter, consolidated TIFRS basis,

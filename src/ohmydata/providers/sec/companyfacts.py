@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from ...core import RequestSpec, SnapshotMode, SnapshotStore
 from ._companyfacts_models import (
@@ -11,7 +11,10 @@ from ._companyfacts_models import (
     _SERIALIZATION,
     SEC_CANONICAL_CONCEPTS,
     SEC_CANONICAL_CONCEPTS_VERSION,
+    SEC_CANONICAL_IFRS_CONCEPTS,
     SEC_COMPANYFACTS_URL,
+    SEC_FUNDAMENTAL_CONCEPTS,
+    SEC_MULTI_TAXONOMY_CONCEPTS_VERSION,
     Sec8KReleaseEvidence,
     SecCanonicalEvidence,
     SecCanonicalFactEvidence,
@@ -23,6 +26,8 @@ from ._companyfacts_models import (
     SecCompanyFactsFact,
     SecCompanyFactsFiling,
     SecFilingXbrlFactEvidence,
+    SecFundamentalMetric,
+    normalize_sec_cik,
     parse_sec_companyfacts_payload,
 )
 from ._companyfacts_periods import _resolve_filing_periods
@@ -31,18 +36,25 @@ from ._companyfacts_projection import (
     _periods_from_companyfacts,
     _target_fact_accessions,
     _unmodeled_newer_filings,
+    _validate_window_args,
     project_sec_companyfacts_quarters,
 )
+from ._companyfacts_selection import _incomplete_xbrl_amendments
 from ._companyfacts_submissions import (
-    _fetch_history_page,
+    _classify_cik_eligibility_from_root,
+    _enrich_result_with_8k_q4_eps,
+    _fetch_companyfacts_body,
+    _fetch_history_page,  # noqa: F401
+    _fetch_targeted_history_pages,
     _history_page_selection,
     _root_payload,
     _submission_filings,
+    _summarize_taxonomy_and_currency,
 )
 from ._event_discovery_models import SecDiscoverySource
 from ._filing_xbrl import SecFilingXbrlFact, fetch_sec_filing_xbrl_source
-from .errors import CoverageError, ResourceLimitError, SchemaMismatchError, TransientProviderError
-from .http import SecHttpClient, validate_sec_url
+from .errors import CoverageError, TransientProviderError
+from .http import SecHttpClient
 from .quarterly import (
     SecCompanyEligibilityStatus,
     SecQuarterlyEligibility,
@@ -67,154 +79,24 @@ def _empty_result(ticker: str, eligibility: SecQuarterlyEligibility) -> SecCanon
     )
 
 
-def _incomplete_xbrl_amendments(
-    facts: tuple[SecCompanyFactsFact | SecFilingXbrlFact, ...],
-    filings: dict[str, SecCompanyFactsFiling],
-    acceptance_upper: datetime | None,
-    filing_xbrl_accessions: set[str],
-) -> tuple[frozenset[tuple[int, int]], tuple[str, ...]]:
-    """Find retained amendments that omit canonical fact classes from their base filing."""
-    resolved = _resolve_filing_periods(facts, filings, acceptance_upper)
-    amendment_accessions = {
-        fact.accn
-        for fact in facts
-        if fact.form == "10-Q/A" and fact.accn in filings and fact.accn in filing_xbrl_accessions
-    }
-    incomplete_periods: set[tuple[int, int]] = set()
-    incomplete_accessions: set[str] = set()
-    for amended_accession in amendment_accessions:
-        amended_filing = filings[amended_accession]
-        if acceptance_upper is not None and amended_filing.accepted_at > acceptance_upper:
-            continue
-        bases = [
-            filing
-            for filing in filings.values()
-            if filing.form == "10-Q"
-            and filing.report_date == amended_filing.report_date
-            and filing.accepted_at < amended_filing.accepted_at
-        ]
-        if not bases:
-            continue
-        base = max(bases, key=lambda filing: filing.accepted_at)
-
-        def metric_classes(accession: str) -> set[str]:
-            return {
-                metric
-                for fact in facts
-                if fact.accn == accession
-                for metric, tags in SEC_CANONICAL_CONCEPTS.items()
-                if fact.tag in tags
-            }
-
-        if metric_classes(base.accession_number) - metric_classes(amended_accession):
-            period = resolved.get(amended_accession)
-            if period is not None:
-                incomplete_periods.add(period)
-                incomplete_accessions.add(amended_accession)
-    return frozenset(incomplete_periods), tuple(sorted(incomplete_accessions))
-
-
-def fetch_sec_canonical_quarters(
-    ticker: str,
+def _fetch_sec_canonical_quarters_from_root(
+    *,
+    canonical_ticker: str,
+    cik: str,
+    eligibility: SecQuarterlyEligibility,
+    root_source: SecDiscoverySource,
+    root_payload: dict[str, object],
     client: SecHttpClient,
     store: SnapshotStore,
-    *,
-    utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
-    acceptance_upper: datetime | None = None,
-    count: int = 8,
-    enrich_8k_q4_eps: bool = False,
+    utc_now: Callable[[], datetime],
+    bound: datetime | None,
+    count: int | None,
+    start_year: int | None,
+    end_year: int | None,
+    enrich_8k_q4_eps: bool,
 ) -> SecCanonicalQuarterlyResult:
-    """Fetch retained SEC companyfacts and project up to eight fiscal quarters.
-
-    Ticker/submissions transient failures are returned as fail-closed eligibility
-    outcomes. Companyfacts transport/schema failures propagate to the caller.
-    """
-    if not isinstance(client, SecHttpClient) or not isinstance(store, SnapshotStore):
-        raise TypeError("client and store must be SEC HTTP and snapshot clients")
-    if not callable(utc_now):
-        raise TypeError("utc_now must be callable")
-    if type(count) is not int or not 1 <= count <= 8:
-        raise ValueError("count must be in 1..8")
-    canonical_ticker = ticker.strip().upper() if type(ticker) is str else ""
-    if not canonical_ticker:
-        raise ValueError("ticker must be non-empty")
-    bound = acceptance_upper
-    if bound is not None and (
-        not isinstance(bound, datetime) or bound.tzinfo is None or bound.utcoffset() is None
-    ):
-        raise ValueError("acceptance_upper must be timezone-aware")
-    try:
-        mapping = fetch_sec_ticker_cik_mapping(client, store, utc_now=utc_now)
-        try:
-            resolution = mapping.resolve(canonical_ticker)
-        except SecTickerCikNotFoundError:
-            from .quarterly import SecQuarterlyEligibility
-
-            eligibility = SecQuarterlyEligibility(
-                SecCompanyEligibilityStatus.NON_SEC,
-                canonical_ticker,
-                None,
-                None,
-                mapping.observation.observation_identity,
-                None,
-                (),
-                "ticker is not listed in this SEC ticker mapping observation",
-            )
-            return _empty_result(canonical_ticker, eligibility)
-        except SecTickerCikAmbiguousError:
-            from .quarterly import SecQuarterlyEligibility
-
-            eligibility = SecQuarterlyEligibility(
-                SecCompanyEligibilityStatus.UNKNOWN,
-                canonical_ticker,
-                None,
-                None,
-                mapping.observation.observation_identity,
-                None,
-                (),
-                "SEC ticker mapping has conflicting CIK identities",
-            )
-            return _empty_result(canonical_ticker, eligibility)
-        root_source = fetch_sec_submissions_root(store, client, resolution.cik, utc_now=utc_now)
-    except TransientProviderError:
-        from .quarterly import SecQuarterlyEligibility
-
-        eligibility = SecQuarterlyEligibility(
-            SecCompanyEligibilityStatus.TRANSIENT_FAILURE,
-            canonical_ticker,
-            None,
-            None,
-            None,
-            None,
-            (),
-            "SEC ticker or submissions source request failed transiently",
-        )
-        return _empty_result(canonical_ticker, eligibility)
-
-    eligibility = classify_sec_company_eligibility_from_root(
-        canonical_ticker, mapping, store, root_source
-    )
-    if eligibility.status is not SecCompanyEligibilityStatus.SEC_COMPANY:
-        return _empty_result(canonical_ticker, eligibility)
-
-    cik = f"{int(resolution.cik):010d}"
-    root_payload = _root_payload(store, root_source, cik)
     url = SEC_COMPANYFACTS_URL.format(cik=cik)
-    response = client.open(
-        url,
-        accept="application/json",
-        max_bytes=_MAX_BODY_BYTES,
-        redirect_validator=lambda actual: _exact_companyfacts_url(url, actual),
-    )
-    try:
-        if validate_sec_url(response.url) != validate_sec_url(url):
-            raise SchemaMismatchError("SEC companyfacts redirect changed source URL")
-        try:
-            body = response.body.read()
-        except (TimeoutError, ConnectionError, OSError) as exc:
-            raise TransientProviderError("SEC companyfacts response read failed") from exc
-    finally:
-        response.body.close()
+    body = _fetch_companyfacts_body(client, url, _MAX_BODY_BYTES)
     raw_facts = parse_sec_companyfacts_payload(body, cik)
     observation = store.observe(
         RequestSpec("sec", "companyfacts", {"cik": cik}),
@@ -223,7 +105,9 @@ def fetch_sec_canonical_quarters(
         _SERIALIZATION,
         SnapshotMode.APPEND,
     )
-    initial_periods = _periods_from_companyfacts(raw_facts, bound, count)
+    initial_periods = _periods_from_companyfacts(
+        raw_facts, bound, count, start_year=start_year, end_year=end_year
+    )
     if not initial_periods:
         return SecCanonicalQuarterlyResult(
             canonical_ticker,
@@ -239,19 +123,9 @@ def fetch_sec_canonical_quarters(
     root_filings, _ = _submission_filings(store, cik, root_source)
     needed, by_period = _target_fact_accessions(raw_facts, initial_periods, root_filings)
     history_names, uncovered = _history_page_selection(root_payload, cik, needed, set(root_filings))
-    if len(history_names) > 256:
-        raise ResourceLimitError("targeted SEC history page count exceeds limit")
-    historical_sources: list[SecDiscoverySource] = []
-    total_history_bytes = 0
-    for name in history_names:
-        source = _fetch_history_page(client, store, cik, name, utc_now)
-        replayed = store.replay_observation(source.observation, max_payload_bytes=8 * 1024**2)
-        total_history_bytes += len(replayed.payload)
-        if total_history_bytes > 64 * 1024**2:
-            raise ResourceLimitError("targeted SEC history bytes exceed limit")
-        historical_sources.append(source)
+    historical_sources = _fetch_targeted_history_pages(client, store, cik, history_names, utc_now)
     filings, submission_observations = _submission_filings(
-        store, cik, root_source, tuple(historical_sources)
+        store, cik, root_source, historical_sources
     )
     filing_xbrl_facts: list[SecFilingXbrlFact] = []
     filing_xbrl_observations: dict[str, tuple[str, str]] = {}
@@ -292,6 +166,9 @@ def fetch_sec_canonical_quarters(
     needed, by_period = _target_fact_accessions(combined_facts, initial_periods, filings)
     uncovered = tuple(sorted(set(uncovered) | (set(needed) - set(filings))))
     unresolved_period_accessions = _unmodeled_newer_filings(combined_facts, filings, bound)
+    taxonomy, reporting_currency, dei_shares = _summarize_taxonomy_and_currency(
+        raw_facts, filings, bound
+    )
     if unresolved_period_accessions:
         uncovered = tuple(sorted(set(uncovered) | set(unresolved_period_accessions)))
         return SecCanonicalQuarterlyResult(
@@ -310,12 +187,22 @@ def fetch_sec_canonical_quarters(
                 for pair in filing_xbrl_observations.values()
                 for observation_id in pair
             ),
+            taxonomy=taxonomy,
+            reporting_currency=reporting_currency,
+            dei_shares_outstanding=dei_shares,
         )
-    resolved_periods = _ordered_periods(combined_facts, filings, bound)
+    resolved_periods = _ordered_periods(
+        combined_facts,
+        filings,
+        bound,
+        count=count,
+        start_year=start_year,
+        end_year=end_year,
+    )
     incomplete_amendment_periods, incomplete_amendment_accessions = _incomplete_xbrl_amendments(
         combined_facts, filings, bound, set(filing_xbrl_observations)
     )
-    requested_periods = resolved_periods[-count:]
+    requested_periods = resolved_periods[-count:] if count is not None else resolved_periods
     xbrl_resolved = _resolve_filing_periods(combined_facts, filings, bound)
     xbrl_periods = {
         xbrl_resolved[accession]
@@ -336,6 +223,9 @@ def fetch_sec_canonical_quarters(
             False,
             False,
             uncovered,
+            taxonomy=taxonomy,
+            reporting_currency=reporting_currency,
+            dei_shares_outstanding=dei_shares,
         )
     required_accessions = {
         accession for period in requested_periods for accession in by_period.get(period, ())
@@ -353,6 +243,8 @@ def fetch_sec_canonical_quarters(
         observation.observation_identity,
         acceptance_upper=bound,
         count=count,
+        start_year=start_year,
+        end_year=end_year,
         requested_periods=requested_periods,
         incomplete_periods=uncovered_periods,
         filing_xbrl_observations=filing_xbrl_observations,
@@ -370,45 +262,214 @@ def fetch_sec_canonical_quarters(
         filing_xbrl_observation_ids=tuple(
             observation_id for pair in filing_xbrl_observations.values() for observation_id in pair
         ),
+        taxonomy=taxonomy,
+        reporting_currency=reporting_currency,
+        dei_shares_outstanding=dei_shares,
     )
     if enrich_8k_q4_eps:
-        from .earnings_8k import (
-            enrich_sec_canonical_quarters_with_8k_eps,
-            fetch_sec_8k_quarterly_eps,
+        result = _enrich_result_with_8k_q4_eps(
+            result, canonical_ticker, client, store, bound, utc_now
         )
-
-        missing_q4s: list[tuple[int, int, date]] = []
-        for slot in result.slots:
-            if slot.fiscal_quarter == 4:
-                eps_field = slot.field(SecCanonicalMetric.GAAP_DILUTED_EPS)
-                if eps_field.status is SecCanonicalFieldStatus.MISSING:
-                    rev_field = slot.field(SecCanonicalMetric.REVENUE)
-                    period_end = rev_field.evidence[0].period_end if rev_field.evidence else None
-                    if period_end is not None:
-                        missing_q4s.append((slot.fiscal_year, 4, period_end))
-        if missing_q4s:
-            eps_result = fetch_sec_8k_quarterly_eps(
-                canonical_ticker,
-                client,
-                store,
-                target_quarters=tuple(missing_q4s),
-                acceptance_upper=bound,
-                utc_now=utc_now,
-            )
-            result = enrich_sec_canonical_quarters_with_8k_eps(result, eps_result)
     return result
 
 
-def _exact_companyfacts_url(expected: str, actual: str) -> str:
-    if validate_sec_url(actual) != validate_sec_url(expected):
-        raise SchemaMismatchError("SEC companyfacts redirect changed source URL")
-    return actual
+def fetch_sec_canonical_quarters(
+    ticker: str,
+    client: SecHttpClient,
+    store: SnapshotStore,
+    *,
+    utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    acceptance_upper: datetime | None = None,
+    count: int | None = 8,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    enrich_8k_q4_eps: bool = False,
+) -> SecCanonicalQuarterlyResult:
+    """Fetch retained SEC companyfacts and project fiscal quarters.
+
+    Ticker/submissions transient failures are returned as fail-closed eligibility
+    outcomes. Companyfacts transport/schema failures propagate to the caller.
+    """
+    if not isinstance(client, SecHttpClient) or not isinstance(store, SnapshotStore):
+        raise TypeError("client and store must be SEC HTTP and snapshot clients")
+    if not callable(utc_now):
+        raise TypeError("utc_now must be callable")
+    _validate_window_args(count, start_year, end_year)
+    canonical_ticker = ticker.strip().upper() if type(ticker) is str else ""
+    if not canonical_ticker:
+        raise ValueError("ticker must be non-empty")
+    bound = acceptance_upper
+    if bound is not None and (
+        not isinstance(bound, datetime) or bound.tzinfo is None or bound.utcoffset() is None
+    ):
+        raise ValueError("acceptance_upper must be timezone-aware")
+    try:
+        mapping = fetch_sec_ticker_cik_mapping(client, store, utc_now=utc_now)
+        try:
+            resolution = mapping.resolve(canonical_ticker)
+        except SecTickerCikNotFoundError:
+            eligibility = SecQuarterlyEligibility(
+                SecCompanyEligibilityStatus.NON_SEC,
+                canonical_ticker,
+                None,
+                None,
+                mapping.observation.observation_identity,
+                None,
+                (),
+                "ticker is not listed in this SEC ticker mapping observation",
+            )
+            return _empty_result(canonical_ticker, eligibility)
+        except SecTickerCikAmbiguousError:
+            eligibility = SecQuarterlyEligibility(
+                SecCompanyEligibilityStatus.UNKNOWN,
+                canonical_ticker,
+                None,
+                None,
+                mapping.observation.observation_identity,
+                None,
+                (),
+                "SEC ticker mapping has conflicting CIK identities",
+            )
+            return _empty_result(canonical_ticker, eligibility)
+        root_source = fetch_sec_submissions_root(store, client, resolution.cik, utc_now=utc_now)
+    except TransientProviderError:
+        eligibility = SecQuarterlyEligibility(
+            SecCompanyEligibilityStatus.TRANSIENT_FAILURE,
+            canonical_ticker,
+            None,
+            None,
+            None,
+            None,
+            (),
+            "SEC ticker or submissions source request failed transiently",
+        )
+        return _empty_result(canonical_ticker, eligibility)
+
+    cik = f"{int(resolution.cik):010d}"
+    eligibility = classify_sec_company_eligibility_from_root(
+        canonical_ticker, mapping, store, root_source
+    )
+    root_payload = _root_payload(store, root_source, cik)
+    if eligibility.status is SecCompanyEligibilityStatus.UNKNOWN:
+        fpi_eligibility = _classify_cik_eligibility_from_root(
+            canonical_ticker,
+            cik,
+            root_payload,
+            root_source.observation.observation_identity,
+            mapping.observation.observation_identity,
+        )
+        if fpi_eligibility.status is SecCompanyEligibilityStatus.SEC_COMPANY:
+            eligibility = fpi_eligibility
+    if eligibility.status is not SecCompanyEligibilityStatus.SEC_COMPANY:
+        return _empty_result(canonical_ticker, eligibility)
+
+    return _fetch_sec_canonical_quarters_from_root(
+        canonical_ticker=canonical_ticker,
+        cik=cik,
+        eligibility=eligibility,
+        root_source=root_source,
+        root_payload=root_payload,
+        client=client,
+        store=store,
+        utc_now=utc_now,
+        bound=bound,
+        count=count,
+        start_year=start_year,
+        end_year=end_year,
+        enrich_8k_q4_eps=enrich_8k_q4_eps,
+    )
+
+
+def fetch_sec_canonical_quarters_by_cik(
+    cik: str | int,
+    client: SecHttpClient,
+    store: SnapshotStore,
+    *,
+    ticker: str | None = None,
+    utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    acceptance_upper: datetime | None = None,
+    count: int | None = 8,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    enrich_8k_q4_eps: bool = False,
+) -> SecCanonicalQuarterlyResult:
+    """Fetch retained SEC companyfacts directly by CIK (including delisted companies)."""
+    if not isinstance(client, SecHttpClient) or not isinstance(store, SnapshotStore):
+        raise TypeError("client and store must be SEC HTTP and snapshot clients")
+    if not callable(utc_now):
+        raise TypeError("utc_now must be callable")
+    normalized_cik = normalize_sec_cik(cik)
+    _validate_window_args(count, start_year, end_year)
+    if ticker is not None and (type(ticker) is not str or not ticker.strip()):
+        raise ValueError("ticker must be a non-empty string when provided")
+    bound = acceptance_upper
+    if bound is not None and (
+        not isinstance(bound, datetime) or bound.tzinfo is None or bound.utcoffset() is None
+    ):
+        raise ValueError("acceptance_upper must be timezone-aware")
+    fallback_ticker = ticker.strip().upper() if ticker is not None else f"CIK{normalized_cik}"
+    try:
+        root_source = fetch_sec_submissions_root(store, client, normalized_cik, utc_now=utc_now)
+    except TransientProviderError:
+        eligibility = SecQuarterlyEligibility(
+            SecCompanyEligibilityStatus.TRANSIENT_FAILURE,
+            fallback_ticker,
+            normalized_cik,
+            None,
+            None,
+            None,
+            (),
+            "SEC submissions source request failed transiently",
+        )
+        return _empty_result(fallback_ticker, eligibility)
+
+    root_payload = _root_payload(store, root_source, normalized_cik)
+    resolved_ticker = fallback_ticker
+    has_real_ticker = ticker is not None
+    if ticker is None:
+        raw_tickers = root_payload.get("tickers")
+        if isinstance(raw_tickers, (list, tuple)):
+            for item in raw_tickers:
+                if isinstance(item, str) and item.strip():
+                    resolved_ticker = item.strip().upper()
+                    has_real_ticker = True
+                    break
+    if enrich_8k_q4_eps and not has_real_ticker:
+        raise ValueError(
+            "enrich_8k_q4_eps requires a real ticker; supply ticker=... for delisted CIKs"
+        )
+    eligibility = _classify_cik_eligibility_from_root(
+        resolved_ticker,
+        normalized_cik,
+        root_payload,
+        root_source.observation.observation_identity,
+    )
+    if eligibility.status is not SecCompanyEligibilityStatus.SEC_COMPANY:
+        return _empty_result(resolved_ticker, eligibility)
+    return _fetch_sec_canonical_quarters_from_root(
+        canonical_ticker=resolved_ticker,
+        cik=normalized_cik,
+        eligibility=eligibility,
+        root_source=root_source,
+        root_payload=root_payload,
+        client=client,
+        store=store,
+        utc_now=utc_now,
+        bound=bound,
+        count=count,
+        start_year=start_year,
+        end_year=end_year,
+        enrich_8k_q4_eps=enrich_8k_q4_eps,
+    )
 
 
 __all__ = [
     "SEC_CANONICAL_CONCEPTS",
     "SEC_CANONICAL_CONCEPTS_VERSION",
+    "SEC_CANONICAL_IFRS_CONCEPTS",
     "SEC_COMPANYFACTS_URL",
+    "SEC_FUNDAMENTAL_CONCEPTS",
+    "SEC_MULTI_TAXONOMY_CONCEPTS_VERSION",
     "Sec8KReleaseEvidence",
     "SecCanonicalEvidence",
     "SecCanonicalFactEvidence",
@@ -420,7 +481,10 @@ __all__ = [
     "SecCompanyFactsFact",
     "SecCompanyFactsFiling",
     "SecFilingXbrlFactEvidence",
+    "SecFundamentalMetric",
     "fetch_sec_canonical_quarters",
+    "fetch_sec_canonical_quarters_by_cik",
+    "normalize_sec_cik",
     "parse_sec_companyfacts_payload",
     "project_sec_companyfacts_quarters",
 ]

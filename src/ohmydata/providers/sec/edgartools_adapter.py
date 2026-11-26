@@ -5,198 +5,43 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
-import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ._edgartools_instance import (
+    _has_xbrl_attachment_candidates,
+    _instance_attachment,
+    _instance_url,
+    _load_user_agent_from_config,
+    _read_instance,
+    _try_instance_attachment,
+)
 from ._financials_filing_selection import (
     amendment_base_accessions,
     select_financial_filing_candidates,
 )
-from ._live_unit_corroboration import _RAW_INSTANCE_MAX_BYTES
 from ._statement_parser import (
     SecStatementParseError,
     SecUnitEvidenceError,
     parse_statement_rows,
 )
-from .financials import SecCompanyFinancialVintage, SecFinancialsRequest, SecStatementRow
-from .http import SecHttpClient, validate_sec_url
+from .adr_metadata import build_adr_share_metadata
+from .financials import (
+    FPI_FINANCIAL_FORMS,
+    SecCompanyFinancialVintage,
+    SecFinancialsRequest,
+    SecStatementRow,
+    normalize_sec_cik,
+)
+from .http import SecHttpClient
 from .unit_evidence import SEC_LIVE_FINANCIAL_PARSER_V2, SecFinancialUnitEvidence
 
 logger = logging.getLogger(__name__)
 _EASTERN_TZ = ZoneInfo("America/New_York")
 _LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-6.4.0"
-_SAFE_DOCUMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-
-
-def _filing_archive_prefix(filing: Any) -> str:
-    """Return the one SEC archive directory that may supply this filing's instance."""
-    try:
-        cik = str(int(str(filing.cik)))
-        accession = str(filing.accession_number)
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise SecUnitEvidenceError("filing identity is unavailable for raw XBRL evidence") from exc
-    if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
-        raise SecUnitEvidenceError("filing accession is invalid for raw XBRL evidence")
-    return f"https://www.sec.gov:443/Archives/edgar/data/{cik}/{accession.replace('-', '')}/"
-
-
-def _attachment_document(item: Any) -> str:
-    document = getattr(item, "document", None)
-    if not isinstance(document, str) or not _SAFE_DOCUMENT.fullmatch(document):
-        raise SecUnitEvidenceError("classified XBRL instance has an unsafe document name")
-    return document
-
-
-def _attachment_sources(container: Any) -> list[Any]:
-    """Return the pinned classifier's source set without inspecting names or content."""
-    if container is None:
-        return []
-    data_files = getattr(container, "data_files", None)
-    if data_files is None:
-        data_files = getattr(container, "datafiles", None)
-    if data_files is None:
-        return []
-    if not isinstance(data_files, list):
-        raise SecUnitEvidenceError("filing XBRL attachment source list is invalid")
-    return data_files
-
-
-def _classifier_eligible(attachment: Any) -> bool:
-    """Mirror the pinned classifier's pre-content filter exactly."""
-    document_type = getattr(attachment, "document_type", None)
-    extension = getattr(attachment, "extension", None)
-    return (
-        document_type in {"XML", "EX-101.INS"}
-        and isinstance(extension, str)
-        and extension.endswith((".xml", ".XML"))
-    )
-
-
-def _materialize_attachment(
-    filing: Any, attachment: Any, client: SecHttpClient | None
-) -> tuple[str, bytes, str]:
-    document = _attachment_document(attachment)
-    supplied_url = getattr(attachment, "url", None)
-    if supplied_url is not None and not isinstance(supplied_url, str):
-        raise SecUnitEvidenceError("classified XBRL instance URL is invalid")
-    url, validator = _instance_url(filing, document, supplied_url)
-    sgml = getattr(attachment, "sgml_document", None)
-    content = getattr(sgml, "content", None) if sgml is not None else None
-    if isinstance(content, str):
-        content = content.encode("utf-8")
-    if content is not None and type(content) is not bytes:
-        raise SecUnitEvidenceError("classified XBRL instance content is not bytes")
-    if content is None:
-        if client is None:
-            raise SecUnitEvidenceError("v2 raw XBRL evidence requires an injected SecHttpClient")
-        content = _read_instance(client, url, validator)
-    if len(content) > _RAW_INSTANCE_MAX_BYTES:
-        raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
-    return document, content, url
-
-
-def _classify_instance(document: str, attachment: Any, raw: bytes) -> bool:
-    """Run edgartools' exact classifier over an in-memory one-document proxy."""
-    try:
-        from edgar.xbrl.xbrl import XBRLAttachments
-    except ImportError as exc:
-        raise SecUnitEvidenceError("pinned edgartools XBRL classifier is unavailable") from exc
-    try:
-        content = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    proxy = type(
-        "_BoundedAttachment",
-        (),
-        {
-            "document": document,
-            "document_type": getattr(attachment, "document_type", None),
-            "extension": getattr(attachment, "extension", Path(document).suffix),
-            "content": content,
-        },
-    )()
-    attachments: Any = type("_OneAttachment", (), {"data_files": [proxy]})()
-    return XBRLAttachments(attachments).get("instance") is not None
-
-
-def _instance_attachment(filing: Any, client: SecHttpClient | None) -> tuple[str, bytes, str]:
-    """Classify every original candidate separately, then one same-filing homepage set."""
-    original = _attachment_sources(getattr(filing, "attachments", None))
-    if not original:
-        original = _attachment_sources(getattr(filing, "xbrl_attachments", None))
-    sources = original
-    homepage_used = False
-    while True:
-        found: dict[tuple[str, str], bytes] = {}
-        for attachment in sources:
-            if not _classifier_eligible(attachment):
-                continue
-            document, raw, url = _materialize_attachment(filing, attachment, client)
-            if _classify_instance(document, attachment, raw):
-                key = (document, url)
-                existing = found.get(key)
-                if existing is not None and existing != raw:
-                    raise SecUnitEvidenceError(
-                        "classified XBRL instance source has conflicting duplicate bytes"
-                    )
-                found[key] = raw
-        if found or homepage_used:
-            break
-        homepage_used = True
-        homepage = getattr(filing, "homepage", None)
-        sources = _attachment_sources(getattr(homepage, "attachments", homepage))
-    if len(found) != 1:
-        raise SecUnitEvidenceError("filing must have exactly one classified original XBRL instance")
-    (document, url), raw = next(iter(found.items()))
-    return document, raw, url
-
-
-def _instance_url(
-    filing: Any, document: str, supplied_url: str | None = None
-) -> tuple[str, Callable[[str], str]]:
-    prefix = _filing_archive_prefix(filing)
-    url = prefix + document
-
-    def _same_directory(candidate: str) -> str:
-        normalized = validate_sec_url(candidate)
-        if not normalized.startswith(prefix):
-            raise SecUnitEvidenceError("XBRL instance URL does not match filing archive directory")
-        tail = normalized.removeprefix(prefix)
-        if not _SAFE_DOCUMENT.fullmatch(tail):
-            raise SecUnitEvidenceError("XBRL instance URL is not a safe filing attachment")
-        return normalized
-
-    selected = _same_directory(url if supplied_url is None else supplied_url)
-    if not selected.endswith("/" + document):
-        raise SecUnitEvidenceError("XBRL instance URL does not match classified attachment")
-    return selected, _same_directory
-
-
-def _read_instance(client: SecHttpClient, url: str, validator: Callable[[str], str]) -> bytes:
-    response = client.open(
-        url,
-        accept="application/xml, text/xml, application/octet-stream",
-        max_bytes=_RAW_INSTANCE_MAX_BYTES,
-        redirect_validator=validator,
-    )
-    try:
-        chunks: list[bytes] = []
-        total = 0
-        while True:
-            chunk = response.body.read(64 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > _RAW_INSTANCE_MAX_BYTES:
-                raise SecUnitEvidenceError("raw XBRL instance exceeds byte limit")
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        response.body.close()
 
 
 class SecFinancialsParseError(SecStatementParseError):
@@ -234,6 +79,73 @@ def validate_user_agent(user_agent: str) -> str:
     return cleaned
 
 
+def _resolve_company_symbol(company: Any, filing: Any) -> str:
+    """Resolve uppercase ticker from entity metadata, or '' for delisted/tickerless companies."""
+    for attr in ("get_ticker", "ticker", "tickers"):
+        try:
+            candidate = getattr(company, attr, None)
+            value = candidate() if callable(candidate) else candidate
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    return item.strip().upper()
+    try:
+        filing_ticker = getattr(filing, "ticker", None)
+        if isinstance(filing_ticker, str) and filing_ticker.strip():
+            return filing_ticker.strip().upper()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        pass
+    return ""
+
+
+def _parse_acceptance_datetime(filing: Any) -> datetime | None:
+    try:
+        header: Any = getattr(filing, "header", None)
+        if header and header.acceptance_datetime:
+            dt: datetime = header.acceptance_datetime
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_EASTERN_TZ)
+            return dt.astimezone(UTC)
+    except (AttributeError, KeyError, ValueError, TypeError) as err:
+        logger.debug("Could not parse acceptance_datetime from filing header: %s", err)
+    return None
+
+
+def _parse_period_end(filing: Any, label: str) -> date | None:
+    try:
+        if hasattr(filing, "period_of_report") and filing.period_of_report:
+            return date.fromisoformat(str(filing.period_of_report))
+    except (ValueError, TypeError) as err:
+        raise ValueError(
+            f"invalid period_of_report for {label}: {filing.period_of_report!r}"
+        ) from err
+    return None
+
+
+def _statement_getter(fin: Any, method_name: str) -> Callable[[], Any] | None:
+    getter = getattr(fin, method_name, None)
+    if callable(getter):
+        return getter
+    if method_name == "cash_flow_statement":
+        alt = getattr(fin, "cashflow_statement", None)
+        if callable(alt):
+            return alt
+    return None
+
+
+def _filing_cik_str(filing: Any, fallback_cik: str | None) -> str:
+    raw = getattr(filing, "cik", None)
+    if raw is not None and str(raw).strip():
+        return normalize_sec_cik(str(raw))
+    if fallback_cik is not None:
+        return normalize_sec_cik(fallback_cik)
+    raise ValueError("filing CIK is unavailable")
+
+
 class SecFinancialsClient:
     """Injected-credentials client for SEC company financials."""
 
@@ -248,7 +160,6 @@ class SecFinancialsClient:
         self.runner = runner
         self.http_client = http_client
 
-        # Set identity in edgartools if not using a custom runner
         if self.runner is None:
             ensure_edgar_available()
             from edgar import set_identity
@@ -258,43 +169,7 @@ class SecFinancialsClient:
     @classmethod
     def from_config(cls, config_path: str | Path, **kwargs: Any) -> SecFinancialsClient:
         """Create a client from an OMD configuration file (YAML, JSON, or TOML)."""
-        path = Path(config_path)
-        if not path.exists():
-            raise FileNotFoundError(f"config file not found: {path}")
-
-        text = path.read_text(encoding="utf-8")
-        raw: dict[str, Any]
-        if path.suffix in (".yaml", ".yml"):
-            try:
-                yaml: Any = importlib.import_module("yaml")
-                raw = yaml.safe_load(text) or {}
-            except ImportError:
-                import json
-
-                raw = json.loads(text)
-        elif path.suffix == ".toml":
-            import tomllib
-
-            raw = tomllib.loads(text)
-        else:
-            import json
-
-            raw = json.loads(text)
-
-        user_agent = raw.get("user_agent")
-        if not user_agent and raw.get("user_agent_file"):
-            ua_file = Path(raw["user_agent_file"])
-            if not ua_file.is_absolute():
-                ua_file = path.parent / ua_file
-            if ua_file.exists():
-                user_agent = ua_file.read_text(encoding="utf-8").strip()
-
-        if not user_agent:
-            raise ValueError(
-                "config must specify either 'user_agent' or 'user_agent_file' pointing to contact info"
-            )
-
-        return cls(user_agent, **kwargs)
+        return cls(_load_user_agent_from_config(config_path), **kwargs)
 
     def fetch_company_financials(
         self, request: SecFinancialsRequest
@@ -302,24 +177,35 @@ class SecFinancialsClient:
         """Fetch and parse financial statement vintages according to request."""
         if self.runner is not None:
             res: list[SecCompanyFinancialVintage] = self.runner(request)
-            if request.parser_version == SEC_LIVE_FINANCIAL_PARSER_V2 and any(
-                item.unit_evidence is None
-                or item.unit_evidence.parser_version != SEC_LIVE_FINANCIAL_PARSER_V2
-                for item in res
-            ):
-                raise SecUnitEvidenceError(
-                    "custom v2 runner returned a vintage without unit evidence"
-                )
+            if request.parser_version == SEC_LIVE_FINANCIAL_PARSER_V2:
+                for item in res:
+                    is_non_xbrl_6k = (
+                        item.form == "6-K" and "NON_XBRL_6K" in item.quality_flags and not item.rows
+                    )
+                    if item.unit_evidence is None and not is_non_xbrl_6k:
+                        raise SecUnitEvidenceError(
+                            "custom v2 runner returned a vintage without unit evidence"
+                        )
+                    if (
+                        item.unit_evidence is not None
+                        and item.unit_evidence.parser_version != SEC_LIVE_FINANCIAL_PARSER_V2
+                    ):
+                        raise SecUnitEvidenceError(
+                            "custom v2 runner returned a vintage without unit evidence"
+                        )
             return res
 
         ensure_edgar_available()
         from edgar import Company
         from edgar.exceptions import DataObjectError, ParsingError, StatementNotFoundError
 
+        targets: list[tuple[str, str]] = [
+            ("symbol", symbol.strip().upper()) for symbol in request.symbols
+        ] + [("cik", cik) for cik in request.ciks]
+
         vintages: list[SecCompanyFinancialVintage] = []
-        for symbol in request.symbols:
-            symbol = symbol.strip().upper()
-            company: Any = Company(symbol)
+        for target_kind, target_value in targets:
+            company: Any = Company(target_value)
             start = f"{request.start_year}-01-01" if request.start_year else ""
             end = f"{request.end_year}-12-31" if request.end_year else ""
             filings: Any = company.get_filings(
@@ -330,64 +216,103 @@ class SecFinancialsClient:
             if not filings:
                 continue
 
-            eligible = select_financial_filing_candidates(filings, request, symbol=symbol)
+            target_label = target_value if target_kind == "symbol" else f"CIK:{target_value}"
+            eligible = select_financial_filing_candidates(filings, request, symbol=target_label)
             amendment_bases = amendment_base_accessions(eligible)
             filings_to_process = (
                 eligible[: request.limit] if request.limit is not None else eligible
             )
 
             for filing in filings_to_process:
-                form = str(filing.form).upper()
+                form = str(filing.form).strip().upper()
                 is_amend = form.endswith("/A")
                 f_date_str = str(filing.filing_date)
                 try:
                     f_date = date.fromisoformat(f_date_str)
                 except ValueError as err:
-                    raise ValueError(f"invalid filing date for {symbol}: {f_date_str!r}") from err
+                    raise ValueError(
+                        f"invalid filing date for {target_label}: {f_date_str!r}"
+                    ) from err
+
+                resolved_symbol = (
+                    target_value
+                    if target_kind == "symbol"
+                    else _resolve_company_symbol(company, filing)
+                )
+                resolved_cik = _filing_cik_str(
+                    filing, target_value if target_kind == "cik" else None
+                )
+                if target_kind == "cik" and resolved_cik != target_value:
+                    raise ValueError(
+                        f"filing CIK {resolved_cik} does not match requested CIK {target_value}"
+                    )
+                company_name = str(
+                    getattr(filing, "company", None) or getattr(company, "name", "") or ""
+                )
+                accepted_at = _parse_acceptance_datetime(filing)
+                p_end = _parse_period_end(filing, target_label)
+
+                quality_flags: list[str] = []
+                if accepted_at is None:
+                    quality_flags.append("ACCEPTED_AT_MISSING")
 
                 raw_instance: bytes | None = None
                 evidence: SecFinancialUnitEvidence | None = None
                 prepared_evidence: Any | None = None
                 if request.parser_version == SEC_LIVE_FINANCIAL_PARSER_V2:
-                    document, raw_instance, _ = _instance_attachment(filing, self.http_client)
+                    if form == "6-K":
+                        attached = _try_instance_attachment(filing, self.http_client)
+                        if attached is None:
+                            quality_flags.extend(
+                                ["NON_XBRL_6K", "NO_XBRL_ATTACHMENT", "NO_FINANCIAL_STATEMENTS"]
+                            )
+                            if not request.include_dimensions:
+                                quality_flags.append("DIMENSIONS_EXCLUDED_BY_REQUEST")
+                            vintages.append(
+                                SecCompanyFinancialVintage(
+                                    symbol=resolved_symbol,
+                                    cik=resolved_cik,
+                                    company_name=company_name,
+                                    form=form,
+                                    accession_number=str(filing.accession_number),
+                                    filing_date=f_date,
+                                    period_end=p_end,
+                                    accepted_at=accepted_at,
+                                    availability_policy=request.availability_policy,
+                                    availability_lag_days=request.lag_days,
+                                    is_amendment=is_amend,
+                                    quality_flags=tuple(quality_flags),
+                                    rows=(),
+                                    unit_evidence=None,
+                                    adr_metadata=None,
+                                )
+                            )
+                            continue
+                        document, raw_instance, _ = attached
+                    else:
+                        document, raw_instance, _ = _instance_attachment(filing, self.http_client)
+
                     from ._live_unit_corroboration import (
                         SecUnitEvidenceError as _RawUnitEvidenceError,
                     )
                     from ._live_unit_corroboration import prepare_raw_instance
 
                     try:
-                        # Validate the complete unit table before native extraction, once per filing.
                         prepared_evidence = prepare_raw_instance(
-                            raw_instance, expected_cik=str(int(str(filing.cik)))
+                            raw_instance, expected_cik=str(int(resolved_cik))
                         )
                     except _RawUnitEvidenceError as exc:
                         raise SecUnitEvidenceError(str(exc)) from exc
                     evidence = SecFinancialUnitEvidence(
                         parser_version=request.parser_version,
-                        cik=str(int(str(filing.cik))),
+                        cik=str(int(resolved_cik)),
                         accession_number=str(filing.accession_number),
                         instance_document=document,
                         instance_sha256=hashlib.sha256(raw_instance).hexdigest(),
                     )
 
-                # Obtain acceptance timestamp
-                accepted_at: datetime | None = None
-                try:
-                    header: Any = getattr(filing, "header", None)
-                    if header and header.acceptance_datetime:
-                        dt: datetime = header.acceptance_datetime
-                        if dt.tzinfo is None:
-                            # SEC acceptance datetimes in SGML are Eastern Time
-                            dt = dt.replace(tzinfo=_EASTERN_TZ)
-                        accepted_at = dt.astimezone(UTC)
-                except (AttributeError, KeyError, ValueError, TypeError) as err:
-                    logger.debug("Could not parse acceptance_datetime from filing header: %s", err)
-
-                # Parse the report object (TenK, TenQ, etc.)
-                quality_flags: list[str] = []
                 parse_failures: list[Exception] = []
-                if accepted_at is None:
-                    quality_flags.append("ACCEPTED_AT_MISSING")
+                filing_xbrl: Any | None = None
                 try:
                     report: Any = filing.obj()
                 except (
@@ -420,7 +345,28 @@ class SecFinancialsClient:
                     fin = None
                     quality_flags.append("FINANCIALS_PARSE_FAILED")
                     parse_failures.append(err)
+
+                if fin is None and form in FPI_FINANCIAL_FORMS:
+                    xbrl_getter = getattr(filing, "xbrl", None)
+                    if callable(xbrl_getter):
+                        try:
+                            filing_xbrl = xbrl_getter()
+                            fin = getattr(filing_xbrl, "statements", None)
+                        except (
+                            AttributeError,
+                            KeyError,
+                            ValueError,
+                            TypeError,
+                            RuntimeError,
+                            OSError,
+                            ParsingError,
+                            DataObjectError,
+                        ) as err:
+                            logger.debug("Could not access FPI filing xbrl: %s", type(err).__name__)
+
                 if fin is None:
+                    if form == "6-K" and not _has_xbrl_attachment_candidates(filing):
+                        quality_flags.extend(["NON_XBRL_6K", "NO_XBRL_ATTACHMENT"])
                     quality_flags.append("NO_FINANCIALS_OBJECT")
 
                 rows: list[SecStatementRow] = []
@@ -430,11 +376,17 @@ class SecFinancialsClient:
                         ("income_statement", "income_statement", "INCOME_STATEMENT"),
                         ("cash_flow_statement", "cash_flow", "CASH_FLOW"),
                     ):
+                        getter = _statement_getter(fin, method_name)
+                        if getter is None:
+                            quality_flags.append(f"{flag}_MISSING")
+                            continue
                         try:
-                            statement = getattr(fin, method_name)()
+                            statement = getter()
                             if statement is None:
                                 quality_flags.append(f"{flag}_MISSING")
                             else:
+                                if filing_xbrl is None:
+                                    filing_xbrl = getattr(statement, "xbrl", None)
                                 statement_rows = parse_statement_rows(
                                     statement,
                                     statement_type,
@@ -474,20 +426,17 @@ class SecFinancialsClient:
                 if not request.include_dimensions:
                     quality_flags.append("DIMENSIONS_EXCLUDED_BY_REQUEST")
 
-                # Period of report date
-                p_end: date | None = None
-                try:
-                    if hasattr(filing, "period_of_report") and filing.period_of_report:
-                        p_end = date.fromisoformat(str(filing.period_of_report))
-                except (ValueError, TypeError) as err:
-                    raise ValueError(
-                        f"invalid period_of_report for {symbol}: {filing.period_of_report!r}"
-                    ) from err
+                adr_metadata = build_adr_share_metadata(
+                    rows,
+                    xbrl=filing_xbrl,
+                    raw_instance=raw_instance,
+                    form=form,
+                )
 
                 vintage = SecCompanyFinancialVintage(
-                    symbol=symbol,
-                    cik=str(filing.cik).zfill(10),
-                    company_name=str(filing.company),
+                    symbol=resolved_symbol,
+                    cik=resolved_cik,
+                    company_name=company_name,
                     form=form,
                     accession_number=str(filing.accession_number),
                     filing_date=f_date,
@@ -499,6 +448,7 @@ class SecFinancialsClient:
                     quality_flags=tuple(quality_flags),
                     rows=tuple(rows),
                     unit_evidence=evidence,
+                    adr_metadata=adr_metadata,
                 )
                 if not rows and parse_failures:
                     raise SecFinancialsParseError(vintage) from parse_failures[0]
@@ -511,6 +461,9 @@ __all__ = [
     "SecFinancialsClient",
     "SecFinancialsParseError",
     "SecStatementParseError",
+    "_instance_attachment",
+    "_instance_url",
+    "_read_instance",
     "ensure_edgar_available",
     "parse_statement_rows",
     "validate_user_agent",

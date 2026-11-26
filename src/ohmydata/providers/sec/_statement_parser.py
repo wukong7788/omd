@@ -8,9 +8,10 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from fractions import Fraction
 from typing import Any
 
+from ._ifrs_concepts import resolve_standard_concept
+from ._statement_precision import select_native_facts
 from .financials import SecStatementRow, StatementType
 
 _LIVE_PARSER_V1 = "sec-live-financial-parser-v1-edgartools-6.4.0"
@@ -22,7 +23,6 @@ _DISPLAY_PERIOD = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\((FY|Q[1-4]|YTD)\))?$"
 _STRUCTURED_PERIOD = re.compile(
     r"^(?:(instant)_(\d{4}-\d{2}-\d{2})|(duration)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2}))$"
 )
-_MAX_FACT_ARITHMETIC_DIGITS = 10_000
 
 
 class SecStatementParseError(ValueError):
@@ -103,104 +103,13 @@ def _dim_key(dimensions: Mapping[str, Any]) -> str:
     return json.dumps(dict(dimensions), sort_keys=True, separators=(",", ":"))
 
 
-def _fact_precision(fact: Any) -> int | str | None:
-    """Return finite precision, None for missing, and ``INF`` for infinity."""
-    decimals = fact.decimals
-    if decimals is None or type(decimals).__name__ in {"NAType", "NaTType"}:
-        return None
-    if isinstance(decimals, str) and decimals.strip() == "INF":
-        return "INF"
-    if isinstance(decimals, bool):
-        raise SecStatementParseError("invalid fact precision")
-    if isinstance(decimals, int):
-        return decimals
-    if isinstance(decimals, str) and re.fullmatch(r"[+-]?\d+", decimals.strip()):
-        return int(decimals.strip())
-    raise SecStatementParseError("invalid fact precision")
-
-
-def _fact_interval(value: Decimal, precision: int | str | None) -> tuple[Fraction, Fraction]:
-    value_tuple = value.as_tuple()
-    if not isinstance(value_tuple.exponent, int):
-        raise SecStatementParseError("non-finite statement fact")
-    if (
-        abs(value_tuple.exponent) > _MAX_FACT_ARITHMETIC_DIGITS
-        or len(value_tuple.digits) > _MAX_FACT_ARITHMETIC_DIGITS
-    ):
-        raise SecStatementParseError("statement fact exceeds arithmetic bounds")
-    if isinstance(precision, int) and abs(precision) > _MAX_FACT_ARITHMETIC_DIGITS:
-        raise SecStatementParseError("statement fact exceeds arithmetic bounds")
-    exact = Fraction(value)
-    if precision is None or precision == "INF":
-        return exact, exact
-    if not isinstance(precision, int):
-        raise SecStatementParseError("invalid fact precision")
-    half_unit = Fraction(10 ** (-precision), 2) if precision < 0 else Fraction(1, 2 * 10**precision)
-    return exact - half_unit, exact + half_unit
-
-
 def _select_native_facts(facts: list[Any]) -> list[Any]:
     """Validate one duplicate group and select its best fact per context."""
-    parsed: list[tuple[Any, Decimal, int | str | None]] = []
-    unit_refs = set()
-    intervals = []
-    missing_precision = False
-    values_by_precision: dict[int | str, set[Decimal]] = {}
-    best_by_context: dict[str, tuple[tuple[int, int], tuple[str, str], Any]] = {}
-
-    def rank(precision: int | str | None) -> tuple[int, int]:
-        if precision is None:
-            return (0, 0)
-        if precision == "INF":
-            return (2, 0)
-        if not isinstance(precision, int):
-            raise SecStatementParseError("invalid fact precision")
-        return (1, precision)
-
-    for fact in facts:
-        value = _number(fact.value)
-        precision = _fact_precision(fact)
-        missing_precision |= precision is None
-        unit_refs.add(fact.unit_ref)
-        if value is None:
-            continue
-        parsed.append((fact, value, precision))
-        intervals.append(_fact_interval(value, precision))
-        if precision is not None:
-            values_by_precision.setdefault(precision, set()).add(value)
-        context = fact.context_ref
-        tie_break = (str(fact.value), str(fact.decimals))
-        candidate = (rank(precision), tie_break, fact)
-        current = best_by_context.get(context)
-        if (
-            current is None
-            or candidate[0] > current[0]
-            or (candidate[0] == current[0] and candidate[1] < current[1])
-        ):
-            best_by_context[context] = candidate
-    if len(unit_refs) != 1:
-        raise SecStatementParseError("conflicting native facts for period and dimensions")
-    if not parsed:
-        return []
-    if len(parsed) != len(facts):
-        raise SecStatementParseError("non-numeric statement fact")
-    # Every interval must share one common point; pairwise or adjacent checks
-    # can incorrectly accept a chain of individually overlapping intervals.
-    lower = max(interval[0] for interval in intervals)
-    upper = min(interval[1] for interval in intervals)
-    if missing_precision and any(precision is not None for _, _, precision in parsed):
-        raise SecStatementParseError("conflicting native facts for period and dimensions")
-    if missing_precision and len({value for _, value, _ in parsed}) != 1:
-        raise SecStatementParseError("conflicting native facts for period and dimensions")
-    for values in values_by_precision.values():
-        if len(values) != 1:
-            raise SecStatementParseError("conflicting native facts for period and dimensions")
-    if lower > upper:
-        raise SecStatementParseError("conflicting native facts for period and dimensions")
-    selected: list[Any] = []
-    for context_ref in sorted(best_by_context):
-        selected.append(best_by_context[context_ref][2])
-    return selected
+    return select_native_facts(
+        facts,
+        parse_number=_number,
+        error_cls=SecStatementParseError,
+    )
 
 
 def _native_index(xbrl: Any, concepts: set[str]) -> dict[tuple[str, str, str], list[Any]]:
@@ -316,7 +225,9 @@ def _structured_rows(
                         raise SecStatementParseError("invalid fact precision") from exc
                 row = SecStatementRow(
                     statement_type=kind,
-                    standard_concept=_text(item.get("standard_concept")) or concept,
+                    standard_concept=resolve_standard_concept(
+                        _text(item.get("standard_concept")), concept
+                    ),
                     concept=concept,
                     label=_text(item.get("label")) or "",
                     value=value,
@@ -458,7 +369,9 @@ def _display_rows(statement: Any, kind: StatementType, dimensions: bool) -> list
             rows.append(
                 SecStatementRow(
                     statement_type=kind,
-                    standard_concept=_text(item.get("standard_concept")) or concept,
+                    standard_concept=resolve_standard_concept(
+                        _text(item.get("standard_concept")), concept
+                    ),
                     concept=concept,
                     label=_text(item.get("label")) or "",
                     value=value,

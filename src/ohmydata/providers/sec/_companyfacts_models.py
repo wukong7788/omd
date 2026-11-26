@@ -12,6 +12,18 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
+from ._bulk_zip_models import (
+    _INSTANT_TAGS_BY_NS,
+    _PARSED_TAGS_BY_NS,
+    _SUPPORTED_NAMESPACES,
+    SEC_CANONICAL_IFRS_CONCEPTS,
+    SEC_CANONICAL_IFRS_REVENUE_PRIORITY,
+    SEC_FUNDAMENTAL_CONCEPTS,
+    SEC_MULTI_TAXONOMY_CONCEPTS_VERSION,
+    SecFundamentalMetric,
+    _currency_from_unit,
+    _is_valid_canonical_unit,
+)
 from ._metric_arithmetic import validate_decimal
 from .errors import ResourceLimitError, SchemaMismatchError
 from .quarterly import SecQuarterlyEligibility
@@ -47,14 +59,31 @@ _ACCESSION = re.compile(r"^[0-9]{10}-[0-9]{2}-[0-9]{6}$")
 _CIK = re.compile(r"^[0-9]{10}$")
 _FRAME = re.compile(r"^CY([0-9]{4})(?:Q([1-4]))?(?:I)?$")
 _QUARTER_FRAME = re.compile(r"^CY[0-9]{4}Q[1-4]$")
-_ALLOWED_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
+_QUARTERLY_FORMS = frozenset({"10-Q", "10-Q/A"})
+_ANNUAL_FORMS = frozenset({"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"})
+_ALLOWED_FORMS = _QUARTERLY_FORMS | _ANNUAL_FORMS
 _FLOW_METRICS = {"REVENUE", "GROSS_PROFIT", "OPERATING_INCOME"}
-_UNITS = {
-    "REVENUE": {"USD", "iso4217:USD"},
-    "GROSS_PROFIT": {"USD", "iso4217:USD"},
-    "OPERATING_INCOME": {"USD", "iso4217:USD"},
-    "GAAP_DILUTED_EPS": {"USD/shares", "usd/shares"},
-}
+
+
+def _is_annual_form(form: str) -> bool:
+    return form in _ANNUAL_FORMS
+
+
+def _is_quarterly_form(form: str) -> bool:
+    return form in _QUARTERLY_FORMS
+
+
+def normalize_sec_cik(cik: str | int) -> str:
+    """Normalize an integer or digit-string SEC CIK to 10 zero-padded digits."""
+    if type(cik) is int:
+        if not 1 <= cik <= 9_999_999_999:
+            raise ValueError("CIK must be between 1 and 9999999999")
+        return f"{cik:010d}"
+    if type(cik) is str:
+        raw = cik.strip()
+        if raw.isascii() and raw.isdecimal() and 1 <= len(raw) <= 10 and int(raw) >= 1:
+            return raw.zfill(10)
+    raise ValueError("CIK must be a positive integer or 1..10 digit string")
 
 
 class SecCanonicalMetric(str, Enum):
@@ -98,6 +127,7 @@ class SecCanonicalFactEvidence:
     companyfacts_observation_id: str
     filing_url: str | None = None
     source_evidence: tuple[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence, ...] = ()
+    namespace: str = "us-gaap"
 
 
 @dataclass(frozen=True)
@@ -191,6 +221,9 @@ class SecCanonicalQuarterlyResult:
     unresolved_period_accessions: tuple[str, ...] = ()
     concept_mapping_version: str = SEC_CANONICAL_CONCEPTS_VERSION
     filing_xbrl_observation_ids: tuple[str, ...] = ()
+    taxonomy: str | None = None
+    reporting_currency: str | None = None
+    dei_shares_outstanding: tuple[SecCompanyFactsFact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -198,14 +231,15 @@ class SecCompanyFactsFact:
     tag: str
     unit: str
     value: Decimal
-    start: date
+    start: date | None
     end: date
-    fy: int
-    fp: str
+    fy: int | None
+    fp: str | None
     form: str
     filed: date
     accn: str
     frame: str | None
+    namespace: str = "us-gaap"
 
 
 def _strict_companyfacts_json(body: bytes) -> dict[str, Any]:
@@ -290,7 +324,7 @@ def _accepted(value: object) -> datetime:
 def parse_sec_companyfacts_payload(
     payload: bytes | dict[str, Any], cik: str
 ) -> tuple[SecCompanyFactsFact, ...]:
-    """Parse a bounded companyfacts payload into exact, typed us-gaap source facts."""
+    """Parse a bounded companyfacts payload into typed us-gaap, ifrs-full, and dei facts."""
     if type(cik) is not str or not _CIK.fullmatch(cik):
         raise ValueError("CIK must be ten digits")
     if type(payload) is bytes:
@@ -312,97 +346,140 @@ def parse_sec_companyfacts_payload(
     if payload_cik != cik:
         raise SchemaMismatchError("SEC companyfacts CIK mismatch")
     facts = payload.get("facts")
-    if type(facts) is not dict or type(facts.get("us-gaap")) is not dict:
-        raise SchemaMismatchError("SEC companyfacts us-gaap facts missing")
-    gaap = facts["us-gaap"]
-    if len(gaap) > _MAX_TAGS:
+    if type(facts) is not dict:
+        raise SchemaMismatchError("SEC companyfacts facts object missing")
+    for ns in _SUPPORTED_NAMESPACES:
+        if ns in facts and type(facts[ns]) is not dict:
+            raise SchemaMismatchError(f"SEC companyfacts {ns} taxonomy schema mismatch")
+    has_us_gaap = isinstance(facts.get("us-gaap"), dict)
+    has_ifrs = isinstance(facts.get("ifrs-full"), dict)
+    if not has_us_gaap and not has_ifrs:
+        raise SchemaMismatchError("SEC companyfacts us-gaap or ifrs-full facts missing")
+    total_tags = sum(
+        len(facts[ns]) for ns in _SUPPORTED_NAMESPACES if isinstance(facts.get(ns), dict)
+    )
+    if total_tags > _MAX_TAGS:
         raise ResourceLimitError("SEC companyfacts taxonomy tag limit exceeded")
-    aliases = {tag for items in SEC_CANONICAL_CONCEPTS.values() for tag in items}
     result: list[SecCompanyFactsFact] = []
     row_count = 0
-    for tag in aliases:
-        concept = gaap.get(tag)
-        if concept is None:
+    for namespace in _SUPPORTED_NAMESPACES:
+        taxonomy_map = facts.get(namespace)
+        if not isinstance(taxonomy_map, dict):
             continue
-        if type(concept) is not dict or type(concept.get("units")) is not dict:
-            raise SchemaMismatchError("SEC companyfacts concept schema mismatch")
-        units = concept["units"]
-        if len(units) > 64:
-            raise ResourceLimitError("SEC companyfacts unit count exceeded")
-        unit_rows = sum(len(rows) for rows in units.values() if type(rows) is list)
-        row_count += unit_rows
-        if row_count > _MAX_FACT_ROWS:
-            raise ResourceLimitError("SEC companyfacts fact row limit exceeded")
-        for unit, rows in units.items():
-            if type(unit) is not str or not unit or type(rows) is not list:
-                raise SchemaMismatchError("SEC companyfacts unit schema mismatch")
-            if len(rows) > _MAX_UNIT_ROWS:
-                raise ResourceLimitError("SEC companyfacts unit row limit exceeded")
-            for row in rows:
-                if type(row) is not dict:
-                    raise SchemaMismatchError("SEC companyfacts fact row is invalid")
-                val = row.get("val")
-                if type(val) is int:
-                    decimal = Decimal(val)
-                elif type(val) is Decimal and val.is_finite():
-                    decimal = val
-                else:
-                    raise SchemaMismatchError("SEC companyfacts fact value is invalid")
-                try:
-                    validate_decimal(decimal)
-                except ValueError as exc:
-                    raise ResourceLimitError(
-                        "SEC companyfacts decimal value exceeds limits"
-                    ) from exc
-                fy, fp, form, filed, accn = (
-                    row.get("fy"),
-                    row.get("fp"),
-                    row.get("form"),
-                    row.get("filed"),
-                    row.get("accn"),
-                )
-                if type(form) is not str:
-                    raise SchemaMismatchError("SEC companyfacts form is invalid")
-                if form not in _ALLOWED_FORMS:
-                    # Other SEC forms do not establish this 10-K/Q contract.
-                    continue
-                if (
-                    type(fy) is not int
-                    or not 1 <= fy <= 9999
-                    or type(fp) is not str
-                    or fp not in {"Q1", "Q2", "Q3", "Q4", "FY"}
-                    or type(accn) is not str
-                    or not _ACCESSION.fullmatch(accn)
-                ):
-                    raise SchemaMismatchError(
-                        "SEC companyfacts fiscal or accession metadata is invalid"
+        instant_tags = _INSTANT_TAGS_BY_NS[namespace]
+        for tag in _PARSED_TAGS_BY_NS[namespace]:
+            concept = taxonomy_map.get(tag)
+            if concept is None:
+                continue
+            if type(concept) is not dict or type(concept.get("units")) is not dict:
+                raise SchemaMismatchError("SEC companyfacts concept schema mismatch")
+            units = concept["units"]
+            if len(units) > 64:
+                raise ResourceLimitError("SEC companyfacts unit count exceeded")
+            unit_rows = sum(len(rows) for rows in units.values() if type(rows) is list)
+            row_count += unit_rows
+            if row_count > _MAX_FACT_ROWS:
+                raise ResourceLimitError("SEC companyfacts fact row limit exceeded")
+            for unit, rows in units.items():
+                if type(unit) is not str or not unit or type(rows) is not list:
+                    raise SchemaMismatchError("SEC companyfacts unit schema mismatch")
+                if len(rows) > _MAX_UNIT_ROWS:
+                    raise ResourceLimitError("SEC companyfacts unit row limit exceeded")
+                for row in rows:
+                    if type(row) is not dict:
+                        raise SchemaMismatchError("SEC companyfacts fact row is invalid")
+                    val = row.get("val")
+                    if type(val) is int:
+                        decimal = Decimal(val)
+                    elif type(val) is Decimal and val.is_finite():
+                        decimal = val
+                    else:
+                        raise SchemaMismatchError("SEC companyfacts fact value is invalid")
+                    try:
+                        validate_decimal(decimal)
+                    except ValueError as exc:
+                        raise ResourceLimitError(
+                            "SEC companyfacts decimal value exceeds limits"
+                        ) from exc
+                    fy, fp, form, filed, accn = (
+                        row.get("fy"),
+                        row.get("fp"),
+                        row.get("form"),
+                        row.get("filed"),
+                        row.get("accn"),
                     )
-                filed_date = _date(filed, "filed")
-                if "end" not in row:
-                    raise SchemaMismatchError("SEC companyfacts duration metadata is missing")
-                if "start" not in row:
-                    # Companyfacts can carry instant-context rows under a flow
-                    # tag. They cannot establish a quarterly duration value.
-                    _date(row.get("end"), "end")
-                    continue
-                start, end = _date(row.get("start"), "start"), _date(row.get("end"), "end")
-                if start > end:
-                    raise SchemaMismatchError("SEC companyfacts duration is reversed")
-                frame = row.get("frame")
-                if frame is not None and (type(frame) is not str or not _FRAME.fullmatch(frame)):
-                    raise SchemaMismatchError("SEC companyfacts frame is invalid")
-                result.append(
-                    SecCompanyFactsFact(
-                        tag, unit, decimal, start, end, fy, fp, form, filed_date, accn, frame
+                    if type(form) is not str:
+                        raise SchemaMismatchError("SEC companyfacts form is invalid")
+                    if form not in _ALLOWED_FORMS:
+                        continue
+                    if type(accn) is not str or not _ACCESSION.fullmatch(accn):
+                        raise SchemaMismatchError(
+                            "SEC companyfacts fiscal or accession metadata is invalid"
+                        )
+                    if namespace == "dei":
+                        if fy is not None and (type(fy) is not int or not 1 <= fy <= 9999):
+                            raise SchemaMismatchError(
+                                "SEC companyfacts fiscal or accession metadata is invalid"
+                            )
+                        if fp is not None and (
+                            type(fp) is not str or fp not in {"Q1", "Q2", "Q3", "Q4", "FY"}
+                        ):
+                            raise SchemaMismatchError(
+                                "SEC companyfacts fiscal or accession metadata is invalid"
+                            )
+                    elif (
+                        type(fy) is not int
+                        or not 1 <= fy <= 9999
+                        or type(fp) is not str
+                        or fp not in {"Q1", "Q2", "Q3", "Q4", "FY"}
+                    ):
+                        raise SchemaMismatchError(
+                            "SEC companyfacts fiscal or accession metadata is invalid"
+                        )
+                    filed_date = _date(filed, "filed")
+                    if "end" not in row:
+                        raise SchemaMismatchError("SEC companyfacts duration metadata is missing")
+                    end = _date(row.get("end"), "end")
+                    if "start" not in row:
+                        if tag not in instant_tags:
+                            continue
+                        start: date | None = None
+                    else:
+                        start = _date(row.get("start"), "start")
+                        if start > end:
+                            raise SchemaMismatchError("SEC companyfacts duration is reversed")
+                    frame = row.get("frame")
+                    if frame is not None and (
+                        type(frame) is not str or not _FRAME.fullmatch(frame)
+                    ):
+                        raise SchemaMismatchError("SEC companyfacts frame is invalid")
+                    result.append(
+                        SecCompanyFactsFact(
+                            tag,
+                            unit,
+                            decimal,
+                            start,
+                            end,
+                            fy,
+                            fp,
+                            form,
+                            filed_date,
+                            accn,
+                            frame,
+                            namespace,
+                        )
                     )
-                )
     return tuple(result)
 
 
 __all__ = [
     "SEC_CANONICAL_CONCEPTS",
     "SEC_CANONICAL_CONCEPTS_VERSION",
+    "SEC_CANONICAL_IFRS_CONCEPTS",
+    "SEC_CANONICAL_IFRS_REVENUE_PRIORITY",
     "SEC_COMPANYFACTS_URL",
+    "SEC_FUNDAMENTAL_CONCEPTS",
+    "SEC_MULTI_TAXONOMY_CONCEPTS_VERSION",
     "Sec8KReleaseEvidence",
     "SecCanonicalEvidence",
     "SecCanonicalFactEvidence",
@@ -413,5 +490,10 @@ __all__ = [
     "SecCanonicalQuarterlyResult",
     "SecCompanyFactsFact",
     "SecCompanyFactsFiling",
+    "SecFilingXbrlFactEvidence",
+    "SecFundamentalMetric",
+    "_currency_from_unit",
+    "_is_valid_canonical_unit",
+    "normalize_sec_cik",
     "parse_sec_companyfacts_payload",
 ]

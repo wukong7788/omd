@@ -11,14 +11,47 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
+from .adr_metadata import SecAdrShareMetadata
 from .unit_evidence import SecFinancialUnitEvidence
 
 STATEMENT_TYPES = ("balance_sheet", "income_statement", "cash_flow")
 StatementType = Literal["balance_sheet", "income_statement", "cash_flow"]
 FINANCIALS_DATASET_SCHEMA = "sec-company-financials-v3"
 FINANCIALS_DATASET_SCHEMA_V4 = "sec-company-financials-v4"
+FINANCIALS_DATASET_SCHEMA_V5 = "sec-company-financials-v5"
+SUPPORTED_FINANCIAL_FORMS = frozenset(
+    {
+        "10-K",
+        "10-Q",
+        "10-K/A",
+        "10-Q/A",
+        "20-F",
+        "20-F/A",
+        "40-F",
+        "40-F/A",
+        "6-K",
+    }
+)
+FPI_FINANCIAL_FORMS = frozenset({"20-F", "20-F/A", "40-F", "40-F/A", "6-K"})
 
 _CURRENCY_UNIT_RE = re.compile(r"(?:iso4217:)?([A-Z]{3})\Z")
+_CIK_DIGITS_RE = re.compile(r"[0-9]{1,10}\Z")
+
+
+def normalize_sec_cik(cik: str | int) -> str:
+    """Validate and canonicalize an SEC CIK to a 10-digit zero-padded ASCII string."""
+    if type(cik) is int:
+        if not 1 <= cik <= 9_999_999_999:
+            raise ValueError(f"invalid CIK: {cik!r}")
+        return f"{cik:010d}"
+    if not isinstance(cik, str) or not cik.strip():
+        raise ValueError(f"invalid CIK: {cik!r}")
+    cleaned = cik.strip()
+    if not cleaned.isascii() or not _CIK_DIGITS_RE.fullmatch(cleaned):
+        raise ValueError(f"invalid CIK: {cik!r}")
+    if int(cleaned) <= 0:
+        raise ValueError(f"invalid CIK: {cik!r}")
+    return cleaned.zfill(10)
 
 
 def _normalized_currency(unit: str | None) -> str | None:
@@ -130,11 +163,14 @@ class SecCompanyFinancialVintage:
     quality_flags: tuple[str, ...] = ()
     rows: tuple[SecStatementRow, ...] = ()
     unit_evidence: SecFinancialUnitEvidence | None = field(default=None, kw_only=True)
+    adr_metadata: SecAdrShareMetadata | None = field(default=None, kw_only=True)
     _cached_vintage_identity: str | None = field(
         default=None, repr=False, compare=False, init=False
     )
 
     def __post_init__(self) -> None:
+        if self.adr_metadata is not None and not isinstance(self.adr_metadata, SecAdrShareMetadata):
+            raise ValueError("adr_metadata must be a SecAdrShareMetadata instance or None")
         if self.unit_evidence is not None:
             if not isinstance(self.cik, str) or not self.cik.isascii() or not self.cik.isdecimal():
                 raise ValueError("vintage cik must be decimal when binding unit evidence")
@@ -190,6 +226,10 @@ class SecCompanyFinancialVintage:
             payload["schema_version"] = FINANCIALS_DATASET_SCHEMA_V4
             payload["unit_evidence"] = self.unit_evidence.canonical_payload
             payload["unit_evidence_identity"] = self.unit_evidence.evidence_identity
+        if self.adr_metadata is not None:
+            payload["schema_version"] = FINANCIALS_DATASET_SCHEMA_V5
+            payload["adr_metadata"] = self.adr_metadata.canonical_payload
+            payload["adr_metadata_identity"] = self.adr_metadata.metadata_identity
         h = hashlib.sha256(
             json.dumps(_canonical_val(payload), sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -217,7 +257,7 @@ class SecCompanyFinancialVintage:
 class SecFinancialsRequest:
     """Request specification for company financial statements."""
 
-    symbols: tuple[str, ...]
+    symbols: tuple[str, ...] = ()
     forms: tuple[str, ...] = ("10-K", "10-Q")
     start_year: int | None = None
     end_year: int | None = None
@@ -225,6 +265,7 @@ class SecFinancialsRequest:
     lag_days: int = 0
     include_amendments: bool = True
     limit: int | None = None
+    ciks: tuple[str, ...] = field(default=(), kw_only=True)
     include_dimensions: bool = field(default=True, kw_only=True)
     parser_version: str = field(
         default="sec-live-financial-parser-v2-edgartools-6.4.0", kw_only=True
@@ -236,11 +277,13 @@ class SecFinancialsRequest:
             "sec-live-financial-parser-v2-edgartools-6.4.0",
         }:
             raise ValueError(f"unsupported parser_version: {self.parser_version}")
-        if not self.symbols:
-            raise ValueError("symbols cannot be empty")
+        if not self.symbols and not self.ciks:
+            raise ValueError("symbols cannot be empty when ciks is not provided")
         for sym in self.symbols:
-            if not sym or not sym.strip():
+            if not isinstance(sym, str) or not sym or not sym.strip():
                 raise ValueError(f"invalid symbol: {sym}")
+        normalized_ciks = tuple(normalize_sec_cik(cik) for cik in self.ciks)
+        object.__setattr__(self, "ciks", normalized_ciks)
         if self.availability_policy not in ("accepted-at-plus-lag", "observation-only"):
             raise ValueError(f"unsupported availability_policy: {self.availability_policy}")
         if self.availability_policy == "observation-only" and self.lag_days != 0:
@@ -249,7 +292,7 @@ class SecFinancialsRequest:
             raise ValueError(f"lag_days must be between 0 and 30, got {self.lag_days}")
         if self.limit is not None and self.limit <= 0:
             raise ValueError("limit must be positive")
-        if not self.forms or any(f not in {"10-K", "10-Q", "10-K/A", "10-Q/A"} for f in self.forms):
+        if not self.forms or any(f not in SUPPORTED_FINANCIAL_FORMS for f in self.forms):
             raise ValueError("forms must contain supported SEC financial forms")
         if self.start_year and self.end_year and self.start_year > self.end_year:
             raise ValueError("start_year must not exceed end_year")

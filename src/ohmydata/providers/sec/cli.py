@@ -151,36 +151,9 @@ def add_nport_commands(subparsers: Any) -> None:
     p_qual.add_argument("--json", action="store_true")
     p_qual.add_argument("--quiet", action="store_true")
 
-    fin = sec.add_parser("financials").add_subparsers(dest="financials_command", required=True)
-    for command in ("sync", "validate"):
-        p_fin = fin.add_parser(command)
-        p_fin.add_argument("--config")
-        p_fin.add_argument("--symbols")
-        p_fin.add_argument("--forms")
-        p_fin.add_argument("--root")
-        p_fin.add_argument("--user-agent-file")
-        p_fin.add_argument("--user-agent")
-        p_fin.add_argument("--start-year", type=int)
-        p_fin.add_argument("--end-year", type=int)
-        p_fin.add_argument("--availability-policy")
-        p_fin.add_argument("--lag-days", type=int)
-        p_fin.add_argument(
-            "--parser-version",
-            choices=(
-                "sec-live-financial-parser-v1-edgartools-6.4.0",
-                "sec-live-financial-parser-v2-edgartools-6.4.0",
-            ),
-        )
-        p_fin.add_argument("--limit", type=int)
-        p_fin.add_argument("--latest", action="store_true")
-        p_fin.add_argument("--json", action="store_true")
-        p_fin.add_argument("--quiet", action="store_true")
-    p_insp = fin.add_parser("inspect")
-    p_insp.add_argument("--config")
-    p_insp.add_argument("--root")
-    p_insp.add_argument("--symbol")
-    p_insp.add_argument("--rows", action="store_true")
-    p_insp.add_argument("--json", action="store_true")
+    from ._cli_financials import add_financials_commands
+
+    add_financials_commands(sec)
 
 
 def run(args: Any) -> int:
@@ -475,157 +448,12 @@ def run_qualify(args: Any) -> int:
 
 
 def run_financials(args: Any) -> int:
-    import importlib
+    from ._cli_financials import run_financials as _run_financials
 
-    if getattr(args, "config", None):
-        cfg = load_cli_config(args.config)
-        for key, val in cfg.items():
-            if key in ("json", "quiet", "rows"):
-                if not getattr(args, key, False) and bool(val):
-                    setattr(args, key, bool(val))
-            elif getattr(args, key, None) is None:
-                setattr(args, key, val)
-
-    if not getattr(args, "root", None):
-        raise ValueError("--root is required")
-    ensure_safe_output_root(args.root)
-
-    cmd = args.financials_command
-    quiet = getattr(args, "quiet", False)
-    payload: dict[str, Any] = {
-        "command": f"sec financials {cmd}",
-        "root": str(args.root),
-    }
-
-    if cmd == "inspect":
-        sym = getattr(args, "symbol", None)
-        if not sym:
-            raise ValueError("--symbol is required for inspect")
-        sym_str = str(sym).upper()
-        p_dir = Path(args.root) / f"symbol={sym_str}"
-        if not p_dir.is_dir():
-            raise ValueError(f"partition not found for symbol: {sym_str}")
-        m_file = p_dir / "manifest.json"
-        if not m_file.is_file():
-            raise ValueError(f"manifest.json missing for symbol: {sym_str}")
-        from .financials_dataset import validate_financials_partition
-
-        m_data = validate_financials_partition(p_dir)
-        payload.update(m_data)
-
-        if getattr(args, "rows", False):
-            pq: Any = importlib.import_module("pyarrow.parquet")
-            s_file = p_dir / "financial_statements.parquet"
-            if s_file.is_file():
-                tbl: Any = pq.read_table(s_file, partitioning=None)
-                payload["rows"] = tbl.to_pylist()[:100]
-
-    elif cmd == "validate":
-        from .financials_dataset import validate_financials_partition
-
-        root_path = Path(args.root)
-        partitions = list(root_path.glob("symbol=*"))
-        verified_count = 0
-        for p in partitions:
-            validate_financials_partition(p)
-            verified_count += 1
-        payload["status"] = "completed"
-        payload["partitions_verified"] = verified_count
-        _log_progress(f"verified {verified_count} company financials partition(s)", quiet)
-
-    elif cmd == "sync":
-        symbols_raw: Any = getattr(args, "symbols", None)
-        if not symbols_raw:
-            universe_val: Any = getattr(args, "universe", None)
-            if isinstance(universe_val, dict) and "symbols" in universe_val:
-                symbols_raw = universe_val["symbols"]
-            elif isinstance(universe_val, list):
-                symbols_raw = universe_val
-        if not symbols_raw:
-            raise ValueError("--symbols is required for sync")
-        symbols: list[str] = []
-        if isinstance(symbols_raw, str):
-            symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
-        elif isinstance(symbols_raw, (list, tuple)):
-            for item in cast(list[object], symbols_raw):
-                s_str = str(item).strip().upper()
-                if s_str:
-                    symbols.append(s_str)
-        if not symbols:
-            raise ValueError("--symbols cannot be empty")
-
-        forms_val = getattr(args, "forms", None)
-        if forms_val:
-            if isinstance(forms_val, str):
-                forms = tuple(f.strip().upper() for f in forms_val.split(",") if f.strip())
-            else:
-                forms = tuple(str(f).strip().upper() for f in forms_val if str(f).strip())
-        else:
-            forms = ("10-K", "10-Q")
-
-        from .edgartools_adapter import SecFinancialsClient
-        from .financials import SecFinancialsRequest
-        from .financials_dataset import write_financials_partition
-
-        user_agent: str = ""
-        if getattr(args, "user_agent", None):
-            user_agent = str(args.user_agent).strip()
-        elif getattr(args, "user_agent_file", None):
-            ua_path = Path(args.user_agent_file)
-            if not ua_path.is_file():
-                raise ValueError(f"User-Agent file not found: {args.user_agent_file}")
-            user_agent = ua_path.read_text(encoding="utf-8").strip()
-
-        client = (
-            SecFinancialsClient.from_config(args.config)
-            if getattr(args, "config", None) and not user_agent
-            else SecFinancialsClient(user_agent, http_client=SecHttpClient(user_agent))
-        )
-        if client.http_client is None:
-            client.http_client = SecHttpClient(client.user_agent)
-
-        limit_val = getattr(args, "limit", None)
-        if getattr(args, "latest", False):
-            limit_val = 1
-
-        req = SecFinancialsRequest(
-            symbols=tuple(symbols),
-            forms=forms,
-            start_year=getattr(args, "start_year", None),
-            end_year=getattr(args, "end_year", None),
-            availability_policy=getattr(args, "availability_policy", "accepted-at-plus-lag")
-            or "accepted-at-plus-lag",
-            lag_days=getattr(args, "lag_days", 0)
-            if getattr(args, "lag_days", None) is not None
-            else 0,
-            limit=limit_val,
-            parser_version=getattr(args, "parser_version", None)
-            or "sec-live-financial-parser-v2-edgartools-6.4.0",
-        )
-
-        _log_progress(f"fetching company financials for {len(symbols)} symbol(s)...", quiet)
-        vintages = client.fetch_company_financials(req)
-
-        written_manifests: dict[str, Any] = {}
-        for sym in symbols:
-            sym_vintages = [v for v in vintages if v.symbol == sym]
-            manifest = write_financials_partition(args.root, sym, sym_vintages)
-            written_manifests[sym] = manifest
-
-        payload["status"] = "completed"
-        payload["symbols_processed"] = len(symbols)
-        payload["vintages_written"] = len(vintages)
-        payload["manifests"] = written_manifests
-        _log_progress(
-            f"sync completed: {len(symbols)} symbol(s), {len(vintages)} vintage(s)", quiet
-        )
-
-    print(
-        json.dumps(
-            payload,
-            default=str,
-            sort_keys=True,
-            separators=(",", ":") if getattr(args, "json", False) else (", ", ": "),
-        )
+    return _run_financials(
+        args,
+        load_config=load_cli_config,
+        http_client_cls=SecHttpClient,
+        log_progress=_log_progress,
+        validate_policy=_validate_policy,
     )
-    return 0

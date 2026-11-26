@@ -9,8 +9,8 @@ from ._companyfacts_models import (
     _ALLOWED_FORMS,
     _FLOW_METRICS,
     _QUARTER_FRAME,
-    _UNITS,
     SEC_CANONICAL_CONCEPTS,
+    SEC_CANONICAL_IFRS_CONCEPTS,
     SecCanonicalFactEvidence,
     SecCanonicalFieldStatus,
     SecCanonicalMetric,
@@ -19,8 +19,21 @@ from ._companyfacts_models import (
     SecCompanyFactsFact,
     SecCompanyFactsFiling,
     SecFilingXbrlFactEvidence,
+    _is_annual_form,
+    _is_quarterly_form,
+    _is_valid_canonical_unit,
 )
-from ._companyfacts_periods import _resolve_filing_periods
+from ._companyfacts_periods import (
+    _MAX_REQUESTED_PERIODS,
+    Fact,
+    _duration_days,
+    _fact_namespace,
+    _fiscal_period,
+    _ordered_periods,
+    _periods_from_companyfacts,
+    _resolve_filing_periods,
+    _validate_window_args,
+)
 from ._companyfacts_selection import finalize_canonical_candidates
 from ._filing_xbrl import SecFilingXbrlFact
 from ._metric_arithmetic import exact_sum
@@ -32,74 +45,8 @@ _MAX_PAIR_ROWS = 4_096
 _MAX_PAIR_ATTEMPTS = 10_000
 
 
-Fact = SecCompanyFactsFact | SecFilingXbrlFact
-
-
-def _duration_days(fact: Fact) -> int:
-    return (fact.end - fact.start).days + 1
-
-
 def _valid_quarter_frame(fact: Fact) -> bool:
     return fact.frame is None or _QUARTER_FRAME.fullmatch(fact.frame) is not None
-
-
-def _fiscal_period(
-    fact: Fact,
-    filing: SecCompanyFactsFiling,
-    resolved_periods: Mapping[str, tuple[int, int]] | None = None,
-) -> tuple[int, int] | None:
-    if fact.accn != filing.accession_number or fact.form != filing.form:
-        return None
-    # SEC filingDate is a provider field and can be one calendar day after the
-    # UTC acceptance date for late US filings. Do not infer it from UTC time.
-    filed_by = filing.filing_date or filing.accepted_at.date()
-    if fact.filed > filed_by or fact.end != filing.report_date:
-        return None
-    if resolved_periods is not None and filing.accession_number in resolved_periods:
-        resolved_fy, resolved_fq = resolved_periods[filing.accession_number]
-        if fact.form.startswith("10-Q"):
-            if fact.fp == f"Q{resolved_fq}":
-                return resolved_fy, resolved_fq
-        elif fact.form.startswith("10-K") and fact.fp == "FY" and resolved_fq == 4:
-            return resolved_fy, 4
-        return None
-    if fact.form.startswith("10-Q") and fact.fp in {"Q1", "Q2", "Q3"}:
-        return fact.fy, int(fact.fp[-1])
-    if fact.form.startswith("10-K") and fact.fp == "FY":
-        return fact.fy, 4
-    return None
-
-
-def _ordered_periods(
-    facts: tuple[Fact, ...],
-    filings: Mapping[str, SecCompanyFactsFiling],
-    acceptance_upper: datetime | None,
-) -> tuple[tuple[int, int], ...]:
-    resolved = _resolve_filing_periods(facts, filings, acceptance_upper)
-    periods: set[tuple[int, int]] = set()
-    for fact in facts:
-        filing = filings.get(fact.accn)
-        if filing is None or (
-            acceptance_upper is not None and filing.accepted_at > acceptance_upper
-        ):
-            continue
-        period = _fiscal_period(fact, filing, resolved)
-        if period is not None:
-            periods.add(period)
-    if not periods:
-        return ()
-    anchor = max(periods)
-    current: list[tuple[int, int]] = []
-    year, quarter = anchor
-    for _ in range(4):
-        current.append((year, quarter))
-        if quarter == 1:
-            year, quarter = year - 1, 4
-        else:
-            quarter -= 1
-    current.reverse()
-    all_periods = [(year - 1, quarter) for year, quarter in current] + current
-    return tuple(sorted(all_periods)[-8:])
 
 
 def _unmodeled_newer_filings(
@@ -133,52 +80,6 @@ def _unmodeled_newer_filings(
     )
 
 
-def _periods_from_companyfacts(
-    facts: tuple[Fact, ...], acceptance_upper: datetime | None, count: int
-) -> tuple[tuple[int, int], ...]:
-    resolved = _resolve_filing_periods(facts, acceptance_upper=acceptance_upper)
-    available: set[tuple[int, int]] = set()
-    for fact in facts:
-        # Candidate selection must admit the SEC filingDate after a late UTC
-        # acceptance. The exact accepted-at cutoff is enforced after joining
-        # submissions; this one-day allowance cannot publish a later filing.
-        if acceptance_upper is not None and fact.filed > acceptance_upper.date() + timedelta(
-            days=1
-        ):
-            continue
-        accn_period = resolved.get(fact.accn)
-        if accn_period is not None:
-            available.add(accn_period)
-        elif fact.form.startswith("10-Q") and fact.fp in {"Q1", "Q2", "Q3"}:
-            if _duration_days(fact) <= 310:
-                available.add((fact.fy, int(fact.fp[-1])))
-        elif (
-            fact.form.startswith("10-K") and fact.fp == "FY" and 300 <= _duration_days(fact) <= 430
-        ):
-            available.add((fact.fy, 4))
-    if not available:
-        return ()
-    anchor = max(available)
-
-    def window(end: tuple[int, int]) -> set[tuple[int, int]]:
-        current: list[tuple[int, int]] = []
-        year, quarter = end
-        for _ in range(4):
-            current.append((year, quarter))
-            year, quarter = (year - 1, 4) if quarter == 1 else (year, quarter - 1)
-        current.reverse()
-        return {(fy - 1, fq) for fy, fq in current} | set(current)
-
-    periods = window(anchor)
-    if acceptance_upper is not None:
-        # A same-day filing may have been accepted after the requested bound and
-        # move the exact anchor back by one quarter. Fetch that alternate window too.
-        prior = (anchor[0] - 1, 4) if anchor[1] == 1 else (anchor[0], anchor[1] - 1)
-        periods.update(window(prior))
-    ordered = tuple(sorted(periods))
-    return ordered if acceptance_upper is not None else ordered[-count:]
-
-
 def _target_fact_accessions(
     facts: tuple[Fact, ...],
     periods: tuple[tuple[int, int], ...],
@@ -189,6 +90,11 @@ def _target_fact_accessions(
     resolved = _resolve_filing_periods(facts, filings)
     for year, quarter in periods:
         for fact in facts:
+            if _fact_namespace(fact) == "dei" or fact.fy is None or fact.fp is None:
+                continue
+            duration = _duration_days(fact)
+            if duration is None:
+                continue
             accn_period = resolved.get(fact.accn)
             fact_year = accn_period[0] if accn_period is not None else fact.fy
             fact_quarter = (
@@ -196,33 +102,32 @@ def _target_fact_accessions(
                 if accn_period is not None
                 else (
                     4
-                    if fact.form.startswith("10-K") and fact.fp == "FY"
+                    if _is_annual_form(fact.form) and fact.fp == "FY"
                     else int(fact.fp[-1])
-                    if fact.form.startswith("10-Q") and fact.fp in {"Q1", "Q2", "Q3"}
+                    if _is_quarterly_form(fact.form) and fact.fp in {"Q1", "Q2", "Q3"}
                     else None
                 )
             )
             eligible = False
             if quarter < 4:
                 eligible = (
-                    fact.form.startswith("10-Q")
+                    _is_quarterly_form(fact.form)
                     and fact.fp == f"Q{quarter}"
                     and (fact_year, fact_quarter) == (year, quarter)
-                    and 60 <= _duration_days(fact) <= 120
+                    and 60 <= duration <= 120
                 )
             elif (
-                fact.form.startswith("10-K")
+                _is_annual_form(fact.form)
                 and fact.fp == "FY"
                 and (fact_year, fact_quarter) == (year, 4)
             ):
-                duration = _duration_days(fact)
                 eligible = 60 <= duration <= 120 or 300 <= duration <= 430
             elif (
-                fact.form.startswith("10-Q")
+                _is_quarterly_form(fact.form)
                 and fact.fp == "Q3"
                 and (fact_year, fact_quarter) == (year, 3)
             ):
-                eligible = 240 <= _duration_days(fact) <= 310
+                eligible = 240 <= duration <= 310
             if eligible:
                 old = needed.get(fact.accn)
                 if old is not None and old != fact.filed:
@@ -237,6 +142,8 @@ def _evidence(
     filing: SecCompanyFactsFiling,
     observation_id: str,
 ) -> SecCanonicalFactEvidence:
+    if fact.start is None or fact.fy is None or fact.fp is None:
+        raise SchemaMismatchError("canonical quarterly evidence requires duration and fiscal focus")
     return SecCanonicalFactEvidence(
         fact.tag,
         fact.unit,
@@ -251,7 +158,17 @@ def _evidence(
         filing.accepted_at,
         observation_id,
         filing.filing_url,
+        namespace=fact.namespace,
     )
+
+
+def _matches_canonical_metric(metric: SecCanonicalMetric, fact: Fact) -> bool:
+    ns = _fact_namespace(fact)
+    if ns == "us-gaap":
+        return fact.tag in SEC_CANONICAL_CONCEPTS[metric.value]
+    if ns == "ifrs-full":
+        return fact.tag in SEC_CANONICAL_IFRS_CONCEPTS[metric.value]
+    return False
 
 
 def project_sec_companyfacts_quarters(
@@ -260,14 +177,15 @@ def project_sec_companyfacts_quarters(
     observation_id: str,
     *,
     acceptance_upper: datetime | None = None,
-    count: int = 8,
+    count: int | None = 8,
+    start_year: int | None = None,
+    end_year: int | None = None,
     requested_periods: tuple[tuple[int, int], ...] | None = None,
     incomplete_periods: frozenset[tuple[int, int]] = frozenset(),
     filing_xbrl_observations: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[SecCanonicalQuarterSlot, ...]:
     """Pure projection helper; only facts joined to exact SEC submission records count."""
-    if type(count) is not int or not 1 <= count <= 8:
-        raise ValueError("count must be in 1..8")
+    _validate_window_args(count, start_year, end_year)
     if acceptance_upper is not None and (
         not isinstance(acceptance_upper, datetime)
         or acceptance_upper.tzinfo is None
@@ -302,17 +220,33 @@ def project_sec_companyfacts_quarters(
         return _evidence(fact, filing, observation_id)
 
     resolved = _resolve_filing_periods(facts, filings, bound)
-    periods = requested_periods or _ordered_periods(facts, filings, bound)
-    if len(periods) > 8 or any(
-        type(year) is not int
-        or not 1 <= year <= 9999
-        or type(quarter) is not int
-        or quarter not in range(1, 5)
-        for year, quarter in periods
-    ):
-        raise ValueError("requested_periods must contain up to eight fiscal quarter keys")
-    if count < len(periods):
-        periods = periods[-count:]
+    if requested_periods is not None:
+        periods = requested_periods
+        if len(periods) > _MAX_REQUESTED_PERIODS or any(
+            type(year) is not int
+            or not 1 <= year <= 9999
+            or type(quarter) is not int
+            or quarter not in range(1, 5)
+            for year, quarter in periods
+        ):
+            raise ValueError("requested_periods must contain valid fiscal quarter keys")
+        if start_year is not None or end_year is not None:
+            periods = tuple(
+                (y, q)
+                for y, q in periods
+                if (start_year is None or y >= start_year) and (end_year is None or y <= end_year)
+            )
+        if count is not None and count < len(periods):
+            periods = periods[-count:]
+    else:
+        periods = _ordered_periods(
+            facts,
+            filings,
+            bound,
+            count=count,
+            start_year=start_year,
+            end_year=end_year,
+        )
 
     def candidates(
         metric: SecCanonicalMetric, year: int, quarter: int
@@ -321,7 +255,6 @@ def project_sec_companyfacts_quarters(
         bool,
         tuple[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence, ...],
     ]:
-        tags = SEC_CANONICAL_CONCEPTS[metric.value]
         valid: list[SecCanonicalFactEvidence | SecFilingXbrlFactEvidence] = []
 
         def add_candidate(evidence: SecCanonicalFactEvidence | SecFilingXbrlFactEvidence) -> None:
@@ -334,14 +267,18 @@ def project_sec_companyfacts_quarters(
                 filing = filings.get(fact.accn)
                 if filing is None or (bound is not None and filing.accepted_at > bound):
                     continue
-                if fact.tag not in tags or fact.form not in {"10-Q", "10-Q/A"}:
+                if not _matches_canonical_metric(metric, fact) or not _is_quarterly_form(fact.form):
                     continue
                 if _fiscal_period(fact, filing, resolved) != (year, quarter):
                     continue
                 if fact.fp != f"Q{quarter}" or not _valid_quarter_frame(fact):
                     continue
                 duration = _duration_days(fact)
-                if not 60 <= duration <= 120 or fact.unit not in _UNITS[metric.value]:
+                if (
+                    duration is None
+                    or not 60 <= duration <= 120
+                    or not _is_valid_canonical_unit(metric.value, fact.unit)
+                ):
                     continue
                 add_candidate(evidence_for(fact, filing))
         elif metric.value in _FLOW_METRICS:
@@ -351,19 +288,24 @@ def project_sec_companyfacts_quarters(
                 filing = filings.get(fact.accn)
                 if filing is None or (bound is not None and filing.accepted_at > bound):
                     continue
-                if fact.tag not in tags or fact.unit not in _UNITS[metric.value]:
+                if not _matches_canonical_metric(metric, fact) or not _is_valid_canonical_unit(
+                    metric.value, fact.unit
+                ):
+                    continue
+                duration = _duration_days(fact)
+                if duration is None:
                     continue
                 period = _fiscal_period(fact, filing, resolved)
-                if fact.form in {"10-K", "10-K/A"} and fact.fp == "FY" and period == (year, 4):
-                    if 300 <= _duration_days(fact) <= 430:
+                if _is_annual_form(fact.form) and fact.fp == "FY" and period == (year, 4):
+                    if 300 <= duration <= 430:
                         if len(fy_rows) >= _MAX_PAIR_ROWS:
                             raise ResourceLimitError("SEC annual candidate limit exceeded")
                         fy_rows.append(fact)
                 elif (
-                    fact.form in {"10-Q", "10-Q/A"}
+                    _is_quarterly_form(fact.form)
                     and fact.fp == "Q3"
                     and period == (year, 3)
-                    and 240 <= _duration_days(fact) <= 310
+                    and 240 <= duration <= 310
                 ):
                     if len(ytd_rows) >= _MAX_PAIR_ROWS:
                         raise ResourceLimitError("SEC Q3 YTD candidate limit exceeded")
@@ -374,12 +316,18 @@ def project_sec_companyfacts_quarters(
             for ytd in ytd_rows:
                 if ytd.form.endswith("/A"):
                     add_candidate(evidence_for(ytd, filings[ytd.accn]))
-            ytd_by_key: dict[tuple[str, str, date], list[Fact]] = {}
+            ytd_by_key: dict[tuple[str, str, str, date], list[Fact]] = {}
             for ytd in ytd_rows:
-                ytd_by_key.setdefault((ytd.tag, ytd.unit, ytd.start), []).append(ytd)
+                if ytd.start is not None:
+                    ytd_by_key.setdefault(
+                        (_fact_namespace(ytd), ytd.tag, ytd.unit, ytd.start), []
+                    ).append(ytd)
             pair_attempts = 0
             for annual in fy_rows:
-                for ytd in ytd_by_key.get((annual.tag, annual.unit, annual.start), ()):
+                if annual.start is None:
+                    continue
+                annual_ns = _fact_namespace(annual)
+                for ytd in ytd_by_key.get((annual_ns, annual.tag, annual.unit, annual.start), ()):
                     pair_attempts += 1
                     if pair_attempts > _MAX_PAIR_ATTEMPTS:
                         raise ResourceLimitError("SEC Q4 candidate pair limit exceeded")
@@ -413,23 +361,26 @@ def project_sec_companyfacts_quarters(
                                 evidence_for(annual, filing_fy),
                                 evidence_for(ytd, filing_ytd),
                             ),
+                            namespace=annual_ns,
                         )
                     )
         else:
-            # No Q4 EPS subtraction. Only an explicitly Q4-focused 10-K fact is
+            # No Q4 EPS subtraction. Only an explicitly Q4-focused annual fact is
             # eligible; ordinary FY facts do not establish a discrete quarter.
             for fact in facts:
                 filing = filings.get(fact.accn)
                 if filing is None or (bound is not None and filing.accepted_at > bound):
                     continue
+                duration = _duration_days(fact)
                 period = _fiscal_period(fact, filing, resolved)
                 if (
-                    fact.tag in tags
-                    and fact.form in {"10-K", "10-K/A"}
+                    _matches_canonical_metric(metric, fact)
+                    and _is_annual_form(fact.form)
                     and fact.fp == "FY"
                     and period == (year, 4)
-                    and fact.unit in _UNITS[metric.value]
-                    and 60 <= _duration_days(fact) <= 120
+                    and _is_valid_canonical_unit(metric.value, fact.unit)
+                    and duration is not None
+                    and 60 <= duration <= 120
                     and _valid_quarter_frame(fact)
                 ):
                     add_candidate(evidence_for(fact, filing))
@@ -472,8 +423,10 @@ def project_sec_companyfacts_quarters(
 
 
 __all__ = [
+    "_ordered_periods",
     "_periods_from_companyfacts",
     "_target_fact_accessions",
     "_unmodeled_newer_filings",
+    "_validate_window_args",
     "project_sec_companyfacts_quarters",
 ]
