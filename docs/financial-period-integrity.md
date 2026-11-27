@@ -1,7 +1,7 @@
 # Financial period integrity and migration
 
 OMD pins `edgartools==6.4.0` in the optional `sec-financials` extra and keeps
-`yfinance==1.7.0` in `yfinance`. The core SDK still has no runtime dependencies.
+`yfinance==1.8.0` in `yfinance`. The core SDK still has no runtime dependencies.
 
 ## Yahoo financial periods
 

@@ -33,7 +33,7 @@ from ohmydata.providers.yfinance.fundamentals import (
 
 class TestVersionAssertion:
     def test_version_match(self):
-        fake_module = SimpleNamespace(__version__="1.7.0")
+        fake_module = SimpleNamespace(__version__="1.8.0")
         assert_yfinance_version(fake_module)
 
     def test_version_mismatch(self):
@@ -70,7 +70,7 @@ class TestClientDailyBars:
             return fake_batch_df
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
 
@@ -136,7 +136,7 @@ class TestClientDailyBars:
             return pd.DataFrame()
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
 
@@ -179,7 +179,7 @@ class TestClientDailyBars:
             return aapl_df
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
 
@@ -222,7 +222,7 @@ class TestClientDailyBars:
         )
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=lambda symbols, **kwargs: batch_df,
         )
 
@@ -300,7 +300,7 @@ class TestClientDailyBars:
             return pd.DataFrame()
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
         req = YFinanceDailyBarsRequest(
@@ -359,7 +359,7 @@ class TestClientDailyBars:
             return pd.DataFrame()
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
         req = YFinanceDailyBarsRequest(
@@ -406,7 +406,7 @@ class TestClientDailyBars:
             return flat_df
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=strict_download,
         )
         req = YFinanceDailyBarsRequest(
@@ -466,7 +466,7 @@ class TestClientDailyBars:
             return pd.DataFrame()
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             download_fn=mock_download,
         )
         req = YFinanceDailyBarsRequest(
@@ -540,7 +540,7 @@ class TestClientFundamentals:
                 return pd.DataFrame({"avg": [2.0, 2.2, 8.5, 9.5]}, index=["0q", "+1q", "0y", "+1y"])
 
         client = YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"),
+            yf_module=SimpleNamespace(__version__="1.8.0"),
             ticker_factory=lambda sym: FakeTicker(),
         )
 
@@ -562,7 +562,7 @@ class TestClientFundamentals:
     @staticmethod
     def _client(factory, **kwargs):
         return YFinanceClient(
-            yf_module=SimpleNamespace(__version__="1.7.0"), ticker_factory=factory, **kwargs
+            yf_module=SimpleNamespace(__version__="1.8.0"), ticker_factory=factory, **kwargs
         )
 
     def test_all_empty_is_unavailable_with_read_evidence(self):

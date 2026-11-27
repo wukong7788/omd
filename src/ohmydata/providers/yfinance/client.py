@@ -47,11 +47,11 @@ from .fundamentals import (
 )
 from .quality import evaluate_symbol_outcomes, validate_daily_bars_dataframe
 
-EXPECTED_YFINANCE_VERSION = "1.7.0"
+EXPECTED_YFINANCE_VERSION = "1.8.0"
 
 
 def assert_yfinance_version(module: Any = None) -> None:
-    """Assert that yfinance is installed and matches the reviewed 1.7.0 baseline."""
+    """Assert that yfinance is installed and matches the reviewed 1.8.0 baseline."""
     if module is None:
         try:
             module = importlib.import_module("yfinance")

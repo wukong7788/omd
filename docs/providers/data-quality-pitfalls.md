@@ -17,6 +17,8 @@ keepna=True`) across three audit tiers:
 3. **Dynamic Top 1000 Universe (2,294 symbols)**: 1,712 active symbols (including
    250 ADRs and 76 suffix-reuse probes) and 582 delisted symbols.
 
+> **Upgrade Note (`yfinance==1.8.0`)**: Re-verified against pinned `yfinance==1.8.0` (`curl_cffi==0.17.0`) via `omd audit-drift --universe r10a0` across 13 ETFs (`2016-01-01` to `2026-11-27`, `2,741` rows/symbol): `0` raw OHLCV diffs (`--raw-only`) and `<= 1.83e-4` `adj_close` rounding diff. Spot checks confirm upstream `NFE` negative `adj_close` (`988` rows) and `WIT` missing 2019 split persist in `1.8.0` (`repair=False`), and `earnings_estimate` / `eps_trend` / `eps_revisions` now include a `methodology` column.
+
 ---
 
 ## Provider × Asset Class Matrix
@@ -126,7 +128,7 @@ or backtests US EOD market data must complete this checklist:
 
 1. **Pin an immutable OMD release**: Depend on a fixed published `ohmydata`
    version (never a moving branch). If `ohmydata[yfinance]` is enabled, preserve
-   pinned `yfinance==1.7.0` and canonical defaults (`auto_adjust=False,
+   pinned `yfinance==1.8.0` and canonical defaults (`auto_adjust=False,
    repair=False, actions=True, keepna=True`); validate upgrades with
    `omd audit-drift`.
 2. **Declare `EodAdjustmentBasis` explicitly**: Bind every ingested bar table to

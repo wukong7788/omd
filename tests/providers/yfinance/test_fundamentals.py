@@ -39,7 +39,7 @@ class TestFundamentalsExtractionHelpers:
                 "financialCurrency": "USD",
             },
         )
-        result = YFinanceFundamentalsResult({"AAPL": record}, ("AAPL",), "1.7.0")
+        result = YFinanceFundamentalsResult({"AAPL": record}, ("AAPL",), "1.8.0")
         expected = {
             "regular_market_time": 1_788_278_400,
             "regular_market_price": 123.45,

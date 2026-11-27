@@ -1632,7 +1632,7 @@ before rebuilding existing financial datasets.
 ### yfinance (US & Global Market Data, Fundamentals, and Zero-Drift Audit)
 
 Install `ohmydata[yfinance]` to access normalized market data, valuation ratios,
-and financial statements with strict version pinning (`yfinance==1.7.0`):
+and financial statements with strict version pinning (`yfinance==1.8.0`):
 
 ```python
 from ohmydata.providers.yfinance import (

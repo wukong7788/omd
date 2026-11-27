@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 — 2026-11-27
+
+### Changed
+
+- Upgrade pinned `yfinance` dependency from `1.7.0` to `1.8.0` (resolving
+  `curl-cffi>=0.17.0`) and update `EXPECTED_YFINANCE_VERSION` to `"1.8.0"`.
+  Verified via `omd audit-drift --universe r10a0` (`0` raw OHLCV drift and
+  `<= 1.83e-4` `adj_close` rounding diff across 13 ETFs over 2016–2026) and
+  live `YFinanceClient.fetch_fundamentals` regression checks (`earnings_estimate`,
+  `eps_trend`, and `eps_revisions` remain parser-compatible with `1.8.0`'s new
+  `methodology` column).
+
 ## 0.6.0 — 2026-11-27
 
 ### Added
