@@ -175,6 +175,13 @@ class SecFxRateTable:
     def observation_count(self) -> int:
         return self._observation_count
 
+    def iter_observations(self) -> tuple[SecFxRateObservation, ...]:
+        """Return all observations ordered deterministically by ``(currency, rate_date)``."""
+        ordered: list[SecFxRateObservation] = []
+        for ccy in self._obs_by_currency:
+            ordered.extend(self._obs_by_currency[ccy])
+        return tuple(ordered)
+
     def __len__(self) -> int:
         return self._observation_count
 

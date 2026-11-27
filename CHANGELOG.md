@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.2 — 2026-11-27
+
+### Added
+
+- Add a free, zero-key, PIT-safe daily FX rate table fetcher and atomic
+  Parquet/CSV writer backed by Frankfurter (official ECB daily reference rates)
+  in `fx_rates.py` (`fetch_frankfurter_fx_rates`,
+  `parse_frankfurter_timeseries_payload`, `validate_frankfurter_url`,
+  `write_fx_rate_table`, plus `SecFxRateTable.iter_observations`), inverting
+  `base=USD` quotes to `usd_per_unit` with 34-digit `Decimal` precision and
+  exposing CLI subcommand `omd sec financials fetch-fx-rates` for
+  `translate-usd --fx-rates` on pure-foreign ADR filings.
+
 ## 0.5.1 — 2026-11-26
 
 ### Added

@@ -577,11 +577,17 @@ uv run omd sec financials bulk-project \
   --workers 8 \
   --json
 
+# Fetch free daily ECB/Frankfurter FX reference rates (usd_per_unit) for pure-foreign ADRs:
+uv run omd sec financials fetch-fx-rates \
+  --start-date 2013-01-01 \
+  --output artifacts/pit-fx-rates.parquet \
+  --json
+
 # Explicit opt-in PIT-safe FX->USD translation of a bulk fundamentals dataset:
 uv run omd sec financials translate-usd \
   --bulk-dataset artifacts/sec-bulk-pit \
   --output artifacts/sec-bulk-pit-usd \
-  --fx-rates /path/to/pit-fx-rates.parquet \
+  --fx-rates artifacts/pit-fx-rates.parquet \
   --date-policy PERIOD_END_SPOT \
   --flow-method PERIOD_AVERAGE \
   --max-staleness-days 10 \
@@ -606,7 +612,11 @@ status (`NATIVE_USD`, `TRANSLATED_FILING_IMPLIED`, `TRANSLATED_EXTERNAL_FX`,
 `MISSING_FX_RATE`, `AMBIGUOUS_FX_RATE`, `MISSING_CURRENCY`), separate flow vs.
 balance-sheet rates, strict PIT bounds (`rate_date <= accepted_at.date()` and
 `available_at <= accepted_at`), and untranslated share counts. External FX rate
-tables use the `usd_per_unit` convention (`1 unit of <currency> = usd_per_unit USD`).
+tables use the `usd_per_unit` convention (`1 unit of <currency> = usd_per_unit USD`),
+and `fetch_frankfurter_fx_rates` / `write_fx_rate_table` /
+`omd sec financials fetch-fx-rates` provide a built-in, zero-key daily ECB
+reference rate fetcher that writes `.parquet` or `.csv` tables directly
+consumable by `load_fx_rate_table`.
 
 Python SDK example with injected credentials:
 

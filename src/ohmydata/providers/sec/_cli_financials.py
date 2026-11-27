@@ -5,8 +5,9 @@ from __future__ import annotations
 import importlib
 import json
 import math
+import re
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,12 @@ from .financials_sync import (
     make_edgartools_filing_fetcher,
     sync_sec_financials_incremental,
 )
+from .fx_rates import (
+    DEFAULT_FX_MAX_ATTEMPTS,
+    FRANKFURTER_FX_SOURCE,
+    fetch_frankfurter_fx_rates,
+    write_fx_rate_table,
+)
 from .fx_translation import (
     DEFAULT_FX_MAX_STALENESS_DAYS,
     SecFxDatePolicy,
@@ -41,6 +48,8 @@ from .fx_translation import (
     build_usd_translated_fundamentals_dataset,
     load_fx_rate_table,
 )
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 __all__ = ["add_financials_commands", "run_financials"]
 
@@ -269,6 +278,16 @@ def _run_sync_incremental(
     return 0 if not receipt.failed_ciks else 1
 
 
+def _resolve_output_path(args: Any, command: str) -> str:
+    out_arg, root_arg = getattr(args, "output", None), getattr(args, "root", None)
+    if out_arg and root_arg and Path(out_arg).resolve() != Path(root_arg).resolve():
+        raise ValueError("--output and --root must match when both are provided")
+    output_path = out_arg or root_arg
+    if not output_path:
+        raise ValueError(f"--output or --root is required for {command}")
+    return str(output_path)
+
+
 def _run_bulk_project(
     args: Any, payload: dict[str, Any], log_progress: Callable[[str, bool], None]
 ) -> None:
@@ -278,12 +297,7 @@ def _run_bulk_project(
         raise ValueError("--companyfacts-zip is required for bulk-project")
     if not sub_zip:
         raise ValueError("--submissions-zip is required for bulk-project")
-    out_arg, root_arg = getattr(args, "output", None), getattr(args, "root", None)
-    if out_arg and root_arg and Path(out_arg).resolve() != Path(root_arg).resolve():
-        raise ValueError("--output and --root must match when both are provided")
-    output_dir = out_arg or root_arg
-    if not output_dir:
-        raise ValueError("--output or --root is required for bulk-project")
+    output_dir = _resolve_output_path(args, "bulk-project")
     ensure_safe_output_root(output_dir)
 
     raw_ciks, universe_ciks = getattr(args, "ciks", None), getattr(args, "universe_ciks", None)
@@ -293,10 +307,7 @@ def _run_bulk_project(
     acc_upper = parse_utc_iso(str(acc_raw), "--acceptance-upper") if acc_raw is not None else None
     max_entry = getattr(args, "max_entry_bytes", None)
     max_total = getattr(args, "max_total_bytes", None)
-    workers_raw = getattr(args, "workers", None)
-    if workers_raw is not None and type(workers_raw) is not int:
-        raise ValueError("--workers must be an integer")
-    workers = 1 if workers_raw is None else workers_raw
+    workers = _parse_optional_int(args, "workers", "--workers", 1)
 
     quiet = getattr(args, "quiet", False)
     log_progress("projecting SEC bulk ZIP archives offline...", quiet)
@@ -343,12 +354,7 @@ def _run_translate_usd(
     bulk_dataset = getattr(args, "bulk_dataset", None)
     if not bulk_dataset:
         raise ValueError("--bulk-dataset is required for translate-usd")
-    out_arg, root_arg = getattr(args, "output", None), getattr(args, "root", None)
-    if out_arg and root_arg and Path(out_arg).resolve() != Path(root_arg).resolve():
-        raise ValueError("--output and --root must match when both are provided")
-    output_dir = out_arg or root_arg
-    if not output_dir:
-        raise ValueError("--output or --root is required for translate-usd")
+    output_dir = _resolve_output_path(args, "translate-usd")
     ensure_safe_output_root(output_dir)
 
     fx_rates_path = getattr(args, "fx_rates", None)
@@ -365,11 +371,8 @@ def _run_translate_usd(
         SecFxFlowMethod.PERIOD_AVERAGE,
         "--flow-method",
     )
-    max_staleness_raw = getattr(args, "max_staleness_days", None)
-    if type(max_staleness_raw) is bool:
-        raise ValueError("--max-staleness-days must be an integer")
-    max_staleness_days = (
-        DEFAULT_FX_MAX_STALENESS_DAYS if max_staleness_raw is None else int(max_staleness_raw)
+    max_staleness_days = _parse_optional_int(
+        args, "max_staleness_days", "--max-staleness-days", DEFAULT_FX_MAX_STALENESS_DAYS
     )
     use_filing_implied = not bool(getattr(args, "no_filing_implied", False))
     allow_spot_fallback = not bool(getattr(args, "no_spot_fallback", False))
@@ -394,6 +397,59 @@ def _run_translate_usd(
     )
 
 
+def _parse_optional_int(args: Any, attr: str, flag_name: str, default: int) -> int:
+    raw = getattr(args, attr, None)
+    if type(raw) is bool or (raw is not None and type(raw) is not int):
+        raise ValueError(f"{flag_name} must be an integer")
+    return default if raw is None else raw
+
+
+def _parse_iso_date_arg(raw: Any, flag_name: str) -> date:
+    if not isinstance(raw, str) or _ISO_DATE_RE.fullmatch(raw.strip()) is None:
+        raise ValueError(f"{flag_name} must be an ISO YYYY-MM-DD date")
+    return date.fromisoformat(raw.strip())
+
+
+def _run_fetch_fx_rates(
+    args: Any, payload: dict[str, Any], log_progress: Callable[[str, bool], None]
+) -> None:
+    out_file = Path(_resolve_output_path(args, "fetch-fx-rates"))
+    if out_file.suffix.lower() not in {".parquet", ".csv"}:
+        raise ValueError(f"unsupported FX rate table format: {out_file.suffix!r}")
+    ensure_safe_output_root(out_file)
+
+    raw_start, raw_end = getattr(args, "start_date", None), getattr(args, "end_date", None)
+    if not raw_start:
+        raise ValueError("--start-date is required for fetch-fx-rates")
+    start_date = _parse_iso_date_arg(raw_start, "--start-date")
+    end_date = _parse_iso_date_arg(raw_end, "--end-date") if raw_end is not None else None
+    if end_date is not None and end_date < start_date:
+        raise ValueError("--end-date must be >= --start-date")
+
+    raw_source = getattr(args, "source", None)
+    src = "frankfurter" if raw_source is None else str(raw_source).strip().lower()
+    if src not in {"frankfurter", FRANKFURTER_FX_SOURCE}:
+        raise ValueError(f"unsupported FX source: {raw_source!r} (expected 'frankfurter')")
+
+    max_attempts = _parse_optional_int(
+        args, "max_attempts", "--max-attempts", DEFAULT_FX_MAX_ATTEMPTS
+    )
+    raw_ccy = getattr(args, "currencies", None)
+    currencies = tuple(parse_str_list(raw_ccy)) if raw_ccy is not None else None
+    if raw_ccy is not None and not currencies:
+        raise ValueError("--currencies cannot be empty when specified")
+    quiet = getattr(args, "quiet", False)
+    log_progress(f"fetching Frankfurter FX rates from {start_date.isoformat()}...", quiet)
+    fx_table = fetch_frankfurter_fx_rates(
+        start_date=start_date, end_date=end_date, currencies=currencies, max_attempts=max_attempts
+    )
+    meta = write_fx_rate_table(out_file, fx_table)
+    if load_fx_rate_table(out_file).observation_count != meta["observation_count"]:
+        raise RuntimeError("reloaded FX rate table observation count mismatch")
+    payload.update({**meta, "status": "completed", "source": FRANKFURTER_FX_SOURCE})
+    log_progress(f"fetch-fx-rates completed: observations={meta['observation_count']}", quiet)
+
+
 def run_financials(
     args: Any,
     *,
@@ -411,6 +467,8 @@ def run_financials(
         _run_bulk_project(args, payload, log_progress)
     elif cmd == "translate-usd":
         _run_translate_usd(args, payload, log_progress)
+    elif cmd == "fetch-fx-rates":
+        _run_fetch_fx_rates(args, payload, log_progress)
     else:
         if not getattr(args, "root", None):
             raise ValueError("--root is required")

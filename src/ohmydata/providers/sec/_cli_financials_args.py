@@ -119,6 +119,17 @@ def add_financials_commands(sec_subparsers: Any) -> None:
         int_flags=("--max-staleness-days",),
         bool_flags=("--no-filing-implied", "--no-spot-fallback"),
     )
+    _add_flags(
+        fin.add_parser("fetch-fx-rates"),
+        (
+            "--output",
+            "--start-date",
+            "--end-date",
+            "--currencies",
+            "--source",
+        ),
+        int_flags=("--max-attempts",),
+    )
 
 
 def apply_config(args: Any, load_config: Callable[[str | Path], dict[str, Any]]) -> None:

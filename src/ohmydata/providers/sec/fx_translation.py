@@ -37,6 +37,17 @@ from ._fx_translation_models import (
     SecUsdTranslatedFundamentalRow,
     SecUsdTranslationResult,
 )
+from .fx_rates import (
+    DEFAULT_FX_MAX_ATTEMPTS,
+    DEFAULT_FX_MAX_RESPONSE_BYTES,
+    DEFAULT_FX_TIMEOUT_SECONDS,
+    FRANKFURTER_API_BASE_URL,
+    FRANKFURTER_FX_SOURCE,
+    fetch_frankfurter_fx_rates,
+    parse_frankfurter_timeseries_payload,
+    validate_frankfurter_url,
+    write_fx_rate_table,
+)
 
 
 def _validate_translation_params(
@@ -254,8 +265,13 @@ def build_usd_translated_fundamentals_dataset(
 __all__ = [
     "BULK_FUNDAMENTALS_USD_DATASET_SCHEMA",
     "BULK_FUNDAMENTALS_USD_WRITER_PROFILE",
+    "DEFAULT_FX_MAX_ATTEMPTS",
     "DEFAULT_FX_MAX_IMPLIED_SPREAD",
+    "DEFAULT_FX_MAX_RESPONSE_BYTES",
     "DEFAULT_FX_MAX_STALENESS_DAYS",
+    "DEFAULT_FX_TIMEOUT_SECONDS",
+    "FRANKFURTER_API_BASE_URL",
+    "FRANKFURTER_FX_SOURCE",
     "FX_FILING_IMPLIED_SOURCE",
     "SecFilingImpliedFxPair",
     "SecFilingImpliedFxRate",
@@ -269,9 +285,13 @@ __all__ = [
     "SecUsdTranslationResult",
     "build_usd_translated_fundamentals_dataset",
     "extract_filing_implied_fx_rates",
+    "fetch_frankfurter_fx_rates",
     "load_fx_rate_table",
+    "parse_frankfurter_timeseries_payload",
     "translate_bulk_dataset_to_usd",
     "translate_bulk_fundamentals_to_usd",
+    "validate_frankfurter_url",
     "validate_usd_translated_fundamentals_dataset",
+    "write_fx_rate_table",
     "write_usd_translated_fundamentals_dataset",
 ]
