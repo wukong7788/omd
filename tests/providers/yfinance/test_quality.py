@@ -101,6 +101,19 @@ class TestDailyBarsValidation:
         with pytest.raises(SchemaMismatchError, match="Duplicate"):
             validate_daily_bars_dataframe(df)
 
+    @pytest.mark.parametrize("bad_adj", [-23.59, 0.0, np.inf])
+    @pytest.mark.parametrize(
+        "mode",
+        [YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE, YFinanceAdjustmentMode.AUTO_ADJUSTED],
+    )
+    def test_non_positive_or_infinite_adj_close_fails(self, bad_adj, mode):
+        df = _make_valid_df()
+        df.loc[0, "adj_close"] = bad_adj
+        with pytest.raises(
+            SchemaMismatchError, match="adj_close contains non-positive or infinite"
+        ):
+            validate_daily_bars_dataframe(df, adjustment_mode=mode)
+
 
 class TestBatchCompleteness:
     def test_evaluate_symbol_outcomes(self):
@@ -118,6 +131,18 @@ class TestBatchCompleteness:
             df, ("AAPL",), YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
         )
         assert outcomes["AAPL"] == YFinanceSymbolOutcome.INVALID_VALUES
+
+    @pytest.mark.parametrize("bad_adj", [-23.59, 0.0, np.inf])
+    @pytest.mark.parametrize(
+        "mode",
+        [YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE, YFinanceAdjustmentMode.AUTO_ADJUSTED],
+    )
+    def test_evaluate_symbol_outcomes_with_non_positive_or_infinite_adj_close(self, bad_adj, mode):
+        df = _make_valid_df(symbols=("AAPL", "NFE"))
+        df.loc[df["symbol"] == "NFE", "adj_close"] = bad_adj
+        outcomes = evaluate_symbol_outcomes(df, ("AAPL", "NFE"), mode)
+        assert outcomes["AAPL"] == YFinanceSymbolOutcome.COMPLETE
+        assert outcomes["NFE"] == YFinanceSymbolOutcome.INVALID_VALUES
 
 
 class TestCoverageValidation:

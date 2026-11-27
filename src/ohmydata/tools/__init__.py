@@ -1,5 +1,23 @@
 """OMD developer and audit tools."""
 
+from .eod_qc import (
+    CorrectionReceipt,
+    CorrectionRecord,
+    EodAdjustmentBasis,
+    EodQcReport,
+    QualityCategory,
+    QualityFinding,
+    QualitySeverity,
+    apply_corrections,
+    detect_non_positive_prices,
+    detect_ohlc_violations,
+    detect_oscillating_currency_jumps,
+    detect_reverse_split_dividend_mismatch,
+    detect_suspect_missing_splits,
+    detect_trailing_staleness,
+    detect_zero_volume,
+    run_eod_qc,
+)
 from .universes import (
     R10A0_UNIVERSE,
     ClusterGroup,
@@ -11,7 +29,23 @@ from .universes import (
 __all__ = [
     "R10A0_UNIVERSE",
     "ClusterGroup",
+    "CorrectionReceipt",
+    "CorrectionRecord",
+    "EodAdjustmentBasis",
+    "EodQcReport",
+    "QualityCategory",
+    "QualityFinding",
+    "QualitySeverity",
     "RegimePool",
     "StrategyUniverse",
+    "apply_corrections",
+    "detect_non_positive_prices",
+    "detect_ohlc_violations",
+    "detect_oscillating_currency_jumps",
+    "detect_reverse_split_dividend_mismatch",
+    "detect_suspect_missing_splits",
+    "detect_trailing_staleness",
+    "detect_zero_volume",
     "get_universe",
+    "run_eod_qc",
 ]

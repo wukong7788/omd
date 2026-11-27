@@ -21,6 +21,7 @@ from ohmydata.providers.yfinance.endpoints import (
 )
 from ohmydata.providers.yfinance.errors import (
     CoverageError,
+    SchemaMismatchError,
     YFinanceVersionMismatchError,
 )
 from ohmydata.providers.yfinance.fundamentals import (
@@ -192,6 +193,314 @@ class TestClientDailyBars:
 
         with pytest.raises(CoverageError, match="Strict batch policy failed"):
             client.fetch_daily_bars(req)
+
+    def test_negative_adj_close_isolated_under_allow_partial_and_failed_under_strict(self):
+        dates = pd.date_range("2026-01-02", periods=2)
+        cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "AAPL"),
+                ("High", "AAPL"),
+                ("Low", "AAPL"),
+                ("Close", "AAPL"),
+                ("Adj Close", "AAPL"),
+                ("Volume", "AAPL"),
+                ("Open", "NFE"),
+                ("High", "NFE"),
+                ("Low", "NFE"),
+                ("Close", "NFE"),
+                ("Adj Close", "NFE"),
+                ("Volume", "NFE"),
+            ]
+        )
+        batch_df = pd.DataFrame(
+            [
+                [100.0, 105.0, 95.0, 102.0, 101.0, 1000, 10.0, 11.0, 9.5, 10.5, -23.59, 500],
+                [102.0, 107.0, 101.0, 106.0, 105.0, 1200, 10.5, 11.5, 10.0, 11.0, -22.50, 600],
+            ],
+            index=dates,
+            columns=cols,
+        )
+
+        client = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"),
+            download_fn=lambda symbols, **kwargs: batch_df,
+        )
+
+        partial_req = YFinanceDailyBarsRequest(
+            symbols=("AAPL", "NFE"),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            batch_policy=YFinanceBatchPolicy.ALLOW_PARTIAL,
+            repair_policy=YFinanceRepairPolicy.NONE,
+        )
+        partial_res = client.fetch_daily_bars(partial_req)
+        assert partial_res.returned_symbols == ("AAPL",)
+        assert set(partial_res.data["symbol"]) == {"AAPL"}
+        assert partial_res.symbol_outcomes["AAPL"] == YFinanceSymbolOutcome.COMPLETE
+        assert partial_res.symbol_outcomes["NFE"] == YFinanceSymbolOutcome.INVALID_VALUES
+        assert partial_res.actions is None
+
+        strict_req = YFinanceDailyBarsRequest(
+            symbols=("AAPL", "NFE"),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            batch_policy=YFinanceBatchPolicy.STRICT,
+            repair_policy=YFinanceRepairPolicy.NONE,
+        )
+        with pytest.raises(SchemaMismatchError, match="adj_close contains non-positive"):
+            client.fetch_daily_bars(strict_req)
+
+    def test_negative_adj_close_repaired_under_per_symbol(self):
+        dates = pd.date_range("2026-01-02", periods=2)
+        batch_cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "AAPL"),
+                ("High", "AAPL"),
+                ("Low", "AAPL"),
+                ("Close", "AAPL"),
+                ("Adj Close", "AAPL"),
+                ("Volume", "AAPL"),
+                ("Open", "NFE"),
+                ("High", "NFE"),
+                ("Low", "NFE"),
+                ("Close", "NFE"),
+                ("Adj Close", "NFE"),
+                ("Volume", "NFE"),
+            ]
+        )
+        batch_df = pd.DataFrame(
+            [
+                [100.0, 105.0, 95.0, 102.0, 101.0, 1000, 10.0, 11.0, 9.5, 10.5, -23.59, 500],
+                [102.0, 107.0, 101.0, 106.0, 105.0, 1200, 10.5, 11.5, 10.0, 11.0, -22.50, 600],
+            ],
+            index=dates,
+            columns=batch_cols,
+        )
+        nfe_cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "NFE"),
+                ("High", "NFE"),
+                ("Low", "NFE"),
+                ("Close", "NFE"),
+                ("Adj Close", "NFE"),
+                ("Volume", "NFE"),
+            ]
+        )
+        nfe_clean_df = pd.DataFrame(
+            [[10.0, 11.0, 9.5, 10.5, 10.5, 500], [10.5, 11.5, 10.0, 11.0, 11.0, 600]],
+            index=dates,
+            columns=nfe_cols,
+        )
+
+        def mock_download(symbols, **kwargs):
+            if isinstance(symbols, list):
+                return batch_df
+            if symbols == "NFE":
+                return nfe_clean_df
+            return pd.DataFrame()
+
+        client = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"),
+            download_fn=mock_download,
+        )
+        req = YFinanceDailyBarsRequest(
+            symbols=("AAPL", "NFE"),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            batch_policy=YFinanceBatchPolicy.STRICT,
+            repair_policy=YFinanceRepairPolicy.PER_SYMBOL,
+        )
+        res = client.fetch_daily_bars(req)
+        assert res.returned_symbols == ("AAPL", "NFE")
+        assert res.symbol_outcomes["NFE"] == YFinanceSymbolOutcome.RECOVERED
+        assert (res.data["adj_close"] > 0).all()
+        assert len(res.repair_receipts) == 1
+        assert res.repair_receipts[0].symbol == "NFE"
+        assert res.repair_receipts[0].original_outcome == "INVALID_VALUES"
+        assert res.repair_receipts[0].final_status == "SUCCESS"
+
+    def test_per_symbol_recovery_of_dropped_active_symbol_vti(self):
+        dates = pd.date_range("2026-01-02", periods=2)
+        spy_cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "SPY"),
+                ("High", "SPY"),
+                ("Low", "SPY"),
+                ("Close", "SPY"),
+                ("Adj Close", "SPY"),
+                ("Volume", "SPY"),
+            ]
+        )
+        spy_df = pd.DataFrame(
+            [
+                [500.0, 505.0, 498.0, 502.0, 500.0, 10000],
+                [502.0, 508.0, 501.0, 507.0, 505.0, 12000],
+            ],
+            index=dates,
+            columns=spy_cols,
+        )
+        vti_df = pd.DataFrame(
+            {
+                "Open": [250.0, 252.0],
+                "High": [253.0, 255.0],
+                "Low": [249.0, 251.0],
+                "Close": [251.0, 254.0],
+                "Adj Close": [250.0, 253.0],
+                "Volume": [5000, 6000],
+            },
+            index=dates,
+        )
+
+        def mock_download(symbols, **kwargs):
+            if isinstance(symbols, list):
+                return spy_df
+            if symbols == "VTI":
+                return vti_df
+            return pd.DataFrame()
+
+        client = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"),
+            download_fn=mock_download,
+        )
+        req = YFinanceDailyBarsRequest(
+            symbols=("SPY", "VTI"),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            batch_policy=YFinanceBatchPolicy.STRICT,
+            repair_policy=YFinanceRepairPolicy.PER_SYMBOL,
+        )
+        res = client.fetch_daily_bars(req)
+        assert res.returned_symbols == ("SPY", "VTI")
+        assert res.symbol_outcomes["SPY"] == YFinanceSymbolOutcome.COMPLETE
+        assert res.symbol_outcomes["VTI"] == YFinanceSymbolOutcome.RECOVERED
+        assert len(res.repair_receipts) == 1
+        assert res.repair_receipts[0].symbol == "VTI"
+        assert res.repair_receipts[0].original_outcome == "EMPTY"
+        assert res.repair_receipts[0].final_status == "SUCCESS"
+
+    def test_include_actions_false_preserves_strict_download_signature(self):
+        dates = pd.date_range("2026-01-02", periods=2)
+        flat_df = pd.DataFrame(
+            {
+                "Open": [100.0, 102.0],
+                "High": [105.0, 107.0],
+                "Low": [95.0, 101.0],
+                "Close": [102.0, 106.0],
+                "Adj Close": [101.0, 105.0],
+                "Volume": [1000, 1200],
+            },
+            index=dates,
+        )
+
+        def strict_download(
+            symbols,
+            *,
+            start,
+            end,
+            interval,
+            auto_adjust,
+            threads,
+            progress,
+            timeout,
+        ):
+            return flat_df
+
+        client = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"),
+            download_fn=strict_download,
+        )
+        req = YFinanceDailyBarsRequest(
+            symbols=("AAPL",),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+        )
+        res = client.fetch_daily_bars(req)
+        assert res.actions is None
+        assert len(res.data) == 2
+
+    def test_include_actions_true_extracts_dividends_and_splits(self):
+        dates = pd.date_range("2026-01-02", periods=3)
+        batch_cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "AAPL"),
+                ("High", "AAPL"),
+                ("Low", "AAPL"),
+                ("Close", "AAPL"),
+                ("Adj Close", "AAPL"),
+                ("Volume", "AAPL"),
+                ("Dividends", "AAPL"),
+                ("Stock Splits", "AAPL"),
+            ]
+        )
+        batch_df = pd.DataFrame(
+            [
+                [100.0, 105.0, 95.0, 102.0, 101.0, 1000, 0.0, 0.0],
+                [102.0, 107.0, 101.0, 106.0, 105.0, 1200, 0.25, 0.0],
+                [53.0, 55.0, 52.0, 54.0, 54.0, 2400, 0.0, 2.0],
+            ],
+            index=dates,
+            columns=batch_cols,
+        )
+        vti_df = pd.DataFrame(
+            {
+                "Open": [250.0, 252.0, 253.0],
+                "High": [253.0, 255.0, 256.0],
+                "Low": [249.0, 251.0, 252.0],
+                "Close": [251.0, 254.0, 255.0],
+                "Adj Close": [250.0, 253.0, 254.0],
+                "Volume": [5000, 6000, 6500],
+                "Dividends": [0.0, 0.85, 0.0],
+                "Stock Splits": [0.0, 0.0, 0.0],
+            },
+            index=dates,
+        )
+
+        seen_actions_flags = []
+
+        def mock_download(symbols, **kwargs):
+            seen_actions_flags.append(kwargs.get("actions"))
+            if isinstance(symbols, list):
+                return batch_df
+            if symbols == "VTI":
+                return vti_df
+            return pd.DataFrame()
+
+        client = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.7.0"),
+            download_fn=mock_download,
+        )
+        req = YFinanceDailyBarsRequest(
+            symbols=("AAPL", "VTI"),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            batch_policy=YFinanceBatchPolicy.STRICT,
+            repair_policy=YFinanceRepairPolicy.PER_SYMBOL,
+            include_actions=True,
+        )
+        res = client.fetch_daily_bars(req)
+        assert seen_actions_flags == [True, True]
+        assert res.actions is not None
+        assert list(res.actions.columns) == ["symbol", "date", "action", "value"]
+        assert len(res.actions) == 3
+        records = res.actions.to_dict(orient="records")
+        assert records[0] == {
+            "symbol": "AAPL",
+            "date": dates[1].date(),
+            "action": "dividend",
+            "value": 0.25,
+        }
+        assert records[1] == {
+            "symbol": "AAPL",
+            "date": dates[2].date(),
+            "action": "split",
+            "value": 2.0,
+        }
+        assert records[2] == {
+            "symbol": "VTI",
+            "date": dates[1].date(),
+            "action": "dividend",
+            "value": 0.85,
+        }
 
 
 class TestClientFundamentals:

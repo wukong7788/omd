@@ -1699,6 +1699,10 @@ any provider upgrade:
 uv run omd audit-drift --universe r10a0 --baseline-dir <old_version_dir> --target-dir <new_version_dir> --raw-only
 ```
 
+For verified empirical data-quality pitfalls across `yfinance` and Sharadar Direct
+(delisted coverage, ticker recycling, silent drops, negative `adj_close`, unrecorded
+splits, spin-offs, and venue differences), see [data-quality-pitfalls.md](docs/providers/data-quality-pitfalls.md).
+
 ## Dataframe Adapters (Polars & Pandas)
 
 The optional `ohmydata[polars]` extra provides explicit, eager representation

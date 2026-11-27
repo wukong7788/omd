@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.6.0 — 2026-11-27
+
+### Added
+
+- Add native `ohmydata.providers.sharadar` provider (`SharadarClient`,
+  `SharadarTable`, `SharadarAdjustmentMode`, `SharadarCapabilities`,
+  `SHARADAR_CAPABILITIES`, `SharadarBulkTableRequest`,
+  `SharadarBulkDownloadResult`, `SharadarTableStatusResult`,
+  `read_local_bars`, `read_local_actions`, `SharadarError`, `redact_secret`,
+  `classify_sharadar_http_error`) with caller-injected `api_key`, stdlib-only
+  streaming ZIP/CSV download, SHA-256 verification, strict secret redaction,
+  and explicit adjustment-mode local readers.
+- Add offline EOD quality-control and explicit correction overlay module
+  `ohmydata.tools.eod_qc` (`run_eod_qc`, `EodQcReport`, `QualityFinding`,
+  `QualityCategory`, `QualitySeverity`, `EodAdjustmentBasis`,
+  `CorrectionRecord`, `CorrectionReceipt`, `apply_corrections`,
+  `detect_non_positive_prices`, `detect_ohlc_violations`,
+  `detect_suspect_missing_splits` with separate `SPINOFF_BASIS_DIFFERENCE`
+  classification, `detect_oscillating_currency_jumps`,
+  `detect_reverse_split_dividend_mismatch`, `detect_trailing_staleness`,
+  `detect_zero_volume`).
+- Add `YFinanceCapabilities` / `YFINANCE_CAPABILITIES` and opt-in
+  `YFinanceDailyBarsRequest.include_actions` (`YFinanceDailyBarsResult.actions`)
+  for dividend/split extraction without altering existing default `download_fn`
+  calls or `STANDARD_COLUMNS`.
+- Add canonical provider pitfalls registry
+  [`docs/providers/data-quality-pitfalls.md`](docs/providers/data-quality-pitfalls.md)
+  linked from [`README.md`](README.md).
+
+### Fixed
+
+- Tighten `ohmydata.providers.yfinance.evaluate_symbol_outcomes` to flag
+  non-positive or non-finite `adj_close` values (such as negative historical
+  `adj_close`) as `INVALID_VALUES`, and isolate per-symbol invalid/empty
+  outcomes under `ALLOW_PARTIAL` and `PER_SYMBOL` recovery while preserving
+  strict whole-batch failure under `STRICT`.
+
 ## 0.5.3 — 2026-11-27
 
 ### Added

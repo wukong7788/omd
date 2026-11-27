@@ -91,6 +91,19 @@ def _format_date(date_val: str | date | datetime) -> str:
 
 
 @dataclass(frozen=True)
+class YFinanceCapabilities:
+    """Explicit capability metadata for the yfinance provider."""
+
+    supports_delisted: bool = False
+    recycled_ticker_risk: bool = True
+    consolidated_tape: bool = True
+    default_adjustment_mode: YFinanceAdjustmentMode = YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
+
+
+YFINANCE_CAPABILITIES = YFinanceCapabilities()
+
+
+@dataclass(frozen=True)
 class YFinanceDailyBarsRequest:
     """Request contract for yfinance daily bars."""
 
@@ -103,6 +116,7 @@ class YFinanceDailyBarsRequest:
     repair_policy: YFinanceRepairPolicy = YFinanceRepairPolicy.NONE
     retry_policy: RetryPolicy | None = None
     timeout: float = 30.0
+    include_actions: bool = False
 
     def __post_init__(self):
         if not self.symbols:
@@ -142,6 +156,7 @@ class YFinanceDailyBarsResult:
     symbol_outcomes: MappingProxyType[str, YFinanceSymbolOutcome]
     repair_receipts: tuple[YFinanceRepairReceipt, ...] = field(default_factory=tuple)
     provenance: FetchProvenance | None = None
+    actions: pd.DataFrame | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "requested_symbols", tuple(self.requested_symbols))

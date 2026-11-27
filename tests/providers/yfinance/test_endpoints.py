@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime
+from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from ohmydata.providers.yfinance import YFINANCE_CAPABILITIES, YFinanceCapabilities
 from ohmydata.providers.yfinance.endpoints import (
     STANDARD_COLUMNS,
     YFinanceAdjustmentMode,
@@ -67,6 +69,30 @@ class TestDailyBarsRequest:
         assert req.adjustment_mode == YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
         assert req.batch_policy == YFinanceBatchPolicy.STRICT
         assert req.repair_policy == YFinanceRepairPolicy.NONE
+        assert req.include_actions is False
+
+    def test_request_include_actions_opt_in(self):
+        req = YFinanceDailyBarsRequest(
+            symbols=("AAPL",),
+            start_date="2026-01-01",
+            end_date_exclusive="2026-01-10",
+            include_actions=True,
+        )
+        assert req.include_actions is True
+
+
+class TestCapabilities:
+    def test_capabilities_defaults_and_frozen(self):
+        assert isinstance(YFINANCE_CAPABILITIES, YFinanceCapabilities)
+        assert YFINANCE_CAPABILITIES.supports_delisted is False
+        assert YFINANCE_CAPABILITIES.recycled_ticker_risk is True
+        assert YFINANCE_CAPABILITIES.consolidated_tape is True
+        assert (
+            YFINANCE_CAPABILITIES.default_adjustment_mode
+            == YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
+        )
+        with pytest.raises(FrozenInstanceError):
+            YFINANCE_CAPABILITIES.supports_delisted = True  # type: ignore[misc]
 
     def test_request_duplicate_symbols(self):
         with pytest.raises(ValueError, match="Duplicate symbols"):

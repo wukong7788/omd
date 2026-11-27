@@ -65,6 +65,8 @@ def validate_daily_bars_dataframe(
     if adjustment_mode == YFinanceAdjustmentMode.AUTO_ADJUSTED:
         if df["adj_close"].isna().any():
             raise SchemaMismatchError("adj_close contains NaN in AUTO_ADJUSTED mode")
+        if (df["adj_close"] <= 0).any() or np.isinf(df["adj_close"]).any():
+            raise SchemaMismatchError("adj_close contains non-positive or infinite values")
     elif adjustment_mode == YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE:
         non_null_adj = df["adj_close"].dropna()
         if not non_null_adj.empty and ((non_null_adj <= 0).any() or np.isinf(non_null_adj).any()):
@@ -98,25 +100,52 @@ def evaluate_symbol_outcomes(
             outcomes[sym] = YFinanceSymbolOutcome.EMPTY
             continue
 
+        # Check dates and duplicate keys for this symbol
+        if sym_df["date"].isna().any() or sym_df["date"].duplicated().any():
+            outcomes[sym] = YFinanceSymbolOutcome.INVALID_VALUES
+            continue
+
         # Check core prices
         has_invalid_prices = False
         for col in ("open", "high", "low", "close"):
             v = sym_df[col]
-            if v.isna().any() or (v <= 0).any() or np.isinf(v).any():
+            if (
+                v.isna().any()
+                or not pd.api.types.is_numeric_dtype(v.dtype)
+                or (v <= 0).any()
+                or np.isinf(v).any()
+            ):
                 has_invalid_prices = True
                 break
 
-        if has_invalid_prices or (sym_df["high"] < sym_df["low"]).any():
-            outcomes[sym] = YFinanceSymbolOutcome.INVALID_VALUES
-            continue
-
-        # Check adj_close under RAW_WITH_ADJ_CLOSE
         if (
-            adjustment_mode == YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
-            and sym_df["adj_close"].isna().any()
+            has_invalid_prices
+            or (sym_df["high"] < sym_df["low"]).any()
+            or (sym_df["high"] < sym_df["open"]).any()
+            or (sym_df["high"] < sym_df["close"]).any()
+            or (sym_df["low"] > sym_df["open"]).any()
+            or (sym_df["low"] > sym_df["close"]).any()
+            or not pd.api.types.is_numeric_dtype(sym_df["volume"].dtype)
+            or (sym_df["volume"] < 0).any()
+            or np.isinf(sym_df["volume"]).any()
         ):
             outcomes[sym] = YFinanceSymbolOutcome.INVALID_VALUES
             continue
+
+        # Check adj_close under RAW_WITH_ADJ_CLOSE and AUTO_ADJUSTED
+        if adjustment_mode in (
+            YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE,
+            YFinanceAdjustmentMode.AUTO_ADJUSTED,
+        ):
+            adj = sym_df["adj_close"]
+            if (
+                adj.isna().any()
+                or not pd.api.types.is_numeric_dtype(adj.dtype)
+                or (adj <= 0).any()
+                or np.isinf(adj).any()
+            ):
+                outcomes[sym] = YFinanceSymbolOutcome.INVALID_VALUES
+                continue
 
         outcomes[sym] = YFinanceSymbolOutcome.COMPLETE
 

@@ -16,7 +16,9 @@ from ohmydata.core.errors import CoverageError, ProviderError
 from ohmydata.core.policy import AttemptRecord, RetryPolicy, execute_with_retry
 from ohmydata.core.provenance import EmptyDisposition, FetchProvenance
 
+from ._actions import extract_yfinance_actions_df
 from ._fundamentals_reads import call_or_get, get_attribute, has_material_data, read_source
+from ._repair import repair_failed_symbols
 from .endpoints import (
     STANDARD_COLUMNS,
     YFinanceAdjustmentMode,
@@ -123,18 +125,20 @@ class YFinanceClient:
 
         auto_adjust_arg = request.adjustment_mode == YFinanceAdjustmentMode.AUTO_ADJUSTED
         symbols_arg = list(request.symbols)
+        download_kwargs: dict[str, Any] = {
+            "start": request.start_date,
+            "end": request.end_date_exclusive,
+            "interval": request.interval,
+            "auto_adjust": auto_adjust_arg,
+            "threads": False,
+            "progress": False,
+            "timeout": request.timeout,
+        }
+        if request.include_actions:
+            download_kwargs["actions"] = True
 
         def _do_download() -> pd.DataFrame:
-            return download_fn(
-                symbols_arg,
-                start=request.start_date,
-                end=request.end_date_exclusive,
-                interval=request.interval,
-                auto_adjust=auto_adjust_arg,
-                threads=False,
-                progress=False,
-                timeout=request.timeout,
-            )
+            return download_fn(symbols_arg, **download_kwargs)
 
         try:
             retry_res = execute_with_retry(
@@ -148,116 +152,34 @@ class YFinanceClient:
         except (ProviderError, OSError, RuntimeError, ValueError, KeyError):
             raw_data = pd.DataFrame()
 
-        # Shape normalization
+        # Shape normalization and per-symbol outcome evaluation before strict validation
         norm_df = normalize_yfinance_download_df(raw_data, request.symbols, request.adjustment_mode)
-
-        # Initial validation & outcome evaluation
-        validate_daily_bars_dataframe(norm_df, request.adjustment_mode)
         outcomes = evaluate_symbol_outcomes(norm_df, request.symbols, request.adjustment_mode)
+        actions_df = (
+            extract_yfinance_actions_df(raw_data, request.symbols)
+            if request.include_actions
+            else None
+        )
 
         repair_receipts: list[YFinanceRepairReceipt] = []
-
-        # Per-symbol bounded repair if requested
         if request.repair_policy == YFinanceRepairPolicy.PER_SYMBOL:
-            failed_symbols = [
-                sym for sym, out in outcomes.items() if out != YFinanceSymbolOutcome.COMPLETE
-            ]
-            if failed_symbols:
-                repaired_dfs: list[pd.DataFrame] = []
-                for sym in failed_symbols:
-                    orig_outcome = outcomes[sym].value
-                    try:
-                        single_raw = download_fn(
-                            sym,
-                            start=request.start_date,
-                            end=request.end_date_exclusive,
-                            interval=request.interval,
-                            auto_adjust=auto_adjust_arg,
-                            threads=False,
-                            progress=False,
-                            timeout=request.timeout,
-                        )
-                        single_df = normalize_yfinance_download_df(
-                            single_raw, (sym,), request.adjustment_mode
-                        )
-                        validate_daily_bars_dataframe(single_df, request.adjustment_mode)
-                        single_outcomes = evaluate_symbol_outcomes(
-                            single_df, (sym,), request.adjustment_mode
-                        )
+            norm_df, actions_df, repair_receipts = repair_failed_symbols(
+                download_fn=download_fn,
+                download_kwargs=download_kwargs,
+                norm_df=norm_df,
+                actions_df=actions_df,
+                outcomes=outcomes,
+                adjustment_mode=request.adjustment_mode,
+                include_actions=request.include_actions,
+            )
 
-                        if (
-                            single_outcomes.get(sym) == YFinanceSymbolOutcome.COMPLETE
-                            and not single_df.empty
-                        ):
-                            outcomes[sym] = YFinanceSymbolOutcome.RECOVERED
-                            repaired_dfs.append(single_df)
-                            repair_receipts.append(
-                                YFinanceRepairReceipt(
-                                    symbol=sym,
-                                    original_outcome=orig_outcome,
-                                    repair_parameters={
-                                        "symbol": sym,
-                                        "mode": "single_symbol_download",
-                                    },
-                                    attempts=1,
-                                    returned_rows=len(single_df),
-                                    final_status="SUCCESS",
-                                )
-                            )
-                        else:
-                            outcomes[sym] = YFinanceSymbolOutcome.RECOVERY_FAILED
-                            repair_receipts.append(
-                                YFinanceRepairReceipt(
-                                    symbol=sym,
-                                    original_outcome=orig_outcome,
-                                    repair_parameters={
-                                        "symbol": sym,
-                                        "mode": "single_symbol_download",
-                                    },
-                                    attempts=1,
-                                    returned_rows=len(single_df) if single_df is not None else 0,
-                                    final_status="FAILED",
-                                )
-                            )
-                    except (
-                        ProviderError,
-                        OSError,
-                        RuntimeError,
-                        ValueError,
-                        KeyError,
-                        TypeError,
-                    ) as exc:
-                        outcomes[sym] = YFinanceSymbolOutcome.RECOVERY_FAILED
-                        repair_receipts.append(
-                            YFinanceRepairReceipt(
-                                symbol=sym,
-                                original_outcome=orig_outcome,
-                                repair_parameters={"symbol": sym, "error": str(exc)},
-                                attempts=1,
-                                returned_rows=0,
-                                final_status="FAILED",
-                            )
-                        )
-
-                if repaired_dfs:
-                    # Remove old partial rows for recovered symbols and merge new ones
-                    recovered_symbols = {
-                        r.symbol for r in repair_receipts if r.final_status == "SUCCESS"
-                    }
-                    cleaned_base = norm_df[~norm_df["symbol"].isin(recovered_symbols)]
-                    all_dfs = [cleaned_base] + repaired_dfs
-                    norm_df = pd.concat(all_dfs, ignore_index=True)
-                    norm_df.sort_values(by=["symbol", "date"], inplace=True)
-                    norm_df.reset_index(drop=True, inplace=True)
-
-        returned_symbols = tuple(sorted(norm_df["symbol"].unique())) if not norm_df.empty else ()
-
-        # Check strict batch policy
+        # Enforce batch policy & final whole-batch validation
         if request.batch_policy == YFinanceBatchPolicy.STRICT:
             if norm_df.empty:
                 raise YFinanceEmptyBatchError(
                     f"yfinance returned empty batch for symbols: {request.symbols}"
                 )
+            validate_daily_bars_dataframe(norm_df, request.adjustment_mode)
             incomplete = [
                 sym
                 for sym, out in outcomes.items()
@@ -268,6 +190,21 @@ class YFinanceClient:
                     f"Strict batch policy failed: symbols {incomplete} did not complete successfully. "
                     f"Outcomes: {dict(outcomes)}"
                 )
+        else:
+            valid_symbols = {
+                sym
+                for sym, out in outcomes.items()
+                if out in (YFinanceSymbolOutcome.COMPLETE, YFinanceSymbolOutcome.RECOVERED)
+            }
+            if not norm_df.empty:
+                norm_df = norm_df[norm_df["symbol"].isin(valid_symbols)].reset_index(drop=True)
+            validate_daily_bars_dataframe(norm_df, request.adjustment_mode)
+            if actions_df is not None and not actions_df.empty:
+                actions_df = actions_df[actions_df["symbol"].isin(valid_symbols)].reset_index(
+                    drop=True
+                )
+
+        returned_symbols = tuple(sorted(norm_df["symbol"].unique())) if not norm_df.empty else ()
 
         provenance = FetchProvenance(
             provider="yfinance",
@@ -281,6 +218,7 @@ class YFinanceClient:
                 "adjustment_mode": request.adjustment_mode.value,
                 "batch_policy": request.batch_policy.value,
                 "repair_policy": request.repair_policy.value,
+                "include_actions": request.include_actions,
             },
             requested_fields=STANDARD_COLUMNS,
             retrieved_at=self._clock(),
@@ -305,6 +243,7 @@ class YFinanceClient:
             symbol_outcomes=MappingProxyType(outcomes),
             repair_receipts=tuple(repair_receipts),
             provenance=provenance,
+            actions=actions_df,
         )
 
     def fetch_fundamentals(
