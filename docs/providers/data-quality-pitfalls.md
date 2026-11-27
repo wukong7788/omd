@@ -111,7 +111,9 @@ keepna=True`) across three audit tiers:
 | `yfinance` silent batch drops (`VTI`, etc.) | `YFinanceDailyBarsRequest(..., repair_policy=YFinanceRepairPolicy.PER_SYMBOL)` | Single-symbol fallback recovery & outcome tracking |
 | Negative / non-positive prices (`NFE`, `WBD`) | `YFinanceSymbolOutcome.INVALID_VALUES`; `eod_qc.detect_non_positive_prices` | `QualityCategory.NON_POSITIVE_PRICE` (`ERROR` → `BLOCKED_DATA`) |
 | OHLC geometry violations | `eod_qc.detect_ohlc_violations` | `QualityCategory.OHLC_GEOMETRY` (`ERROR` → `BLOCKED_DATA`) |
-| Missing pure splits (`HEI.A`, `SPTI`) | `eod_qc.detect_suspect_missing_splits` | `QualityCategory.SUSPECT_MISSING_SPLIT` (`ERROR` → `BLOCKED_DATA`) |
+| Missing pure splits (`HEI.A`, `SPTI`) | `eod_qc.detect_suspect_missing_splits(..., error_jump_threshold=...)` | `QualityCategory.SUSPECT_MISSING_SPLIT` (`ERROR` >= `error_jump_threshold` else `WARNING`) |
+| Large cash / capital-gain distributions (`PDBC`, `EWT`) | `yfinance` `include_actions=True` (`dividend`, `capital_gain`) + `eod_qc.detect_suspect_missing_splits(..., adjustment_basis=...)` | `QualityCategory.DISTRIBUTION_EX_DATE` (`INFO`, non-blocking; metrics expose `adj_close_ret` & `dividend_adjusted_ret`) |
+| Volatility indices without corporate actions (`^VIX`, `^VIX3M`) | `eod_qc.run_eod_qc(..., skip_corporate_action_symbols=...)` | Retains `NON_POSITIVE_PRICE`, `OHLC_GEOMETRY`, `TRAILING_STALENESS`; skips split/currency/action checks |
 | Spin-off basis difference (`GE`, `DELL`) | `eod_qc.detect_suspect_missing_splits` + `market-data-audit` | `QualityCategory.SPINOFF_BASIS_DIFFERENCE` (`INFO`) |
 | Reverse-split dividend mismatch (`NVD`, `NVDL`) | `eod_qc.detect_reverse_split_dividend_mismatch` | `QualityCategory.REVERSE_SPLIT_DIVIDEND_MISMATCH` (`ERROR` → `BLOCKED_DATA`) |
 | Currency oscillation (`WPM`) | `eod_qc.detect_oscillating_currency_jumps` | `QualityCategory.OSCILLATING_CURRENCY_JUMP` (`WARNING`/`ERROR`) |

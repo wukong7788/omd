@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.2 — 2026-11-27
+
+### Added
+
+- Add `QualityCategory.DISTRIBUTION_EX_DATE` and `DISTRIBUTION_ACTIONS`
+  (`dividend` + `capital_gain`) in `ohmydata.tools.eod_qc`, enriching
+  split/distribution findings with `adj_close_ret`, `dividend_value`,
+  `distribution_amount`, `dividend_adjusted_ret`, `close_adj_ret_diff`, and
+  `distribution_confirmed_by_action` metrics.
+- Add `skip_corporate_action_symbols` and `error_jump_threshold` parameters
+  to `run_eod_qc` (plus `adjustment_basis` and `error_jump_threshold` to
+  `detect_suspect_missing_splits`) so volatility indices (e.g. `^VIX`,
+  `^VIX3M`) retain `NON_POSITIVE_PRICE`, `OHLC_GEOMETRY`, and
+  `TRAILING_STALENESS` checks while skipping split/currency/action/zero-volume
+  false positives.
+- Extract non-zero `Capital Gains` events (`action="capital_gain"`) in
+  `ohmydata.providers.yfinance.extract_yfinance_actions_df` and include them
+  in `eod_qc` distribution and reverse-split dividend mismatch checks.
+
+### Changed
+
+- Classify large ex-distribution raw price drops with smooth `adj_close`
+  returns as non-blocking `DISTRIBUTION_EX_DATE` (`INFO`) under
+  `SPLIT_ADJUSTED_WITH_ADJ_CLOSE` and `UNADJUSTED_WITH_ADJ_CLOSE` (both with
+  and without `actions_df`), and grade unexplained `SUSPECT_MISSING_SPLIT`
+  jumps as `ERROR` at `>= error_jump_threshold` (default `0.35`) and
+  `WARNING` between `jump_threshold` and `error_jump_threshold`.
+- Pass `"repair": False` explicitly in `YFinanceClient.fetch_daily_bars`
+  `download_kwargs` and record `"repair": False` in
+  `provenance.effective_parameters`.
+
 ## 0.6.1 — 2026-11-27
 
 ### Changed

@@ -10,10 +10,9 @@ import numpy as np
 import pandas as pd
 
 from ._eod_qc_prep import (
-    DIVIDEND_ACTIONS,
+    DISTRIBUTION_ACTIONS,
     OHLC_COLUMNS,
     PRICE_COLUMNS,
-    SPINOFF_ACTIONS,
     SPLIT_ACTIONS,
     QualityCategory,
     QualitySeverity,
@@ -91,91 +90,6 @@ def detect_ohlc_violations_work(
                 metrics,
             )
         )
-    return findings
-
-
-def _merge_nearest_action(
-    cand: pd.DataFrame, action_df: pd.DataFrame, col_name: str, tol: pd.Timedelta
-) -> pd.DataFrame:
-    if action_df.empty:
-        cand[col_name] = pd.NaT
-        return cand
-    ref = action_df[["_symbol", "_dt"]].rename(columns={"_dt": col_name})
-    return pd.merge_asof(
-        cand,
-        ref,
-        left_on="_dt",
-        right_on=col_name,
-        by="_symbol",
-        direction="nearest",
-        tolerance=tol,
-    )
-
-
-def detect_suspect_missing_splits_work(
-    work: pd.DataFrame, act: pd.DataFrame, jump_threshold: float, finding_cls: Any
-) -> list[Any]:
-    if work.empty or "close" not in work.columns:
-        return []
-    prev_close = work.groupby("_symbol", sort=False)["close"].shift(1)
-    valid_prev = prev_close > 0.0
-    close_ret = np.where(valid_prev, work["close"] / prev_close - 1.0, np.nan)
-    overnight_gap = (
-        np.where(valid_prev, work["open"] / prev_close - 1.0, np.nan)
-        if "open" in work.columns
-        else np.nan
-    )
-    work = work.assign(_prev_close=prev_close, _close_ret=close_ret, _overnight_gap=overnight_gap)
-    cand = work[
-        (work["_close_ret"].abs() >= jump_threshold)
-        | (work["_overnight_gap"].abs() >= jump_threshold)
-    ].copy()
-    if cand.empty:
-        return []
-
-    cand.sort_values(["_dt", "_symbol"], kind="mergesort", inplace=True)
-    tol = pd.Timedelta(days=3)
-    splits = act[act["_action"].isin(SPLIT_ACTIONS) & (act["_value"].isna() | (act["_value"] > 0))]
-    cand = _merge_nearest_action(cand, splits, "_split_dt", tol)
-    cand = cand[cand["_split_dt"].isna()].copy()
-    if cand.empty:
-        return []
-
-    spinoffs = act[act["_action"].isin(SPINOFF_ACTIONS)]
-    cand = _merge_nearest_action(cand, spinoffs, "_spinoff_dt", tol)
-    cand.sort_values(["_symbol", "_dt"], kind="mergesort", inplace=True)
-
-    findings: list[Any] = []
-    cols = (
-        cand["_symbol"],
-        cand["_date_str"],
-        cand["_close_ret"],
-        cand["_overnight_gap"],
-        cand["_prev_close"],
-        cand["close"],
-        cand["_spinoff_dt"],
-    )
-    for sym, d_str, cr_v, og_v, pc_v, c_v, sp_dt in zip(*cols, strict=True):
-        has_spin = pd.notna(sp_dt)
-        cat = (
-            QualityCategory.SPINOFF_BASIS_DIFFERENCE
-            if has_spin
-            else QualityCategory.SUSPECT_MISSING_SPLIT
-        )
-        sev = QualitySeverity.INFO if has_spin else QualitySeverity.ERROR
-        msg = (
-            "Large price jump coincides with +/-3d spinoff/spinoffdividend action"
-            if has_spin
-            else "Large price jump without +/-3d split action"
-        )
-        metrics = {
-            "close_ret": None if pd.isna(cr_v) else float(cr_v),
-            "overnight_gap": None if pd.isna(og_v) else float(og_v),
-            "prev_close": float(pc_v),
-            "close": float(c_v),
-            "spinoff_date": pd.Timestamp(sp_dt).strftime("%Y-%m-%d") if has_spin else None,
-        }
-        findings.append(make_finding(finding_cls, str(sym), str(d_str), cat, sev, msg, metrics))
     return findings
 
 
@@ -272,7 +186,11 @@ def detect_reverse_split_dividend_mismatch_work(
     if work.empty:
         return []
     divs = (
-        act[act["_action"].isin(DIVIDEND_ACTIONS) & act["_value"].notna() & (act["_value"] > 0.0)]
+        act[
+            act["_action"].isin(DISTRIBUTION_ACTIONS)
+            & act["_value"].notna()
+            & (act["_value"] > 0.0)
+        ]
         .groupby(["_symbol", "_dt"])["_value"]
         .sum()
         .rename("_div")

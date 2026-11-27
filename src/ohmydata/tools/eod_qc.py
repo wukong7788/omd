@@ -17,7 +17,6 @@ from ._eod_qc_detectors import (
     detect_ohlc_violations_work,
     detect_oscillating_currency_jumps_work,
     detect_reverse_split_dividend_mismatch_work,
-    detect_suspect_missing_splits_work,
     detect_trailing_staleness_work,
     detect_zero_volume_work,
 )
@@ -29,6 +28,7 @@ from ._eod_qc_prep import (
     prepare_bars,
     symbol_col,
 )
+from ._eod_qc_splits import detect_suspect_missing_splits_work
 
 
 class EodAdjustmentBasis(StrEnum):
@@ -273,10 +273,18 @@ def detect_suspect_missing_splits(
     bars_df: pd.DataFrame,
     actions_df: pd.DataFrame | None = None,
     jump_threshold: float = 0.15,
+    *,
+    adjustment_basis: EodAdjustmentBasis = EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
+    error_jump_threshold: float | None = None,
 ) -> list[QualityFinding]:
-    """Flag >= jump_threshold close/gap moves lacking a +/-3d split; tag spinoffs as INFO."""
+    """Flag >= jump_threshold close/gap moves lacking a +/-3d split or distribution explanation."""
     return detect_suspect_missing_splits_work(
-        prepare_bars(bars_df), prepare_actions(actions_df), jump_threshold, QualityFinding
+        prepare_bars(bars_df),
+        prepare_actions(actions_df),
+        jump_threshold,
+        QualityFinding,
+        adjustment_basis=adjustment_basis,
+        error_jump_threshold=error_jump_threshold,
     )
 
 
@@ -327,7 +335,9 @@ def run_eod_qc(
     adjustment_basis: EodAdjustmentBasis = EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
     expected_latest_date: str | date | datetime | None = None,
     active_symbols: Iterable[str] | None = None,
+    skip_corporate_action_symbols: Iterable[str] | None = None,
     jump_threshold: float = 0.15,
+    error_jump_threshold: float | None = None,
     currency_jump_threshold: float = 0.20,
     currency_max_gap_days: int = 3,
     reverse_split_tolerance: float = 0.10,
@@ -337,20 +347,37 @@ def run_eod_qc(
     """Run all vectorized EOD quality control detectors and assemble an EodQcReport."""
     work = prepare_bars(bars_df)
     act = prepare_actions(actions_df)
+    skip_ca_set = (
+        {str(s) for s in skip_corporate_action_symbols}
+        if skip_corporate_action_symbols is not None
+        else set()
+    )
+    ca_work = (
+        work[~work["_symbol"].isin(skip_ca_set)].reset_index(drop=True)
+        if (skip_ca_set and not work.empty)
+        else work
+    )
     findings: list[QualityFinding] = [
         *detect_non_positive_prices_work(work, QualityFinding),
         *detect_ohlc_violations_work(work, ulp_rel_tol, QualityFinding),
-        *detect_suspect_missing_splits_work(work, act, jump_threshold, QualityFinding),
+        *detect_suspect_missing_splits_work(
+            ca_work,
+            act,
+            jump_threshold,
+            QualityFinding,
+            adjustment_basis=adjustment_basis,
+            error_jump_threshold=error_jump_threshold,
+        ),
         *detect_oscillating_currency_jumps_work(
-            work, currency_jump_threshold, currency_max_gap_days, QualityFinding
+            ca_work, currency_jump_threshold, currency_max_gap_days, QualityFinding
         ),
         *detect_reverse_split_dividend_mismatch_work(
-            work, act, reverse_split_tolerance, QualityFinding
+            ca_work, act, reverse_split_tolerance, QualityFinding
         ),
         *detect_trailing_staleness_work(
             work, expected_latest_date, max_lag_days, active_symbols, QualityFinding
         ),
-        *detect_zero_volume_work(work, QualityFinding),
+        *detect_zero_volume_work(ca_work, QualityFinding),
     ]
     counts: dict[str, int] = {sev.value: 0 for sev in QualitySeverity}
     counts.update({cat.value: 0 for cat in QualityCategory})

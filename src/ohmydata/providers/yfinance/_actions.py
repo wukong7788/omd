@@ -13,7 +13,7 @@ def extract_yfinance_actions_df(
     raw_df: pd.DataFrame,
     requested_symbols: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Extract non-zero Dividends and Stock Splits rows from a raw yfinance DataFrame."""
+    """Extract non-zero Dividends, Stock Splits, and Capital Gains rows from yfinance data."""
     if raw_df is None or raw_df.empty:
         return pd.DataFrame(columns=list(ACTIONS_COLUMNS))
 
@@ -52,7 +52,7 @@ def extract_yfinance_actions_df(
 
 
 def _extract_single_symbol_actions(df_sym: pd.DataFrame, symbol: str) -> pd.DataFrame | None:
-    """Extract non-zero dividend and split events for a single symbol."""
+    """Extract non-zero dividend, split, and capital gain events for a single symbol."""
     if df_sym is None or df_sym.empty:
         return None
 
@@ -84,6 +84,8 @@ def _extract_single_symbol_actions(df_sym: pd.DataFrame, symbol: str) -> pd.Data
             col_map[col] = "dividends"
         elif norm_col == "stock_splits":
             col_map[col] = "stock_splits"
+        elif norm_col == "capital_gains":
+            col_map[col] = "capital_gains"
 
     if not col_map:
         return None
@@ -93,7 +95,11 @@ def _extract_single_symbol_actions(df_sym: pd.DataFrame, symbol: str) -> pd.Data
     work["date"] = dates_raw.dt.date
 
     action_frames: list[pd.DataFrame] = []
-    for source_col, action_name in (("dividends", "dividend"), ("stock_splits", "split")):
+    for source_col, action_name in (
+        ("dividends", "dividend"),
+        ("stock_splits", "split"),
+        ("capital_gains", "capital_gain"),
+    ):
         if source_col not in work.columns:
             continue
         values = pd.to_numeric(work[source_col], errors="coerce")

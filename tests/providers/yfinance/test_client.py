@@ -392,6 +392,8 @@ class TestClientDailyBars:
             index=dates,
         )
 
+        seen_repair_vals = []
+
         def strict_download(
             symbols,
             *,
@@ -399,10 +401,12 @@ class TestClientDailyBars:
             end,
             interval,
             auto_adjust,
+            repair,
             threads,
             progress,
             timeout,
         ):
+            seen_repair_vals.append(repair)
             return flat_df
 
         client = YFinanceClient(
@@ -415,8 +419,82 @@ class TestClientDailyBars:
             end_date_exclusive="2026-01-10",
         )
         res = client.fetch_daily_bars(req)
+        assert seen_repair_vals == [False]
+        assert res.provenance is not None
+        assert res.provenance.effective_parameters["repair"] is False
         assert res.actions is None
         assert len(res.data) == 2
+
+    def test_include_actions_true_extracts_capital_gains_single_and_batch(self):
+        dates = pd.date_range("2026-12-10", periods=2)
+        single_df = pd.DataFrame(
+            {
+                "Open": [50.0, 48.0],
+                "High": [51.0, 49.0],
+                "Low": [49.0, 47.0],
+                "Close": [50.0, 48.0],
+                "Adj Close": [48.0, 48.0],
+                "Volume": [1000, 1200],
+                "Dividends": [0.0, 0.5],
+                "Stock Splits": [0.0, 0.0],
+                "Capital Gains": [0.0, 1.5],
+            },
+            index=dates,
+        )
+        batch_cols = pd.MultiIndex.from_tuples(
+            [
+                ("Open", "EWT"),
+                ("High", "EWT"),
+                ("Low", "EWT"),
+                ("Close", "EWT"),
+                ("Adj Close", "EWT"),
+                ("Volume", "EWT"),
+                ("Dividends", "EWT"),
+                ("Stock Splits", "EWT"),
+                ("Capital Gains", "EWT"),
+            ]
+        )
+        batch_df = pd.DataFrame(
+            [
+                [46.07, 46.20, 45.90, 46.07, 39.07, 1000, 0.0, 0.0, 0.0],
+                [38.87, 39.10, 38.70, 38.87, 38.87, 1500, 0.0, 0.0, 7.0],
+            ],
+            index=dates,
+            columns=batch_cols,
+        )
+
+        def _client_for(df):
+            return YFinanceClient(
+                yf_module=SimpleNamespace(__version__="1.8.0"),
+                download_fn=lambda symbols, **kwargs: df,
+            )
+
+        res_single = _client_for(single_df).fetch_daily_bars(
+            YFinanceDailyBarsRequest(
+                symbols=("PDBC",),
+                start_date="2026-12-09",
+                end_date_exclusive="2026-12-15",
+                include_actions=True,
+            )
+        )
+        assert res_single.actions is not None
+        assert res_single.actions.to_dict(orient="records") == [
+            {"symbol": "PDBC", "date": dates[1].date(), "action": "capital_gain", "value": 1.5},
+            {"symbol": "PDBC", "date": dates[1].date(), "action": "dividend", "value": 0.5},
+        ]
+
+        res_batch = _client_for(batch_df).fetch_daily_bars(
+            YFinanceDailyBarsRequest(
+                symbols=("EWT",),
+                start_date="2026-12-09",
+                end_date_exclusive="2026-12-15",
+                include_actions=True,
+            )
+        )
+        assert res_batch.actions is not None
+        assert res_batch.actions.to_dict(orient="records") == [
+            {"symbol": "EWT", "date": dates[1].date(), "action": "capital_gain", "value": 7.0},
+        ]
 
     def test_include_actions_true_extracts_dividends_and_splits(self):
         dates = pd.date_range("2026-01-02", periods=3)

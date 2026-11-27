@@ -15,6 +15,10 @@ OHLC_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close")
 SPLIT_ACTIONS: frozenset[str] = frozenset({"split", "stock split", "stock_split"})
 SPINOFF_ACTIONS: frozenset[str] = frozenset({"spinoff", "spinoffdividend", "spin-off", "spin_off"})
 DIVIDEND_ACTIONS: frozenset[str] = frozenset({"dividend", "cash dividend", "dividends"})
+CAPITAL_GAIN_ACTIONS: frozenset[str] = frozenset(
+    {"capital_gain", "capital gain", "capital_gains", "capital gains"}
+)
+DISTRIBUTION_ACTIONS: frozenset[str] = DIVIDEND_ACTIONS | CAPITAL_GAIN_ACTIONS
 
 
 class QualitySeverity(StrEnum):
@@ -31,6 +35,7 @@ class QualityCategory(StrEnum):
     NON_POSITIVE_PRICE = "NON_POSITIVE_PRICE"
     OHLC_GEOMETRY = "OHLC_GEOMETRY"
     SUSPECT_MISSING_SPLIT = "SUSPECT_MISSING_SPLIT"
+    DISTRIBUTION_EX_DATE = "DISTRIBUTION_EX_DATE"
     SPINOFF_BASIS_DIFFERENCE = "SPINOFF_BASIS_DIFFERENCE"
     OSCILLATING_CURRENCY_JUMP = "OSCILLATING_CURRENCY_JUMP"
     REVERSE_SPLIT_DIVIDEND_MISMATCH = "REVERSE_SPLIT_DIVIDEND_MISMATCH"

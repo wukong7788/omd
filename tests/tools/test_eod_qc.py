@@ -535,3 +535,255 @@ def test_apply_corrections_sequential_overlay_and_error_cases() -> None:
             df,
             [CorrectionRecord("A", "2026-01-02", "date", "2026-01-02", "2026-01-03", "bad", "src")],
         )
+
+
+def test_detect_suspect_missing_splits_handles_distributions_and_severity() -> None:
+    df = _bars(
+        [
+            # PDBC-like large cash dividend ex-date: raw close -26.56%, adj_close 0.00%
+            {
+                "symbol": "PDBC",
+                "date": "2021-12-02",
+                "open": 18.41,
+                "high": 18.50,
+                "low": 18.30,
+                "close": 18.41,
+                "adj_close": 13.52,
+                "volume": 1000,
+            },
+            {
+                "symbol": "PDBC",
+                "date": "2021-12-03",
+                "open": 13.52,
+                "high": 13.60,
+                "low": 13.40,
+                "close": 13.52,
+                "adj_close": 13.52,
+                "volume": 1200,
+            },
+            # EWT-like capital-gain ex-date: raw close -15.63%, adj_close -0.50%
+            {
+                "symbol": "EWT",
+                "date": "2022-12-12",
+                "open": 46.07,
+                "high": 46.20,
+                "low": 45.90,
+                "close": 46.07,
+                "adj_close": 39.065,
+                "volume": 1000,
+            },
+            {
+                "symbol": "EWT",
+                "date": "2022-12-13",
+                "open": 38.87,
+                "high": 39.10,
+                "low": 38.70,
+                "close": 38.87,
+                "adj_close": 38.87,
+                "volume": 1100,
+            },
+            # True missing 2:1 split: close and adj_close both drop -50%
+            {
+                "symbol": "SPLT2",
+                "date": "2026-01-02",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "adj_close": 100.0,
+                "volume": 1000,
+            },
+            {
+                "symbol": "SPLT2",
+                "date": "2026-01-05",
+                "open": 50.0,
+                "high": 51.0,
+                "low": 49.0,
+                "close": 50.0,
+                "adj_close": 50.0,
+                "volume": 2000,
+            },
+            # Macro -20% move without split: WARNING by default (<0.35), ERROR if threshold=0.15
+            {
+                "symbol": "MACRO20",
+                "date": "2026-01-02",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "adj_close": 100.0,
+                "volume": 1000,
+            },
+            {
+                "symbol": "MACRO20",
+                "date": "2026-01-05",
+                "open": 80.0,
+                "high": 81.0,
+                "low": 79.0,
+                "close": 80.0,
+                "adj_close": 80.0,
+                "volume": 1500,
+            },
+        ]
+    )
+    actions = pd.DataFrame(
+        [
+            {"symbol": "PDBC", "date": "2021-12-03", "action": "dividend", "value": 4.89},
+            {"symbol": "EWT", "date": "2022-12-13", "action": "capital_gain", "value": 7.0},
+        ]
+    )
+
+    rep_with_actions = run_eod_qc(
+        df[df["symbol"].isin(["PDBC", "EWT"])],
+        actions_df=actions,
+        adjustment_basis=EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
+    )
+    assert rep_with_actions.status == "PASSED"
+    by_sym = {f.symbol: f for f in rep_with_actions.findings}
+    assert set(by_sym.keys()) == {"EWT", "PDBC"}
+    assert by_sym["PDBC"].category == QualityCategory.DISTRIBUTION_EX_DATE
+    assert by_sym["PDBC"].severity == QualitySeverity.INFO
+    assert by_sym["PDBC"].metrics["adj_close_ret"] == pytest.approx(0.0, abs=1e-6)
+    assert by_sym["PDBC"].metrics["dividend_value"] == pytest.approx(4.89)
+    assert by_sym["PDBC"].metrics["distribution_amount"] == pytest.approx(4.89)
+    assert by_sym["PDBC"].metrics["dividend_adjusted_ret"] == pytest.approx(0.0, abs=1e-6)
+    assert by_sym["PDBC"].metrics["distribution_confirmed_by_action"] is True
+    assert by_sym["EWT"].category == QualityCategory.DISTRIBUTION_EX_DATE
+    assert by_sym["EWT"].metrics["dividend_value"] == 0.0
+    assert by_sym["EWT"].metrics["distribution_amount"] == pytest.approx(7.0)
+    assert by_sym["EWT"].metrics["distribution_confirmed_by_action"] is True
+
+    # Without actions_df: PDBC & EWT still do not trigger BLOCKED_DATA
+    rep_no_actions = run_eod_qc(
+        df[df["symbol"].isin(["PDBC", "EWT"])],
+        actions_df=None,
+        adjustment_basis=EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
+    )
+    assert rep_no_actions.status == "PASSED"
+    by_sym_no = {f.symbol: f for f in rep_no_actions.findings}
+    assert by_sym_no["PDBC"].category == QualityCategory.DISTRIBUTION_EX_DATE
+    assert by_sym_no["PDBC"].metrics["distribution_confirmed_by_action"] is False
+    assert by_sym_no["EWT"].category == QualityCategory.DISTRIBUTION_EX_DATE
+    assert by_sym_no["EWT"].metrics["close_adj_ret_diff"] == pytest.approx(
+        (38.87 / 46.07 - 1.0) - (38.87 / 39.065 - 1.0), abs=1e-6
+    )
+
+    # Full run with SPLT2 & MACRO20: SPLT2 stays ERROR -> BLOCKED_DATA; MACRO20 is WARNING
+    rep_all = run_eod_qc(
+        df,
+        actions_df=actions,
+        adjustment_basis=EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
+    )
+    assert rep_all.status == "BLOCKED_DATA"
+    all_by_sym = {f.symbol: f for f in rep_all.findings}
+    assert all_by_sym["SPLT2"].category == QualityCategory.SUSPECT_MISSING_SPLIT
+    assert all_by_sym["SPLT2"].severity == QualitySeverity.ERROR
+    assert all_by_sym["MACRO20"].category == QualityCategory.SUSPECT_MISSING_SPLIT
+    assert all_by_sym["MACRO20"].severity == QualitySeverity.WARNING
+
+    # Custom error_jump_threshold=0.15 promotes MACRO20 to ERROR
+    strict_macro = detect_suspect_missing_splits(
+        df[df["symbol"] == "MACRO20"],
+        error_jump_threshold=0.15,
+    )
+    assert strict_macro[0].severity == QualitySeverity.ERROR
+
+    # AUTO_ADJUSTED does not reclassify large raw drop as distribution ex-date
+    auto_findings = detect_suspect_missing_splits(
+        df[df["symbol"] == "PDBC"],
+        adjustment_basis=EodAdjustmentBasis.AUTO_ADJUSTED,
+    )
+    assert auto_findings[0].category == QualityCategory.SUSPECT_MISSING_SPLIT
+
+    with pytest.raises(ValueError, match="jump_threshold"):
+        detect_suspect_missing_splits(df, jump_threshold=0.0)
+    with pytest.raises(ValueError, match="error_jump_threshold"):
+        detect_suspect_missing_splits(df, jump_threshold=0.20, error_jump_threshold=0.10)
+
+
+def test_run_eod_qc_skip_corporate_action_symbols_and_capital_gain_rev_split() -> None:
+    df = _bars(
+        [
+            {
+                "symbol": "SPY",
+                "date": "2026-01-02",
+                "open": 500.0,
+                "high": 502.0,
+                "low": 499.0,
+                "close": 501.0,
+                "adj_close": 501.0,
+                "volume": 10000,
+            },
+            {
+                "symbol": "SPY",
+                "date": "2026-01-05",
+                "open": 501.0,
+                "high": 505.0,
+                "low": 500.0,
+                "close": 504.0,
+                "adj_close": 504.0,
+                "volume": 10000,
+            },
+            # ^VIX large swings (+55%, -35%) + zero volume
+            {
+                "symbol": "^VIX",
+                "date": "2026-01-02",
+                "open": 20.0,
+                "high": 21.0,
+                "low": 19.0,
+                "close": 20.0,
+                "adj_close": 20.0,
+                "volume": 0,
+            },
+            {
+                "symbol": "^VIX",
+                "date": "2026-01-05",
+                "open": 31.0,
+                "high": 32.0,
+                "low": 30.0,
+                "close": 31.0,
+                "adj_close": 31.0,
+                "volume": 0,
+            },
+            {
+                "symbol": "^VIX",
+                "date": "2026-01-06",
+                "open": 20.15,
+                "high": 21.0,
+                "low": 19.5,
+                "close": 20.15,
+                "adj_close": 20.15,
+                "volume": 0,
+            },
+        ]
+    )
+    rep = run_eod_qc(df, skip_corporate_action_symbols=("^VIX",))
+    assert rep.status == "PASSED"
+    assert rep.symbol_count == 2
+    assert rep.findings == ()
+
+    # Still blocks OHLC geometry and non-positive prices on skipped symbols
+    bad_vix = df.copy()
+    bad_vix.loc[bad_vix["symbol"] == "^VIX", "high"] = 10.0  # high < low
+    bad_vix.loc[(bad_vix["symbol"] == "^VIX") & (bad_vix["date"] == "2026-01-06"), "close"] = -1.0
+    rep_bad = run_eod_qc(bad_vix, skip_corporate_action_symbols=("^VIX",))
+    assert rep_bad.status == "BLOCKED_DATA"
+    cats = {f.category for f in rep_bad.findings}
+    assert QualityCategory.OHLC_GEOMETRY in cats
+    assert QualityCategory.NON_POSITIVE_PRICE in cats
+
+    # Capital gain accounted for in reverse-split dividend mismatch
+    rev_df = _bars(
+        [
+            {"symbol": "ETFX", "date": "2026-01-02", "close": 20.0, "adj_close": 19.0},
+            {"symbol": "ETFX", "date": "2026-01-05", "close": 20.0, "adj_close": 20.0},
+            {"symbol": "ETFX", "date": "2026-01-10", "close": 20.0, "adj_close": 20.0},
+        ]
+    )
+    rev_actions = pd.DataFrame(
+        [
+            {"symbol": "ETFX", "date": "2026-01-05", "action": "capital_gain", "value": 1.0},
+            {"symbol": "ETFX", "date": "2026-01-10", "action": "split", "value": 0.2},
+        ]
+    )
+    assert detect_reverse_split_dividend_mismatch(rev_df, rev_actions, tolerance=0.10) == []
