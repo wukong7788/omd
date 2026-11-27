@@ -12,7 +12,12 @@ from typing import Any
 
 import pandas as pd
 
-from ohmydata.core.errors import CoverageError, ProviderError
+from ohmydata.core.errors import (
+    CoverageError,
+    ProviderError,
+    RetryExhaustedError,
+    TransientProviderError,
+)
 from ohmydata.core.policy import AttemptRecord, RetryPolicy, execute_with_retry
 from ohmydata.core.provenance import EmptyDisposition, FetchProvenance
 
@@ -131,6 +136,7 @@ class YFinanceClient:
             "interval": request.interval,
             "auto_adjust": auto_adjust_arg,
             "repair": False,
+            "keepna": True,
             "threads": False,
             "progress": False,
             "timeout": request.timeout,
@@ -139,8 +145,14 @@ class YFinanceClient:
             download_kwargs["actions"] = True
 
         def _do_download() -> pd.DataFrame:
-            return download_fn(symbols_arg, **download_kwargs)
+            try:
+                return download_fn(symbols_arg, **download_kwargs)
+            except (TimeoutError, ConnectionError, OSError) as exc:
+                raise TransientProviderError(
+                    f"yfinance download transport error: {type(exc).__name__}: {exc}"
+                ) from exc
 
+        batch_warnings: list[str] = []
         try:
             retry_res = execute_with_retry(
                 _do_download,
@@ -150,7 +162,14 @@ class YFinanceClient:
             )
             raw_data = retry_res.value
             attempts_log.extend(retry_res.attempts)
-        except (ProviderError, OSError, RuntimeError, ValueError, KeyError):
+        except (ProviderError, OSError, RuntimeError, ValueError, KeyError) as exc:
+            if request.repair_policy != YFinanceRepairPolicy.PER_SYMBOL:
+                raise
+            if isinstance(exc, RetryExhaustedError):
+                attempts_log.extend(exc.attempts)
+            else:
+                attempts_log.append(AttemptRecord(1, type(exc).__name__, None))
+            batch_warnings.append(f"batch_download_failed:{type(exc).__name__}")
             raw_data = pd.DataFrame()
 
         # Shape normalization and per-symbol outcome evaluation before strict validation
@@ -172,6 +191,9 @@ class YFinanceClient:
                 outcomes=outcomes,
                 adjustment_mode=request.adjustment_mode,
                 include_actions=request.include_actions,
+                retry_policy=retry_policy,
+                sleep_fn=self._sleep,
+                random_value_fn=self._random_value,
             )
 
         # Enforce batch policy & final whole-batch validation
@@ -218,6 +240,7 @@ class YFinanceClient:
                 "interval": request.interval,
                 "adjustment_mode": request.adjustment_mode.value,
                 "repair": False,
+                "keepna": True,
                 "batch_policy": request.batch_policy.value,
                 "repair_policy": request.repair_policy.value,
                 "include_actions": request.include_actions,
@@ -227,7 +250,7 @@ class YFinanceClient:
             attempts=tuple(attempts_log),
             row_count=len(norm_df),
             columns=STANDARD_COLUMNS,
-            warnings=(),
+            warnings=tuple(batch_warnings),
             snapshot_identities=(),
             empty_disposition=EmptyDisposition.ALLOWED_EMPTY
             if norm_df.empty

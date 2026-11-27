@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from .errors import SchemaMismatchError
@@ -37,7 +38,12 @@ def extract_yfinance_actions_df(
             if extracted is not None and not extracted.empty:
                 frames.append(extracted)
     else:
-        sym = requested_symbols[0] if len(requested_symbols) == 1 else "UNKNOWN"
+        if len(requested_symbols) != 1:
+            raise SchemaMismatchError(
+                f"Expected MultiIndex columns for multi-symbol actions response "
+                f"({len(requested_symbols)} symbols)"
+            )
+        sym = requested_symbols[0]
         extracted = _extract_single_symbol_actions(raw_df, sym)
         if extracted is not None and not extracted.empty:
             frames.append(extracted)
@@ -103,7 +109,7 @@ def _extract_single_symbol_actions(df_sym: pd.DataFrame, symbol: str) -> pd.Data
         if source_col not in work.columns:
             continue
         values = pd.to_numeric(work[source_col], errors="coerce")
-        non_zero = values.notna() & (values != 0.0)
+        non_zero = values.notna() & np.isfinite(values) & (values != 0.0)
         if not non_zero.any():
             continue
         action_frames.append(

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import json
 import urllib.error
+import urllib.request
 import zipfile
 from datetime import UTC, date, datetime
 from email.message import Message
@@ -35,6 +37,7 @@ from ohmydata.providers.sharadar import (
     SharadarClient,
     SharadarError,
     SharadarTable,
+    SharadarTruncatedDownloadError,
     classify_sharadar_http_error,
     read_local_actions,
     read_local_actions_pl,
@@ -381,17 +384,31 @@ class TestSharadarClient:
         target_csv = tmp_path / "stocks.csv"
         target_csv.write_text("existing-valid-data", encoding="utf-8")
 
-        client = SharadarClient(
-            "trunc-secret",
-            opener=lambda req, timeout=300.0: _FakeResponse(
+        calls = 0
+
+        def flaky_trunc(req: Any, timeout: float = 300.0) -> _FakeResponse:
+            nonlocal calls
+            calls += 1
+            return _FakeResponse(
                 b"ticker,date\nAAPL,2026",
                 headers={"Content-Length": "100", "Content-Type": "text/csv"},
-            ),
-        )
-        with pytest.raises(SharadarError, match="truncated download"):
-            client.download_table(
-                SharadarBulkTableRequest(table=SharadarTable.STOCKS, output_dir=tmp_path)
             )
+
+        client = SharadarClient(
+            "trunc-secret",
+            opener=flaky_trunc,
+            retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.0),
+            sleep_fn=lambda _: None,
+        )
+        with pytest.raises(RetryExhaustedError) as exc_info:
+            client.download_table(
+                SharadarBulkTableRequest(
+                    table=SharadarTable.STOCKS, output_dir=tmp_path, overwrite=True
+                )
+            )
+        assert calls == 2
+        assert isinstance(exc_info.value.__cause__, SharadarTruncatedDownloadError)
+        assert isinstance(exc_info.value.__cause__, SharadarError)
         assert target_csv.read_text(encoding="utf-8") == "existing-valid-data"
         assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
 
@@ -407,11 +424,15 @@ class TestSharadarClient:
                     "Content-Type": "application/zip",
                 },
             ),
+            retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.0),
+            sleep_fn=lambda _: None,
         )
-        with pytest.raises(SharadarError, match="corrupt or truncated"):
+        with pytest.raises(RetryExhaustedError) as exc_info_1:
             client_bad_header.download_table(
                 SharadarBulkTableRequest(table=SharadarTable.STOCKS, output_dir=tmp_path)
             )
+        assert isinstance(exc_info_1.value.__cause__, SharadarTruncatedDownloadError)
+        assert "corrupt or truncated" in str(exc_info_1.value.__cause__)
         assert not (tmp_path / "stocks.csv").exists()
         assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
 
@@ -430,11 +451,15 @@ class TestSharadarClient:
                     "Content-Type": "application/zip",
                 },
             ),
+            retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.0),
+            sleep_fn=lambda _: None,
         )
-        with pytest.raises(SharadarError, match="corrupt or truncated"):
+        with pytest.raises(RetryExhaustedError) as exc_info_2:
             client_bad_crc.download_table(
                 SharadarBulkTableRequest(table=SharadarTable.STOCKS, output_dir=tmp_path)
             )
+        assert isinstance(exc_info_2.value.__cause__, SharadarTruncatedDownloadError)
+        assert "corrupt or truncated" in str(exc_info_2.value.__cause__)
         assert not (tmp_path / "stocks.csv").exists()
         assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
 
@@ -549,6 +574,118 @@ class TestSharadarClient:
         assert isinstance(exc_info.value.__cause__, RateLimitError)
         assert secret not in str(exc_info.value.__cause__)
         assert "retry%2Bsecret" not in str(exc_info.value.__cause__)
+
+    def test_security_overwrite_retry_status_and_bom_hardening(self, tmp_path: Path) -> None:
+        from ohmydata.providers.sharadar.client import _HttpsOnlyRedirectHandler
+
+        with pytest.raises(ValueError, match="https://"):
+            SharadarClient("secret", base_url="http://api.sharadar.com/v1.0/data")
+
+        handler = _HttpsOnlyRedirectHandler("topsecret")
+        src_req = urllib.request.Request(
+            "https://api.sharadar.com/v1.0/data/stocks?api_key=topsecret"
+        )
+        with pytest.raises(PermanentProviderError, match="non-HTTPS"):
+            handler.redirect_request(
+                src_req, None, 302, "Found", Message(), "http://api.sharadar.com/x"
+            )
+        with pytest.raises(PermanentProviderError, match="cross-host"):
+            handler.redirect_request(
+                src_req,
+                None,
+                302,
+                "Found",
+                Message(),
+                "https://evil.example.com/steal?api_key=topsecret",
+            )
+
+        # IncompleteRead redacted & retried, truncated attempt 1 -> valid attempt 2 succeeds
+        bom_csv = b"\xef\xbb\xbfticker,date,open,high,low,close,volume,closeadj\nAAPL,2026-01-02,10,11,9,10,100,10\n"
+        attempt = 0
+
+        def recovering_opener(req: Any, timeout: float = 300.0) -> _FakeResponse:
+            nonlocal attempt
+            attempt += 1
+            if attempt == 1:
+                raise http.client.IncompleteRead(b"partial api_key=topsecret")
+            if attempt == 2:
+                return _FakeResponse(b"short", headers={"Content-Length": "100"})
+            return _FakeResponse(bom_csv, headers={"Content-Length": str(len(bom_csv))})
+
+        client = SharadarClient(
+            "topsecret",
+            opener=recovering_opener,
+            retry_policy=RetryPolicy(max_attempts=3, base_delay_seconds=0.0),
+            sleep_fn=lambda _: None,
+        )
+        out_dir = tmp_path / "safe"
+        res = client.download_table(
+            SharadarBulkTableRequest(table=SharadarTable.STOCKS, years="full", output_dir=out_dir)
+        )
+        assert attempt == 3
+        assert res.provenance is not None
+        assert res.provenance.columns[0] == "ticker"
+
+        # Default overwrite=False protects existing files; overwrite=True replaces atomically
+        with pytest.raises(FileExistsError, match="overwrite=True"):
+            client.download_table(
+                SharadarBulkTableRequest(table=SharadarTable.STOCKS, years="1", output_dir=out_dir)
+            )
+        attempt = 2
+        res_ow = client.download_table(
+            SharadarBulkTableRequest(
+                table=SharadarTable.STOCKS,
+                years="1",
+                output_dir=out_dir,
+                overwrite=True,
+            )
+        )
+        assert res_ow.csv_path.read_bytes() == bom_csv
+
+        # max_extracted_bytes enforced on ZIP extraction
+        big_zip = _make_zip_bytes("SHARADAR_SEP.csv", b"ticker,date\n" + b"AAPL,2026-01-02\n" * 20)
+        zip_client = SharadarClient(
+            "topsecret",
+            opener=lambda req, timeout=300.0: _FakeResponse(
+                big_zip,
+                headers={"Content-Length": str(len(big_zip)), "Content-Type": "application/zip"},
+            ),
+        )
+        zip_dir = tmp_path / "zipbomb"
+        with pytest.raises(SharadarError, match="max_extracted_bytes"):
+            zip_client.download_table(
+                SharadarBulkTableRequest(
+                    table=SharadarTable.STOCKS,
+                    output_dir=zip_dir,
+                    max_extracted_bytes=32,
+                )
+            )
+        assert not [p for p in zip_dir.iterdir() if p.name.endswith(".tmp")]
+
+        # fetch_status: >64 KiB cap, non-raising >=400 classification, non-200 available=False
+        big_status = SharadarClient(
+            "topsecret", opener=lambda req, timeout=30.0: _FakeResponse(b"x" * 70000)
+        )
+        with pytest.raises(PermanentProviderError, match="65536"):
+            big_status.fetch_status(SharadarTable.STOCKS)
+
+        err_status = SharadarClient(
+            "topsecret",
+            opener=lambda req, timeout=30.0: _FakeResponse(
+                b"unauthorized api_key=topsecret", status=401
+            ),
+        )
+        with pytest.raises(AuthenticationError) as auth_exc:
+            err_status.fetch_status(SharadarTable.STOCKS)
+        assert "topsecret" not in str(auth_exc.value)
+
+        non_200 = SharadarClient(
+            "topsecret",
+            opener=lambda req, timeout=30.0: _FakeResponse(b"pending", status=204),
+        )
+        status_204 = non_200.fetch_status(SharadarTable.STOCKS)
+        assert status_204.status_code == 204
+        assert status_204.available is False
 
 
 class TestLocalReaders:

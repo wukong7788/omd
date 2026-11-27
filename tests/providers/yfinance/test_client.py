@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from ohmydata.core.errors import RetryExhaustedError
 from ohmydata.core.policy import RetryPolicy
 from ohmydata.providers.yfinance.client import (
     YFinanceClient,
@@ -393,6 +394,7 @@ class TestClientDailyBars:
         )
 
         seen_repair_vals = []
+        seen_keepna_vals = []
 
         def strict_download(
             symbols,
@@ -402,11 +404,13 @@ class TestClientDailyBars:
             interval,
             auto_adjust,
             repair,
+            keepna,
             threads,
             progress,
             timeout,
         ):
             seen_repair_vals.append(repair)
+            seen_keepna_vals.append(keepna)
             return flat_df
 
         client = YFinanceClient(
@@ -420,8 +424,10 @@ class TestClientDailyBars:
         )
         res = client.fetch_daily_bars(req)
         assert seen_repair_vals == [False]
+        assert seen_keepna_vals == [True]
         assert res.provenance is not None
         assert res.provenance.effective_parameters["repair"] is False
+        assert res.provenance.effective_parameters["keepna"] is True
         assert res.actions is None
         assert len(res.data) == 2
 
@@ -579,6 +585,99 @@ class TestClientDailyBars:
             "action": "dividend",
             "value": 0.85,
         }
+
+    def test_batch_failure_propagates_without_repair_and_recovers_with_retried_repair(self):
+        dates = pd.date_range("2026-01-02", periods=2)
+        aapl_df = pd.DataFrame(
+            {
+                "Open": [100.0, 102.0],
+                "High": [105.0, 107.0],
+                "Low": [95.0, 101.0],
+                "Close": [102.0, 106.0],
+                "Adj Close": [101.0, 105.0],
+                "Volume": [1000, 1200],
+            },
+            index=dates,
+        )
+
+        # 1. repair_policy=NONE must retry TimeoutError and raise RetryExhaustedError
+        none_calls = 0
+
+        def always_timeout(symbols, **kwargs):
+            nonlocal none_calls
+            none_calls += 1
+            raise TimeoutError("network timeout")
+
+        client_none = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.8.0"),
+            download_fn=always_timeout,
+            default_retry_policy=RetryPolicy(2, 0.0, 1.0, 0.0, 0.0),
+            sleep_fn=lambda _: None,
+        )
+        with pytest.raises(RetryExhaustedError):
+            client_none.fetch_daily_bars(
+                YFinanceDailyBarsRequest(
+                    symbols=("AAPL",),
+                    start_date="2026-01-01",
+                    end_date_exclusive="2026-01-10",
+                    batch_policy=YFinanceBatchPolicy.ALLOW_PARTIAL,
+                    repair_policy=YFinanceRepairPolicy.NONE,
+                )
+            )
+        assert none_calls == 2
+
+        # 2. repair_policy=PER_SYMBOL falls back after batch failure and retries single-symbol read
+        single_calls = 0
+
+        def batch_fail_single_retry(symbols, **kwargs):
+            nonlocal single_calls
+            if isinstance(symbols, list):
+                raise TimeoutError("batch timeout")
+            single_calls += 1
+            if single_calls == 1:
+                raise TimeoutError("transient single timeout")
+            return aapl_df
+
+        client_repair = YFinanceClient(
+            yf_module=SimpleNamespace(__version__="1.8.0"),
+            download_fn=batch_fail_single_retry,
+            default_retry_policy=RetryPolicy(2, 0.0, 1.0, 0.0, 0.0),
+            sleep_fn=lambda _: None,
+        )
+        res = client_repair.fetch_daily_bars(
+            YFinanceDailyBarsRequest(
+                symbols=("AAPL",),
+                start_date="2026-01-01",
+                end_date_exclusive="2026-01-10",
+                batch_policy=YFinanceBatchPolicy.STRICT,
+                repair_policy=YFinanceRepairPolicy.PER_SYMBOL,
+            )
+        )
+        assert single_calls == 2
+        assert res.symbol_outcomes["AAPL"] == YFinanceSymbolOutcome.RECOVERED
+        assert len(res.repair_receipts) == 1
+        assert res.repair_receipts[0].attempts == 2
+        assert res.provenance is not None
+        assert "batch_download_failed:RetryExhaustedError" in res.provenance.warnings
+
+    def test_actions_rejects_flat_multi_symbol_and_filters_inf(self):
+        from ohmydata.providers.yfinance._actions import extract_yfinance_actions_df
+
+        dates = pd.date_range("2026-01-02", periods=2)
+        flat_df = pd.DataFrame(
+            {
+                "Dividends": [0.0, 0.5],
+                "Stock Splits": [0.0, float("inf")],
+            },
+            index=dates,
+        )
+        with pytest.raises(SchemaMismatchError, match="MultiIndex"):
+            extract_yfinance_actions_df(flat_df, ("AAPL", "MSFT"))
+
+        single_actions = extract_yfinance_actions_df(flat_df, ("AAPL",))
+        assert single_actions.to_dict(orient="records") == [
+            {"symbol": "AAPL", "date": dates[1].date(), "action": "dividend", "value": 0.5}
+        ]
 
 
 class TestClientFundamentals:

@@ -1122,3 +1122,47 @@ def test_review_regressions_spot_window_today_bound_fail_fast_and_cli_flags(
         assert cli_main(bad_argv) == 2
         err_text = capsys.readouterr().err
         assert "usd-output" in err_text or "--usd-output" in err_text
+
+
+def test_sec_fx_review_regressions(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    cf_zip, sub_zip = _make_mini_zips(tmp_path, include_asml=True)
+    raw_dir = tmp_path / "raw-only"
+    fx_tbl = SecFxRateTable.from_observations(
+        [SecFxRateObservation("EUR", date(2024, 12, 31), Decimal("1.04"), "custom_ecb")]
+    )
+    with pytest.raises(ValueError, match="usd_output_dir"):
+        build_bulk_companyfacts_dataset(cf_zip, sub_zip, raw_dir, fx_table=fx_tbl)
+    assert not raw_dir.exists()
+
+    # headers=None on Frankfurter response raises PermanentProviderError, not AttributeError
+    class _NoneHeadersOpener:
+        def open(self, req: Any, timeout: float = 30.0) -> Any:
+            return SimpleNamespace(
+                status=200,
+                headers=None,
+                read=lambda n=-1: b'{"base":"USD","amount":1,"rates":{}}',
+                close=lambda: None,
+            )
+
+    with pytest.raises(PermanentProviderError, match="content type"):
+        fetch_frankfurter_fx_rates(
+            start_date=date(2024, 12, 30),
+            end_date=date(2024, 12, 31),
+            opener=_NoneHeadersOpener(),
+        )
+
+    # Custom fx_fetcher records actual observation source instead of hardcoded frankfurter_ecb
+    bulk_dir = tmp_path / "bulk-src"
+    build_bulk_companyfacts_dataset(cf_zip, sub_zip, bulk_dir)
+    custom_res = translate_bulk_dataset_to_usd(
+        bulk_dir,
+        fx_fetcher=lambda **kwargs: SecFxRateTable.from_observations(
+            [
+                SecFxRateObservation("EUR", date(2024, 6, 30), Decimal("1.08"), "custom_ecb"),
+                SecFxRateObservation("EUR", date(2024, 12, 31), Decimal("1.04"), "custom_ecb"),
+            ]
+        ),
+    )
+    assert custom_res.policy["fx_auto_fetch_source"] == "custom_ecb"

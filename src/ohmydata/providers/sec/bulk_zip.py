@@ -308,6 +308,17 @@ def build_bulk_companyfacts_dataset(
             auto_fetch_fx=auto_fetch_fx,
             fx_fetcher=fx_fetcher,
         )
+    elif (
+        fx_table is not None
+        or fx_fetcher is not None
+        or auto_fetch_fx is not True
+        or use_filing_implied is not True
+        or date_policy is not SecFxDatePolicy.PERIOD_END_SPOT
+        or flow_method is not SecFxFlowMethod.PERIOD_AVERAGE
+        or max_staleness_days != DEFAULT_FX_MAX_STALENESS_DAYS
+        or allow_spot_fallback is not True
+    ):
+        raise ValueError("USD translation parameters require usd_output_dir")
     projection = project_bulk_companyfacts_zips(
         companyfacts_zip,
         submissions_zip,

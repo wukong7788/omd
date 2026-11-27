@@ -10,8 +10,8 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .endpoints import SharadarTable
-from .errors import SharadarError, redact_secret
+from .endpoints import DEFAULT_MAX_EXTRACTED_BYTES, SharadarTable
+from .errors import SharadarError, SharadarTruncatedDownloadError, redact_secret
 
 CHUNK_SIZE = 1024 * 1024
 
@@ -34,7 +34,7 @@ class DownloadedPayload:
 def _parse_csv_header(first_line_bytes: bytes) -> tuple[str, ...]:
     if not first_line_bytes:
         return ()
-    text = first_line_bytes.decode("utf-8", errors="replace").strip("\r\n")
+    text = first_line_bytes.decode("utf-8-sig", errors="replace").strip("\r\n")
     if not text:
         return ()
     parsed = next(csv.reader([text]), [])
@@ -90,6 +90,7 @@ def extract_zip_payload(
     raw_bytes: int,
     raw_sha256: str,
     api_key: str,
+    max_extracted_bytes: int = DEFAULT_MAX_EXTRACTED_BYTES,
 ) -> DownloadedPayload:
     """Validate and extract the primary CSV from a downloaded ZIP archive atomically."""
     csv_hash = hashlib.sha256()
@@ -105,9 +106,14 @@ def extract_zip_payload(
                 )
             with zf.open(csv_members[0], "r") as src, csv_tmp.open("wb") as dst:
                 while chunk := src.read(CHUNK_SIZE):
+                    csv_bytes += len(chunk)
+                    if csv_bytes > max_extracted_bytes:
+                        raise SharadarError(
+                            f"Sharadar {table.value} extracted CSV exceeded "
+                            f"max_extracted_bytes ({max_extracted_bytes})"
+                        )
                     dst.write(chunk)
                     csv_hash.update(chunk)
-                    csv_bytes += len(chunk)
                     counter.update(chunk)
         os.replace(csv_tmp, csv_path)
     except SharadarError:
@@ -118,7 +124,7 @@ def extract_zip_payload(
         csv_tmp.unlink(missing_ok=True)
         raw_tmp.unlink(missing_ok=True)
         safe_msg = redact_secret(str(exc), api_key)
-        raise SharadarError(
+        raise SharadarTruncatedDownloadError(
             f"Sharadar {table.value} downloaded ZIP is corrupt or truncated: {safe_msg}"
         ) from None
     except Exception:

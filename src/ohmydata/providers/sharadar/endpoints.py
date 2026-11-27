@@ -20,6 +20,7 @@ STANDARD_COLUMNS: tuple[str, ...] = (
     "adj_close",
     "volume",
 )
+DEFAULT_MAX_EXTRACTED_BYTES: int = 4 * 1024 * 1024 * 1024
 
 
 class SharadarTable(StrEnum):
@@ -91,6 +92,8 @@ class SharadarBulkTableRequest:
     keep_zip: bool = True
     timeout: float = 300.0
     retry_policy: RetryPolicy | None = None
+    overwrite: bool = False
+    max_extracted_bytes: int = DEFAULT_MAX_EXTRACTED_BYTES
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "table", normalize_table(self.table))
@@ -115,7 +118,12 @@ class SharadarBulkTableRequest:
         ):
             raise ValueError(f"timeout must be a positive finite number, got {self.timeout!r}")
         object.__setattr__(self, "timeout", float(self.timeout))
-        object.__setattr__(self, "keep_zip", bool(self.keep_zip))
+        if type(self.overwrite) is not bool:
+            raise TypeError(f"overwrite must be a bool, got {type(self.overwrite).__name__}")
+        if type(self.max_extracted_bytes) is not int or self.max_extracted_bytes <= 0:
+            raise ValueError(
+                f"max_extracted_bytes must be a positive integer, got {self.max_extracted_bytes!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -147,6 +155,7 @@ class SharadarBulkDownloadResult:
 
 
 __all__ = [
+    "DEFAULT_MAX_EXTRACTED_BYTES",
     "SHARADAR_CAPABILITIES",
     "STANDARD_COLUMNS",
     "SharadarAdjustmentMode",

@@ -477,9 +477,17 @@ def resolve_auto_fx_table(
     fetched = fetcher(start_date=min_date, end_date=fetch_end)
     if not isinstance(fetched, SecFxRateTable):
         raise TypeError("fx_fetcher must return a SecFxRateTable")
+    auto_sources = sorted({obs.source for obs in fetched.iter_observations()})
+    source_label = (
+        ",".join(auto_sources)
+        if auto_sources
+        else (
+            FRANKFURTER_FX_SOURCE if fetcher is fetch_frankfurter_fx_rates else "custom_fx_fetcher"
+        )
+    )
     return fetched, {
         "fx_auto_fetched": True,
-        "fx_auto_fetch_source": FRANKFURTER_FX_SOURCE,
+        "fx_auto_fetch_source": source_label,
         "fx_auto_fetch_start_date": min_date.isoformat(),
         "fx_auto_fetch_end_date": fetch_end.isoformat() if fetch_end is not None else None,
     }

@@ -88,6 +88,26 @@ class TestDailyBarsValidation:
         with pytest.raises(SchemaMismatchError, match="high < low"):
             validate_daily_bars_dataframe(df)
 
+    def test_ohlc_ulp_tolerance_and_real_violation(self):
+        df = _make_valid_df()
+        df.loc[0, "high"] = float(df.loc[0, "close"]) - 1e-12
+        validate_daily_bars_dataframe(df)
+        outcomes = evaluate_symbol_outcomes(
+            df, ("AAPL",), YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE
+        )
+        assert outcomes["AAPL"] == YFinanceSymbolOutcome.COMPLETE
+
+        bad = _make_valid_df()
+        bad.loc[0, "high"] = float(bad.loc[0, "close"]) - 0.01
+        with pytest.raises(SchemaMismatchError, match="high is less than"):
+            validate_daily_bars_dataframe(bad)
+        assert (
+            evaluate_symbol_outcomes(bad, ("AAPL",), YFinanceAdjustmentMode.RAW_WITH_ADJ_CLOSE)[
+                "AAPL"
+            ]
+            == YFinanceSymbolOutcome.INVALID_VALUES
+        )
+
     def test_negative_volume_fails(self):
         df = _make_valid_df()
         df.loc[0, "volume"] = -5

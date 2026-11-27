@@ -18,6 +18,10 @@ class SharadarError(ProviderError):
     """Base error for Sharadar Direct bulk download and reader operations."""
 
 
+class SharadarTruncatedDownloadError(SharadarError, TransientProviderError):
+    """Transient error raised when a Sharadar download stream is truncated or corrupt."""
+
+
 def redact_secret(text: str, api_key: str) -> str:
     """Redact plain and URL-encoded forms of ``api_key`` from ``text``."""
     if not text or not api_key:
@@ -61,6 +65,7 @@ def classify_sharadar_http_error(
 
 __all__ = [
     "SharadarError",
+    "SharadarTruncatedDownloadError",
     "classify_sharadar_http_error",
     "redact_secret",
 ]

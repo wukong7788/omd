@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.7.0 — 2026-11-27
+
+### Added
+
+- Add native lazy and eager Polars local readers for Sharadar datasets
+  (`scan_local_bars_pl`, `read_local_bars_pl`, `scan_local_actions_pl`,
+  `read_local_actions_pl` in `ohmydata.providers.sharadar`) under
+  `ohmydata[polars]`, supporting CSV/Parquet predicate pushdown, explicit
+  numeric/string `schema_overrides`, strict date parsing, and literal
+  `"NA"`/`"NAN"`/`"NULL"` ticker preservation.
+- Add native Polars `DataFrame` support across `ohmydata.tools.eod_qc`
+  (`run_eod_qc`, `detect_*`, and dual-DataFrame `apply_corrections` preserving
+  the caller's `polars.DataFrame` or `pandas.DataFrame` type).
+- Add `SharadarTruncatedDownloadError` (subclass of `SharadarError` and
+  `TransientProviderError`), `DEFAULT_MAX_EXTRACTED_BYTES` (4 GiB), and
+  `SharadarBulkTableRequest` parameters `overwrite: bool = False` and
+  `max_extracted_bytes`.
+
+### Changed
+
+- Rewrite `ohmydata.tools.eod_qc` internal detectors on Polars
+  (`ohmydata[polars]` — `polars` and `pyarrow` — is now required for both
+  Polars and Pandas callers).
+- Default `SharadarBulkTableRequest.overwrite` to `False` (raising
+  `FileExistsError` rather than silently overwriting existing local CSV/ZIP
+  files); callers refreshing files in-place must pass `overwrite=True`.
+- Update `YFinanceClient.fetch_daily_bars` to pass `"keepna": True` (and
+  record `"keepna": True` in `provenance.effective_parameters`), retry
+  transient transport errors (`TimeoutError`, `ConnectionError`, `OSError`) on
+  both batch and `PER_SYMBOL` recovery paths, and propagate batch download
+  exceptions when `repair_policy=NONE` instead of collapsing them to an empty
+  frame.
+- Fail fast with `ValueError` in `build_bulk_companyfacts_dataset` when
+  non-default USD translation kwargs are supplied without `usd_output_dir`,
+  and distinguish auto-FX progress messaging from offline runs in
+  `omd sec financials bulk-project`.
+- Extract `write_fx_rate_table` into `src/ohmydata/providers/sec/_fx_rates_io.py`
+  (preserving all public imports) and record actual fetched observation sources
+  in `policy["fx_auto_fetch_source"]` instead of hardcoding `frankfurter_ecb`.
+
+### Fixed
+
+- Preserve literal `"NA"`, `"NAN"`, `"NULL"`, and `"N/A"` tickers in Pandas
+  Sharadar CSV readers (`keep_default_na=False, na_values=[""]`), fix
+  >100-row Polars CSV integer-to-float / late `"NA"` schema inference errors,
+  and strip UTF-8 BOM in Sharadar provenance CSV headers.
+- Harden `SharadarClient` to require `https://` `base_url`, reject non-HTTPS
+  and cross-host `api_key`-leaking redirects, redact and retry
+  `http.client.HTTPException` / truncated downloads, bound `fetch_status` reads
+  to 64 KiB, classify `>= 400` status responses, and set
+  `available=(status_code == 200)`.
+- Support `YYYYMMDD` and `YYYY/MM/DD` date formats in `eod_qc` date parsing
+  (preventing silent row drops and false `PASSED` verdicts), handle null
+  `close` on overnight-gap split candidates without `TypeError`, guard Polars
+  `NaN`/`inf` split ratio comparisons, and fix Pandas nullable `pd.NA`/`pd.NaT`
+  and `bool` comparisons in `apply_corrections`.
+- Fix `yfinance` multi-symbol flat actions fallback (`SchemaMismatchError`
+  instead of `"UNKNOWN"`), filter non-finite action values, align OHLC `1e-9`
+  relative ULP tolerance between `yfinance.quality` and `eod_qc`, check
+  numeric `volume` dtype, and avoid empty-frame `pd.concat` dtype corruption
+  during full per-symbol recovery.
+- Guard `response.headers is None` in `fx_rates._fetch_frankfurter_bytes`.
+
 ## 0.6.2 — 2026-11-27
 
 ### Added

@@ -18,6 +18,8 @@ from .endpoints import (
 )
 from .errors import CoverageError, SchemaMismatchError
 
+_OHLC_ULP_REL_TOL: float = 1e-9
+
 
 def validate_daily_bars_dataframe(
     df: pd.DataFrame,
@@ -49,15 +51,18 @@ def validate_daily_bars_dataframe(
                 f"Price column {col!r} contains non-positive or infinite values"
             )
 
-    # High / Low relationship checks
+    # High / Low relationship checks (allow 1e-9 relative tolerance for float ULP rounding)
+    tol = np.abs(df["close"]) * _OHLC_ULP_REL_TOL
     if (df["high"] < df["low"]).any():
         raise SchemaMismatchError("Found rows where high < low")
-    if (df["high"] < df["open"]).any() or (df["high"] < df["close"]).any():
+    if (df["high"] < np.maximum(df["open"], df["close"]) - tol).any():
         raise SchemaMismatchError("Found rows where high is less than open or close")
-    if (df["low"] > df["open"]).any() or (df["low"] > df["close"]).any():
+    if (df["low"] > np.minimum(df["open"], df["close"]) + tol).any():
         raise SchemaMismatchError("Found rows where low is greater than open or close")
 
     # Volume check
+    if not pd.api.types.is_numeric_dtype(df["volume"].dtype):
+        raise SchemaMismatchError("volume column is not numeric")
     if (df["volume"] < 0).any() or np.isinf(df["volume"]).any():
         raise SchemaMismatchError("volume contains negative or infinite values")
 
@@ -118,13 +123,12 @@ def evaluate_symbol_outcomes(
                 has_invalid_prices = True
                 break
 
+        sym_tol = np.abs(sym_df["close"]) * _OHLC_ULP_REL_TOL
         if (
             has_invalid_prices
             or (sym_df["high"] < sym_df["low"]).any()
-            or (sym_df["high"] < sym_df["open"]).any()
-            or (sym_df["high"] < sym_df["close"]).any()
-            or (sym_df["low"] > sym_df["open"]).any()
-            or (sym_df["low"] > sym_df["close"]).any()
+            or (sym_df["high"] < np.maximum(sym_df["open"], sym_df["close"]) - sym_tol).any()
+            or (sym_df["low"] > np.minimum(sym_df["open"], sym_df["close"]) + sym_tol).any()
             or not pd.api.types.is_numeric_dtype(sym_df["volume"].dtype)
             or (sym_df["volume"] < 0).any()
             or np.isinf(sym_df["volume"]).any()

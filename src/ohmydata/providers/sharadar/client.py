@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.client
 import math
 import os
 import random
@@ -18,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ohmydata.core.errors import AuthenticationError, TransientProviderError
+from ohmydata.core.errors import AuthenticationError, PermanentProviderError, TransientProviderError
 from ohmydata.core.policy import RetryPolicy, execute_with_retry
 from ohmydata.core.provenance import EmptyDisposition, FetchProvenance
 from ohmydata.core.specs import RequestSpec
@@ -32,10 +33,56 @@ from .endpoints import (
     normalize_table,
     normalize_years,
 )
-from .errors import SharadarError, classify_sharadar_http_error, redact_secret
+from .errors import (
+    SharadarTruncatedDownloadError,
+    classify_sharadar_http_error,
+    redact_secret,
+)
 
 DEFAULT_BASE_URL = "https://api.sharadar.com/v1.0/data"
 _USER_AGENT = "ohmydata-sharadar/0.1"
+_MAX_STATUS_BYTES = 65536
+
+
+def _validate_base_url(base_url: str) -> str:
+    cleaned = base_url.strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(cleaned)
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Sharadar base_url must be a clean https:// URL without credentials")
+    return cleaned
+
+
+class _HttpsOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject non-HTTPS redirects and cross-host redirects that could leak api_key."""
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        src = urllib.parse.urlsplit(req.full_url)
+        dst = urllib.parse.urlsplit(newurl)
+        if dst.scheme.lower() != "https":
+            raise PermanentProviderError("Sharadar non-HTTPS redirect rejected")
+        if dst.hostname != src.hostname and (
+            self._api_key in dst.query or urllib.parse.quote(self._api_key, safe="") in dst.query
+        ):
+            raise PermanentProviderError("Sharadar cross-host redirect rejected")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class SharadarClient:
@@ -58,8 +105,10 @@ class SharadarClient:
             raise ValueError("base_url must be a non-empty string")
 
         self._api_key = api_key.strip()
-        self._base_url = base_url.strip().rstrip("/")
-        self._opener = opener or urllib.request.urlopen
+        self._base_url = _validate_base_url(base_url)
+        self._opener = (
+            opener or urllib.request.build_opener(_HttpsOnlyRedirectHandler(self._api_key)).open
+        )
         self._retry_policy = retry_policy or RetryPolicy(
             max_attempts=3,
             base_delay_seconds=1.0,
@@ -99,7 +148,7 @@ class SharadarClient:
             with contextlib.suppress(Exception):
                 exc.close()
             raise classify_sharadar_http_error(code, reason, self._api_key) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
             safe_msg = redact_secret(str(exc), self._api_key)
             raise TransientProviderError(f"Sharadar transport error: {safe_msg}") from None
 
@@ -128,14 +177,21 @@ class SharadarClient:
         def _probe() -> tuple[int, str]:
             try:
                 with self._open_response(url, timeout=float(timeout)) as resp:
-                    raw = resp.read()
+                    raw = resp.read(_MAX_STATUS_BYTES + 1)
+                    if len(raw) > _MAX_STATUS_BYTES:
+                        raise PermanentProviderError(
+                            f"Sharadar status response exceeded {_MAX_STATUS_BYTES} bytes"
+                        )
                     status_code = getattr(resp, "status", None)
                     if status_code is None and hasattr(resp, "getcode"):
                         status_code = resp.getcode()
                     code_int = int(status_code) if status_code is not None else 200
                     body = raw.decode("utf-8", errors="replace").strip() if raw else ""
-                    return code_int, redact_secret(body, self._api_key)
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    safe_body = redact_secret(body, self._api_key)
+                    if code_int >= 400:
+                        raise classify_sharadar_http_error(code_int, safe_body, self._api_key)
+                    return code_int, safe_body
+            except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
                 safe_msg = redact_secret(str(exc), self._api_key)
                 raise TransientProviderError(f"Sharadar transport error: {safe_msg}") from None
 
@@ -171,7 +227,7 @@ class SharadarClient:
         return SharadarTableStatusResult(
             table=resolved_table,
             years=resolved_years,
-            available=True,
+            available=status_code == 200,
             status_code=status_code,
             message=message,
             provenance=provenance,
@@ -182,6 +238,14 @@ class SharadarClient:
         table = normalize_table(request.table)
         years = normalize_years(request.years)
         output_dir = Path(request.output_dir)
+        csv_path = output_dir / f"{table.value}.csv"
+        zip_path = output_dir / f"{table.value}.csv.zip"
+        if not request.overwrite and (
+            csv_path.exists() or (request.keep_zip and zip_path.exists())
+        ):
+            raise FileExistsError(
+                f"Refusing to overwrite existing Sharadar file in {output_dir} without overwrite=True"
+            )
         output_dir.mkdir(parents=True, exist_ok=True)
         url = self._build_url(table, years=years, status_only=False)
         policy = request.retry_policy or self._retry_policy
@@ -193,6 +257,7 @@ class SharadarClient:
                 output_dir=output_dir,
                 keep_zip=request.keep_zip,
                 timeout=request.timeout,
+                max_extracted_bytes=request.max_extracted_bytes,
             ),
             policy=policy,
             sleep=self._sleep_fn,
@@ -248,6 +313,7 @@ class SharadarClient:
         output_dir: Path,
         keep_zip: bool,
         timeout: float,
+        max_extracted_bytes: int,
     ) -> DownloadedPayload:
         nonce = uuid.uuid4().hex[:8]
         raw_tmp = output_dir / f".{table.value}.{nonce}.download.tmp"
@@ -277,7 +343,7 @@ class SharadarClient:
                     raw_hash.update(chunk)
                     raw_bytes += len(chunk)
                     raw_csv_counter.update(chunk)
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
             raw_tmp.unlink(missing_ok=True)
             safe_msg = redact_secret(str(exc), self._api_key)
             raise TransientProviderError(f"Sharadar transport error: {safe_msg}") from None
@@ -287,7 +353,7 @@ class SharadarClient:
 
         if expected_len is not None and raw_bytes != expected_len:
             raw_tmp.unlink(missing_ok=True)
-            raise SharadarError(
+            raise SharadarTruncatedDownloadError(
                 f"Sharadar {table.value} truncated download: "
                 f"got {raw_bytes} bytes, expected {expected_len}"
             )
@@ -298,7 +364,9 @@ class SharadarClient:
         is_zip = zipfile.is_zipfile(raw_tmp)
         if (head.startswith(b"PK\x03\x04") or is_zip_hint) and not is_zip:
             raw_tmp.unlink(missing_ok=True)
-            raise SharadarError(f"Sharadar {table.value} downloaded ZIP is corrupt or truncated")
+            raise SharadarTruncatedDownloadError(
+                f"Sharadar {table.value} downloaded ZIP is corrupt or truncated"
+            )
 
         if is_zip:
             return extract_zip_payload(
@@ -311,6 +379,7 @@ class SharadarClient:
                 raw_bytes=raw_bytes,
                 raw_sha256=raw_hash.hexdigest(),
                 api_key=self._api_key,
+                max_extracted_bytes=max_extracted_bytes,
             )
 
         columns, row_count = raw_csv_counter.summary()

@@ -129,6 +129,7 @@ def run_bulk_project(
             raise ValueError("--usd-output must differ from --output")
         ensure_safe_output_root(usd_output)
         usd_opts = _parse_usd_options(args)
+        usd_opts["fx_fetcher"] = fx_fetcher
     else:
         has_usd_flag = any(
             bool(getattr(args, key, False))
@@ -149,7 +150,17 @@ def run_bulk_project(
     workers = _parse_optional_int(args, "workers", "--workers", 1)
 
     quiet = getattr(args, "quiet", False)
-    log_progress("projecting SEC bulk ZIP archives offline...", quiet)
+    will_auto_fetch = (
+        usd_output is not None
+        and usd_opts.get("auto_fetch_fx", True)
+        and usd_opts.get("fx_table") is None
+    )
+    log_progress(
+        "projecting SEC bulk ZIP archives and translating to USD (auto-FX enabled)..."
+        if will_auto_fetch
+        else "projecting SEC bulk ZIP archives offline...",
+        quiet,
+    )
     manifest = build_bulk_companyfacts_dataset(
         cf_zip,
         sub_zip,
@@ -164,7 +175,6 @@ def run_bulk_project(
         max_total_bytes=DEFAULT_MAX_ZIP_TOTAL_BYTES if max_total is None else int(max_total),
         workers=workers,
         usd_output_dir=usd_output,
-        fx_fetcher=fx_fetcher,
         **usd_opts,
     )
     payload.update(manifest)
