@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from ._bulk_zip_dataset import validate_bulk_companyfacts_dataset
-from ._bulk_zip_models import SecBulkFundamentalRow, SecBulkJoinedFact
+from ._bulk_zip_models import SecBulkFundamentalRow, SecBulkJoinedFact, SecBulkProjectionResult
 from ._fx_translation_dataset import (
     validate_usd_translated_fundamentals_dataset,
     write_usd_translated_fundamentals_dataset,
 )
-from ._fx_translation_engine import translate_single_row
+from ._fx_translation_engine import resolve_auto_fx_table, translate_single_row
 from ._fx_translation_io import (
     extract_filing_implied_fx_rates,
     extract_implied_from_facts_parquet,
@@ -50,7 +50,7 @@ from .fx_rates import (
 )
 
 
-def _validate_translation_params(
+def validate_translation_params(
     *,
     fx_table: SecFxRateTable | None,
     use_filing_implied: bool,
@@ -58,9 +58,12 @@ def _validate_translation_params(
     flow_method: SecFxFlowMethod,
     max_staleness_days: int,
     allow_spot_fallback: bool,
-    max_implied_spread: Decimal,
-    allow_cross_kind_implied: bool,
+    max_implied_spread: Decimal = DEFAULT_FX_MAX_IMPLIED_SPREAD,
+    allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = False,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
 ) -> None:
+    """Validate explicit FX translation policy arguments before fetching or reading inputs."""
     if fx_table is not None and not isinstance(fx_table, SecFxRateTable):
         raise TypeError("fx_table must be a SecFxRateTable or None")
     if type(use_filing_implied) is not bool:
@@ -81,6 +84,10 @@ def _validate_translation_params(
         raise ValueError("max_implied_spread must be a non-negative finite Decimal")
     if type(allow_cross_kind_implied) is not bool:
         raise TypeError("allow_cross_kind_implied must be a bool")
+    if type(auto_fetch_fx) is not bool:
+        raise TypeError("auto_fetch_fx must be a bool")
+    if fx_fetcher is not None and not callable(fx_fetcher):
+        raise TypeError("fx_fetcher must be callable or None")
 
 
 def _translate_rows_with_implied_map(
@@ -142,9 +149,11 @@ def translate_bulk_fundamentals_to_usd(
     allow_spot_fallback: bool = True,
     max_implied_spread: Decimal = DEFAULT_FX_MAX_IMPLIED_SPREAD,
     allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = False,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
 ) -> SecUsdTranslationResult:
     """Translate SEC bulk fundamental rows into USD with full PIT provenance."""
-    _validate_translation_params(
+    validate_translation_params(
         fx_table=fx_table,
         use_filing_implied=use_filing_implied,
         date_policy=date_policy,
@@ -153,13 +162,15 @@ def translate_bulk_fundamentals_to_usd(
         allow_spot_fallback=allow_spot_fallback,
         max_implied_spread=max_implied_spread,
         allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
     )
     implied_map = (
         extract_filing_implied_fx_rates(joined_facts, max_implied_spread=max_implied_spread)
         if use_filing_implied and joined_facts
         else {}
     )
-    return _translate_rows_with_implied_map(
+    resolved_fx, auto_meta = resolve_auto_fx_table(
         rows,
         implied_map=implied_map,
         fx_table=fx_table,
@@ -167,9 +178,71 @@ def translate_bulk_fundamentals_to_usd(
         date_policy=date_policy,
         flow_method=flow_method,
         max_staleness_days=max_staleness_days,
+        allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
+    )
+    return _translate_rows_with_implied_map(
+        rows,
+        implied_map=implied_map,
+        fx_table=resolved_fx,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
         allow_spot_fallback=allow_spot_fallback,
         max_implied_spread=max_implied_spread,
         allow_cross_kind_implied=allow_cross_kind_implied,
+        extra_policy=auto_meta,
+    )
+
+
+def _finish_bulk_translation(
+    rows: Sequence[SecBulkFundamentalRow],
+    *,
+    source_manifest: Mapping[str, Any],
+    implied_map: Mapping[tuple[str, str, str], SecFilingImpliedFxPair],
+    fx_table: SecFxRateTable | None,
+    use_filing_implied: bool,
+    date_policy: SecFxDatePolicy,
+    flow_method: SecFxFlowMethod,
+    max_staleness_days: int,
+    allow_spot_fallback: bool,
+    max_implied_spread: Decimal,
+    allow_cross_kind_implied: bool,
+    auto_fetch_fx: bool,
+    fx_fetcher: Callable[..., SecFxRateTable] | None,
+) -> SecUsdTranslationResult:
+    resolved_fx, auto_meta = resolve_auto_fx_table(
+        rows,
+        implied_map=implied_map,
+        fx_table=fx_table,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
+    )
+    source_lineage = {
+        "source_dataset_schema": source_manifest["dataset_schema"],
+        "source_fundamentals_sha256": source_manifest["files"]["fundamentals.parquet"]["sha256"],
+        "source_facts_sha256": source_manifest["files"]["facts.parquet"]["sha256"],
+        **auto_meta,
+    }
+    return _translate_rows_with_implied_map(
+        rows,
+        implied_map=implied_map,
+        fx_table=resolved_fx,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_spot_fallback=allow_spot_fallback,
+        max_implied_spread=max_implied_spread,
+        allow_cross_kind_implied=allow_cross_kind_implied,
+        extra_policy=source_lineage,
     )
 
 
@@ -184,9 +257,11 @@ def translate_bulk_dataset_to_usd(
     allow_spot_fallback: bool = True,
     max_implied_spread: Decimal = DEFAULT_FX_MAX_IMPLIED_SPREAD,
     allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = True,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
 ) -> SecUsdTranslationResult:
-    """Validate and translate a ``sec-bulk-companyfacts-v1`` dataset into USD offline."""
-    _validate_translation_params(
+    """Validate and translate a ``sec-bulk-companyfacts-v1`` dataset into USD."""
+    validate_translation_params(
         fx_table=fx_table,
         use_filing_implied=use_filing_implied,
         date_policy=date_policy,
@@ -195,6 +270,8 @@ def translate_bulk_dataset_to_usd(
         allow_spot_fallback=allow_spot_fallback,
         max_implied_spread=max_implied_spread,
         allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
     )
     src_dir = Path(bulk_dataset_dir)
     source_manifest = validate_bulk_companyfacts_dataset(src_dir)
@@ -213,13 +290,9 @@ def translate_bulk_dataset_to_usd(
         if use_filing_implied
         else {}
     )
-    source_lineage = {
-        "source_dataset_schema": source_manifest["dataset_schema"],
-        "source_fundamentals_sha256": source_manifest["files"]["fundamentals.parquet"]["sha256"],
-        "source_facts_sha256": source_manifest["files"]["facts.parquet"]["sha256"],
-    }
-    return _translate_rows_with_implied_map(
+    return _finish_bulk_translation(
         rows,
+        source_manifest=source_manifest,
         implied_map=implied_map,
         fx_table=fx_table,
         use_filing_implied=use_filing_implied,
@@ -229,8 +302,69 @@ def translate_bulk_dataset_to_usd(
         allow_spot_fallback=allow_spot_fallback,
         max_implied_spread=max_implied_spread,
         allow_cross_kind_implied=allow_cross_kind_implied,
-        extra_policy=source_lineage,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
     )
+
+
+def build_usd_translated_from_projection(
+    projection: SecBulkProjectionResult,
+    output_dir: str | Path,
+    *,
+    source_manifest: Mapping[str, Any],
+    fx_table: SecFxRateTable | None = None,
+    use_filing_implied: bool = True,
+    date_policy: SecFxDatePolicy = SecFxDatePolicy.PERIOD_END_SPOT,
+    flow_method: SecFxFlowMethod = SecFxFlowMethod.PERIOD_AVERAGE,
+    max_staleness_days: int = DEFAULT_FX_MAX_STALENESS_DAYS,
+    allow_spot_fallback: bool = True,
+    max_implied_spread: Decimal = DEFAULT_FX_MAX_IMPLIED_SPREAD,
+    allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = True,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
+) -> dict[str, Any]:
+    """Translate an in-memory bulk projection to USD, write immutable Parquet, and validate."""
+    validate_translation_params(
+        fx_table=fx_table,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_spot_fallback=allow_spot_fallback,
+        max_implied_spread=max_implied_spread,
+        allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
+    )
+    rows = projection.fundamental_rows
+    non_usd_accns = {
+        r.accession_number
+        for r in rows
+        if r.reporting_currency is not None and r.reporting_currency.strip().upper() != "USD"
+    }
+    implied_facts = [f for f in projection.joined_facts if f.accession_number in non_usd_accns]
+    implied_map = (
+        extract_filing_implied_fx_rates(implied_facts, max_implied_spread=max_implied_spread)
+        if use_filing_implied and implied_facts
+        else {}
+    )
+    result = _finish_bulk_translation(
+        rows,
+        source_manifest=source_manifest,
+        implied_map=implied_map,
+        fx_table=fx_table,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_spot_fallback=allow_spot_fallback,
+        max_implied_spread=max_implied_spread,
+        allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
+    )
+    write_usd_translated_fundamentals_dataset(output_dir, result)
+    return validate_usd_translated_fundamentals_dataset(output_dir)
 
 
 def build_usd_translated_fundamentals_dataset(
@@ -245,6 +379,8 @@ def build_usd_translated_fundamentals_dataset(
     allow_spot_fallback: bool = True,
     max_implied_spread: Decimal = DEFAULT_FX_MAX_IMPLIED_SPREAD,
     allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = True,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
 ) -> dict[str, Any]:
     """One-shot CLI/SDK helper: translate bulk dataset to USD, write immutable Parquet, validate."""
     result = translate_bulk_dataset_to_usd(
@@ -257,6 +393,8 @@ def build_usd_translated_fundamentals_dataset(
         allow_spot_fallback=allow_spot_fallback,
         max_implied_spread=max_implied_spread,
         allow_cross_kind_implied=allow_cross_kind_implied,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
     )
     write_usd_translated_fundamentals_dataset(output_dir, result)
     return validate_usd_translated_fundamentals_dataset(output_dir)

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.3 — 2026-11-27
+
+### Added
+
+- Support one-shot native + USD bulk dataset output via
+  `build_bulk_companyfacts_dataset(..., usd_output_dir=...)`,
+  `build_usd_translated_from_projection`, and CLI
+  `omd sec financials bulk-project --usd-output <dir>`, reusing the in-memory
+  projection and failing fast on invalid FX flags.
+- Add `resolve_auto_fx_table` and `validate_translation_params` in the SEC FX
+  translation layer to determine minimal required PIT FX date windows and emit
+  `fx_auto_fetched` metadata in `manifest.json` policy.
+
+### Changed
+
+- Automatically fetch free daily ECB/Frankfurter FX rates by default
+  (`auto_fetch_fx=True`) in `translate_bulk_dataset_to_usd`,
+  `build_usd_translated_fundamentals_dataset`, and CLI
+  `omd sec financials translate-usd` when no explicit FX rate table is supplied
+  and unresolved non-USD rows remain (`--no-auto-fx` / `auto_fetch_fx=False`
+  preserves strict offline behavior).
+
 ## 0.5.2 — 2026-11-27
 
 ### Added

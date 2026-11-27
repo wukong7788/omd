@@ -824,7 +824,7 @@ def test_cli_translate_usd_and_dataset_end_to_end_offline(
     )
 
     # 1. SDK translate_bulk_dataset_to_usd without external FX: BABA implied, ASML missing
-    res_no_fx = translate_bulk_dataset_to_usd(bulk_dir)
+    res_no_fx = translate_bulk_dataset_to_usd(bulk_dir, auto_fetch_fx=False)
     by_sym = {r.symbols[0]: r for r in res_no_fx.rows}
     assert by_sym["BABA"].fx_status is SecFxTranslationStatus.TRANSLATED_FILING_IMPLIED
     assert by_sym["BABA"].revenue_usd == Decimal(140000)

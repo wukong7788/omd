@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +42,14 @@ from ._bulk_zip_parallel import (
 )
 from ._companyfacts_models import normalize_sec_cik
 from .errors import SchemaMismatchError
+from .fx_translation import (
+    DEFAULT_FX_MAX_STALENESS_DAYS,
+    SecFxDatePolicy,
+    SecFxFlowMethod,
+    SecFxRateTable,
+    build_usd_translated_from_projection,
+    validate_translation_params,
+)
 
 DEFAULT_BULK_FORMS: tuple[str, ...] = ("10-K", "10-Q", "20-F", "40-F")
 _SUPPORTED_BASE_FORMS = frozenset({"10-K", "10-Q", "20-F", "40-F"})
@@ -274,8 +282,32 @@ def build_bulk_companyfacts_dataset(
     max_total_bytes: int = DEFAULT_MAX_ZIP_TOTAL_BYTES,
     max_history_pages_per_cik: int = DEFAULT_MAX_HISTORY_PAGES_PER_CIK,
     workers: int = 1,
+    usd_output_dir: str | Path | None = None,
+    fx_table: SecFxRateTable | None = None,
+    auto_fetch_fx: bool = True,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
+    use_filing_implied: bool = True,
+    date_policy: SecFxDatePolicy = SecFxDatePolicy.PERIOD_END_SPOT,
+    flow_method: SecFxFlowMethod = SecFxFlowMethod.PERIOD_AVERAGE,
+    max_staleness_days: int = DEFAULT_FX_MAX_STALENESS_DAYS,
+    allow_spot_fallback: bool = True,
 ) -> dict[str, Any]:
     """One-shot CLI/SDK helper: project bulk ZIPs, write immutable dataset, and validate."""
+    if usd_output_dir is not None:
+        if not str(usd_output_dir).strip():
+            raise ValueError("usd_output_dir cannot be empty")
+        if Path(usd_output_dir).expanduser().resolve() == Path(output_dir).expanduser().resolve():
+            raise ValueError("usd_output_dir must differ from output_dir")
+        validate_translation_params(
+            fx_table=fx_table,
+            use_filing_implied=use_filing_implied,
+            date_policy=date_policy,
+            flow_method=flow_method,
+            max_staleness_days=max_staleness_days,
+            allow_spot_fallback=allow_spot_fallback,
+            auto_fetch_fx=auto_fetch_fx,
+            fx_fetcher=fx_fetcher,
+        )
     projection = project_bulk_companyfacts_zips(
         companyfacts_zip,
         submissions_zip,
@@ -291,7 +323,23 @@ def build_bulk_companyfacts_dataset(
         workers=workers,
     )
     write_bulk_companyfacts_dataset(output_dir, projection)
-    return validate_bulk_companyfacts_dataset(output_dir)
+    manifest = validate_bulk_companyfacts_dataset(output_dir)
+    if usd_output_dir is None:
+        return manifest
+    usd_manifest = build_usd_translated_from_projection(
+        projection,
+        usd_output_dir,
+        source_manifest=manifest,
+        fx_table=fx_table,
+        use_filing_implied=use_filing_implied,
+        date_policy=date_policy,
+        flow_method=flow_method,
+        max_staleness_days=max_staleness_days,
+        allow_spot_fallback=allow_spot_fallback,
+        auto_fetch_fx=auto_fetch_fx,
+        fx_fetcher=fx_fetcher,
+    )
+    return {**manifest, "usd_dataset": usd_manifest}
 
 
 __all__ = [

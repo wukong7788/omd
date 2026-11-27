@@ -567,30 +567,31 @@ uv run omd sec financials sync-incremental \
   --user-agent-file /path/to/private-sec-contact.txt \
   --json
 
-# Offline SEC bulk ZIP PIT projection (companyfacts.zip + submissions.zip -> Parquet dataset):
+# Offline SEC bulk ZIP PIT projection (native currency) + optional one-shot USD dataset:
 uv run omd sec financials bulk-project \
   --companyfacts-zip /path/to/companyfacts.zip \
   --submissions-zip /path/to/submissions.zip \
   --output artifacts/sec-bulk-pit \
+  --usd-output artifacts/sec-bulk-pit-usd \
   --start-year 2018 \
   --end-year 2025 \
   --workers 8 \
   --json
 
-# Fetch free daily ECB/Frankfurter FX reference rates (usd_per_unit) for pure-foreign ADRs:
-uv run omd sec financials fetch-fx-rates \
-  --start-date 2013-01-01 \
-  --output artifacts/pit-fx-rates.parquet \
-  --json
-
-# Explicit opt-in PIT-safe FX->USD translation of a bulk fundamentals dataset:
+# Translate an existing bulk dataset to USD (auto-fetches free ECB/Frankfurter FX when needed;
+# pass --fx-rates <file> to supply a local rate table, or --no-auto-fx to stay strictly offline):
 uv run omd sec financials translate-usd \
   --bulk-dataset artifacts/sec-bulk-pit \
   --output artifacts/sec-bulk-pit-usd \
-  --fx-rates artifacts/pit-fx-rates.parquet \
   --date-policy PERIOD_END_SPOT \
   --flow-method PERIOD_AVERAGE \
   --max-staleness-days 10 \
+  --json
+
+# Optional standalone FX download (when managing/caching your own FX file):
+uv run omd sec financials fetch-fx-rates \
+  --start-date 2013-01-01 \
+  --output artifacts/pit-fx-rates.parquet \
   --json
 
 # Inspect local symbol= or cik= partitions:
@@ -606,17 +607,19 @@ Native-currency bulk datasets (`sec-bulk-companyfacts-v1`) remain untouched;
 `omd sec financials bulk-project` accept `--workers` / `workers` (`1..64`, default `1`)
 for deterministic multi-process projection with byte-identical Parquet and manifest output.
 Opt-in USD translation (`translate_bulk_fundamentals_to_usd`,
-`translate_bulk_dataset_to_usd`, and `omd sec financials translate-usd`) writes
+`translate_bulk_dataset_to_usd`, `omd sec financials translate-usd`, and
+`omd sec financials bulk-project --usd-output ...`) writes
 a separate immutable `sec-bulk-fundamentals-usd-v1` dataset with per-row FX
 status (`NATIVE_USD`, `TRANSLATED_FILING_IMPLIED`, `TRANSLATED_EXTERNAL_FX`,
 `MISSING_FX_RATE`, `AMBIGUOUS_FX_RATE`, `MISSING_CURRENCY`), separate flow vs.
 balance-sheet rates, strict PIT bounds (`rate_date <= accepted_at.date()` and
 `available_at <= accepted_at`), and untranslated share counts. External FX rate
-tables use the `usd_per_unit` convention (`1 unit of <currency> = usd_per_unit USD`),
-and `fetch_frankfurter_fx_rates` / `write_fx_rate_table` /
-`omd sec financials fetch-fx-rates` provide a built-in, zero-key daily ECB
-reference rate fetcher that writes `.parquet` or `.csv` tables directly
-consumable by `load_fx_rate_table`.
+tables use the `usd_per_unit` convention (`1 unit of <currency> = usd_per_unit USD`);
+when no `--fx-rates` / `fx_table` is supplied and pure-foreign rows need
+external FX, `translate_bulk_dataset_to_usd`, `build_usd_translated_fundamentals_dataset`,
+`omd sec financials translate-usd`, and `omd sec financials bulk-project --usd-output ...`
+automatically fetch daily ECB reference rates via `fetch_frankfurter_fx_rates`
+(opt out with `auto_fetch_fx=False` / `--no-auto-fx`).
 
 Python SDK example with injected credentials:
 

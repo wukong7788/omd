@@ -3,7 +3,8 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import UTC, date, datetime
+import zipfile
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from email.message import Message
 from pathlib import Path
@@ -18,14 +19,20 @@ from ohmydata.core.errors import PermanentProviderError, TransientProviderError
 from ohmydata.providers.sec import (
     FRANKFURTER_FX_SOURCE,
     SecBulkFundamentalRow,
+    SecFxDatePolicy,
+    SecFxFlowMethod,
     SecFxRateObservation,
     SecFxRateTable,
     SecFxTranslationStatus,
+    build_bulk_companyfacts_dataset,
     fetch_frankfurter_fx_rates,
     load_fx_rate_table,
     parse_frankfurter_timeseries_payload,
+    translate_bulk_dataset_to_usd,
     translate_bulk_fundamentals_to_usd,
+    validate_bulk_companyfacts_dataset,
     validate_frankfurter_url,
+    validate_usd_translated_fundamentals_dataset,
     write_fx_rate_table,
 )
 
@@ -586,3 +593,532 @@ def test_cli_fetch_fx_rates_roundtrip_and_errors(
     ):
         assert cli_main(bad_argv) == 2
         capsys.readouterr()
+
+
+def _make_mini_zips(tmp_path: Path, *, include_asml: bool = True) -> tuple[Path, Path]:
+    cf_zip = tmp_path / "companyfacts.zip"
+    sub_zip = tmp_path / "submissions.zip"
+    baba_cik = "0001577552"
+    asml_cik = "0000937966"
+    baba_accn = f"{baba_cik}-25-000001"
+    asml_accn = f"{asml_cik}-25-000001"
+
+    baba_cf = {
+        "cik": int(baba_cik),
+        "entityName": "Synthetic Alibaba Group",
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "CNY": [
+                            {
+                                "val": 1_000_000,
+                                "accn": baba_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "start": "2024-01-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-06-20",
+                            }
+                        ],
+                        "USD": [
+                            {
+                                "val": 140_000,
+                                "accn": baba_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "start": "2024-01-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-06-20",
+                            }
+                        ],
+                    }
+                },
+                "Assets": {
+                    "units": {
+                        "CNY": [
+                            {
+                                "val": 2_000_000,
+                                "accn": baba_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "end": "2024-12-31",
+                                "filed": "2025-06-20",
+                            }
+                        ],
+                        "USD": [
+                            {
+                                "val": 276_000,
+                                "accn": baba_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "end": "2024-12-31",
+                                "filed": "2025-06-20",
+                            }
+                        ],
+                    }
+                },
+            }
+        },
+    }
+    baba_sub = {
+        "cik": baba_cik,
+        "name": "Synthetic Alibaba Group",
+        "tickers": ["BABA"],
+        "filings": {
+            "recent": {
+                "accessionNumber": [baba_accn],
+                "form": ["20-F"],
+                "filingDate": ["2025-06-20"],
+                "reportDate": ["2024-12-31"],
+                "primaryDocument": ["baba-20f.htm"],
+                "acceptanceDateTime": ["2025-06-20T12:00:00.000Z"],
+            },
+            "files": [],
+        },
+    }
+    asml_cf = {
+        "cik": int(asml_cik),
+        "entityName": "Synthetic ASML NV",
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "val": 500_000,
+                                "accn": asml_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "start": "2024-01-01",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-20",
+                            }
+                        ]
+                    }
+                },
+                "Assets": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "val": 1_000_000,
+                                "accn": asml_accn,
+                                "form": "20-F",
+                                "fy": 2024,
+                                "fp": "FY",
+                                "end": "2024-12-31",
+                                "filed": "2025-02-20",
+                            }
+                        ]
+                    }
+                },
+            }
+        },
+    }
+    asml_sub = {
+        "cik": asml_cik,
+        "name": "Synthetic ASML NV",
+        "tickers": ["ASML"],
+        "filings": {
+            "recent": {
+                "accessionNumber": [asml_accn],
+                "form": ["20-F"],
+                "filingDate": ["2025-02-20"],
+                "reportDate": ["2024-12-31"],
+                "primaryDocument": ["asml-20f.htm"],
+                "acceptanceDateTime": ["2025-02-20T12:00:00.000Z"],
+            },
+            "files": [],
+        },
+    }
+    with zipfile.ZipFile(cf_zip, "w") as zf:
+        zf.writestr(f"CIK{baba_cik}.json", json.dumps(baba_cf))
+        if include_asml:
+            zf.writestr(f"CIK{asml_cik}.json", json.dumps(asml_cf))
+    with zipfile.ZipFile(sub_zip, "w") as zf:
+        zf.writestr(f"CIK{baba_cik}.json", json.dumps(baba_sub))
+        if include_asml:
+            zf.writestr(f"CIK{asml_cik}.json", json.dumps(asml_sub))
+    return cf_zip, sub_zip
+
+
+def test_auto_fx_translate_dataset_and_skips_when_unneeded(tmp_path: Path) -> None:
+    cf_zip, sub_zip = _make_mini_zips(tmp_path, include_asml=True)
+    bulk_dir = tmp_path / "bulk-src"
+    build_bulk_companyfacts_dataset(cf_zip, sub_zip, bulk_dir)
+
+    fx_table = SecFxRateTable.from_observations(
+        [
+            SecFxRateObservation("EUR", date(2024, 6, 30), Decimal("1.08"), FRANKFURTER_FX_SOURCE),
+            SecFxRateObservation("EUR", date(2024, 12, 31), Decimal("1.04"), FRANKFURTER_FX_SOURCE),
+        ]
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_fetcher(**kwargs: Any) -> SecFxRateTable:
+        calls.append(kwargs)
+        return fx_table
+
+    res = translate_bulk_dataset_to_usd(bulk_dir, fx_fetcher=fake_fetcher)
+    assert len(calls) == 1
+    assert calls[0]["start_date"] == date(2024, 1, 1)
+    assert calls[0]["end_date"] == date(2024, 12, 31)
+    assert res.policy["fx_auto_fetched"] is True
+    assert res.policy["fx_auto_fetch_source"] == FRANKFURTER_FX_SOURCE
+    by_sym = {r.symbols[0]: r for r in res.rows}
+    assert by_sym["ASML"].fx_status is SecFxTranslationStatus.TRANSLATED_EXTERNAL_FX
+    assert by_sym["ASML"].revenue_usd == Decimal("530000.00")
+    assert by_sym["ASML"].total_assets_usd == Decimal("1040000.00")
+    assert by_sym["BABA"].fx_status is SecFxTranslationStatus.TRANSLATED_FILING_IMPLIED
+
+    # Explicit fx_table -> zero fetcher calls
+    calls.clear()
+    res_explicit = translate_bulk_dataset_to_usd(
+        bulk_dir, fx_table=fx_table, fx_fetcher=fake_fetcher
+    )
+    assert calls == []
+    assert res_explicit.policy["fx_auto_fetched"] is False
+
+    # Opt-out auto_fetch_fx=False -> zero fetcher calls
+    res_off = translate_bulk_dataset_to_usd(bulk_dir, auto_fetch_fx=False, fx_fetcher=fake_fetcher)
+    assert calls == []
+    assert res_off.policy["fx_auto_fetched"] is False
+
+    # Dataset fully covered by USD / filing-implied FX -> zero fetcher calls even when auto_fetch_fx=True
+    baba_only_dir = tmp_path / "baba-only"
+    baba_only_dir.mkdir(parents=True, exist_ok=True)
+    cf_only_baba, sub_only_baba = _make_mini_zips(baba_only_dir, include_asml=False)
+    bulk_baba = tmp_path / "bulk-baba"
+    build_bulk_companyfacts_dataset(cf_only_baba, sub_only_baba, bulk_baba)
+    res_baba = translate_bulk_dataset_to_usd(bulk_baba, fx_fetcher=fake_fetcher)
+    assert calls == []
+    assert res_baba.policy["fx_auto_fetched"] is False
+
+    # Explicit error propagation when auto-fetch fails
+    def failing_fetcher(**kwargs: Any) -> SecFxRateTable:
+        _ = kwargs
+        raise TransientProviderError("network down")
+
+    with pytest.raises(TransientProviderError, match="network down"):
+        translate_bulk_dataset_to_usd(bulk_dir, fx_fetcher=failing_fetcher)
+
+
+def test_oneshot_bulk_project_and_cli_auto_fx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import ohmydata.providers.sec._cli_financials as cli_fin
+
+    cf_zip, sub_zip = _make_mini_zips(tmp_path, include_asml=True)
+    fx_table = SecFxRateTable.from_observations(
+        [
+            SecFxRateObservation("EUR", date(2024, 6, 30), Decimal("1.10"), FRANKFURTER_FX_SOURCE),
+            SecFxRateObservation("EUR", date(2024, 12, 31), Decimal("1.00"), FRANKFURTER_FX_SOURCE),
+        ]
+    )
+    fetch_calls: list[dict[str, Any]] = []
+
+    def fake_fetch(**kwargs: Any) -> SecFxRateTable:
+        fetch_calls.append(kwargs)
+        return fx_table
+
+    # 1. SDK one-shot build_bulk_companyfacts_dataset(..., usd_output_dir=...)
+    raw_dir = tmp_path / "raw-sdk"
+    usd_dir = tmp_path / "usd-sdk"
+    manifest = build_bulk_companyfacts_dataset(
+        cf_zip,
+        sub_zip,
+        raw_dir,
+        usd_output_dir=usd_dir,
+        fx_fetcher=fake_fetch,
+    )
+    assert len(fetch_calls) == 1
+    assert validate_bulk_companyfacts_dataset(raw_dir)["counts"]["total_ciks"] == 2
+    assert (
+        validate_usd_translated_fundamentals_dataset(usd_dir)["status_counts"][
+            "TRANSLATED_EXTERNAL_FX"
+        ]
+        == 1
+    )
+    assert manifest["usd_dataset"]["policy"]["fx_auto_fetched"] is True
+
+    with pytest.raises(ValueError, match="must differ"):
+        build_bulk_companyfacts_dataset(cf_zip, sub_zip, raw_dir, usd_output_dir=raw_dir)
+
+    # 2. CLI translate-usd WITHOUT --fx-rates uses auto-FX by default; --no-auto-fx skips
+    monkeypatch.setattr(cli_fin, "fetch_frankfurter_fx_rates", fake_fetch)
+    fetch_calls.clear()
+    cli_usd_auto = tmp_path / "cli-usd-auto"
+    assert (
+        cli_main(
+            [
+                "sec",
+                "financials",
+                "translate-usd",
+                "--bulk-dataset",
+                str(raw_dir),
+                "--output",
+                str(cli_usd_auto),
+                "--json",
+                "--quiet",
+            ]
+        )
+        == 0
+    )
+    out_auto = json.loads(capsys.readouterr().out)
+    assert len(fetch_calls) == 1
+    assert out_auto["status_counts"]["TRANSLATED_EXTERNAL_FX"] == 1
+    assert out_auto["policy"]["fx_auto_fetched"] is True
+
+    fetch_calls.clear()
+    cli_usd_off = tmp_path / "cli-usd-off"
+    assert (
+        cli_main(
+            [
+                "sec",
+                "financials",
+                "translate-usd",
+                "--bulk-dataset",
+                str(raw_dir),
+                "--output",
+                str(cli_usd_off),
+                "--no-auto-fx",
+                "--json",
+                "--quiet",
+            ]
+        )
+        == 0
+    )
+    out_off = json.loads(capsys.readouterr().out)
+    assert fetch_calls == []
+    assert out_off["status_counts"]["MISSING_FX_RATE"] == 1
+    assert out_off["policy"]["fx_auto_fetched"] is False
+
+    # 3. CLI bulk-project with --usd-output produces both datasets in one call
+    raw_cli = tmp_path / "raw-cli"
+    usd_cli = tmp_path / "usd-cli"
+    assert (
+        cli_main(
+            [
+                "sec",
+                "financials",
+                "bulk-project",
+                "--companyfacts-zip",
+                str(cf_zip),
+                "--submissions-zip",
+                str(sub_zip),
+                "--output",
+                str(raw_cli),
+                "--usd-output",
+                str(usd_cli),
+                "--json",
+                "--quiet",
+            ]
+        )
+        == 0
+    )
+    out_bp = json.loads(capsys.readouterr().out)
+    assert out_bp["status"] == "completed"
+    assert out_bp["usd_output"] == str(usd_cli)
+    assert out_bp["usd_dataset"]["status_counts"]["TRANSLATED_EXTERNAL_FX"] == 1
+    assert len(fetch_calls) == 1
+
+    # Reject --usd-output == --output
+    assert (
+        cli_main(
+            [
+                "sec",
+                "financials",
+                "bulk-project",
+                "--companyfacts-zip",
+                str(cf_zip),
+                "--submissions-zip",
+                str(sub_zip),
+                "--output",
+                str(raw_cli),
+                "--usd-output",
+                str(raw_cli),
+                "--quiet",
+            ]
+        )
+        == 2
+    )
+    capsys.readouterr()
+
+
+def test_review_regressions_spot_window_today_bound_fail_fast_and_cli_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import ohmydata.providers.sec.fx_rates as fx_rates_mod
+    from ohmydata.providers.sec._fx_translation_engine import resolve_auto_fx_table
+
+    cf_zip, sub_zip = _make_mini_zips(tmp_path, include_asml=True)
+    bulk_dir = tmp_path / "bulk-spot"
+    build_bulk_companyfacts_dataset(cf_zip, sub_zip, bulk_dir)
+
+    # P3: SPOT flow_method requests tight [period_end - max_staleness_days, period_end] window
+    spot_calls: list[dict[str, Any]] = []
+    spot_table = SecFxRateTable.from_observations(
+        [SecFxRateObservation("EUR", date(2024, 12, 31), Decimal("1.04"), FRANKFURTER_FX_SOURCE)]
+    )
+
+    def spot_fetcher(**kwargs: Any) -> SecFxRateTable:
+        spot_calls.append(kwargs)
+        return spot_table
+
+    res_spot = translate_bulk_dataset_to_usd(
+        bulk_dir,
+        flow_method=SecFxFlowMethod.SPOT,
+        max_staleness_days=10,
+        fx_fetcher=spot_fetcher,
+    )
+    assert spot_calls == [{"start_date": date(2024, 12, 21), "end_date": date(2024, 12, 31)}]
+    assert res_spot.counts["TRANSLATED_EXTERNAL_FX"] == 1
+
+    # P1: CLI default fx_fetcher=fetch_frankfurter_fx_rates uses open end_date=None when max_date >= today
+    captured_urls: list[str] = []
+    today_utc = datetime.now(UTC).date()
+    yesterday_utc = today_utc - timedelta(days=1)
+
+    def fake_bytes(**kwargs: Any) -> bytes:
+        captured_urls.append(kwargs["url"])
+        return json.dumps(
+            {
+                "amount": 1.0,
+                "base": "USD",
+                "rates": {yesterday_utc.isoformat(): {"EUR": 0.9}},
+            }
+        ).encode("utf-8")
+
+    monkeypatch.setattr(fx_rates_mod, "_fetch_frankfurter_bytes", fake_bytes)
+    today_row = SecBulkFundamentalRow(
+        cik="0000937966",
+        entity_name="ASML",
+        symbols=("ASML",),
+        accession_number="0000937966-26-000099",
+        form="20-F",
+        is_amendment=False,
+        filing_date=today_utc,
+        report_date=today_utc,
+        accepted_at=datetime.now(UTC),
+        fiscal_year=today_utc.year,
+        fiscal_period="FY",
+        period_kind="FY",
+        period_start=yesterday_utc,
+        period_end=today_utc,
+        taxonomy="us-gaap",
+        reporting_currency="EUR",
+        revenue=Decimal(1000),
+    )
+    resolved, auto_meta = resolve_auto_fx_table(
+        [today_row],
+        implied_map={},
+        fx_table=None,
+        use_filing_implied=True,
+        date_policy=SecFxDatePolicy.PERIOD_END_SPOT,
+        flow_method=SecFxFlowMethod.PERIOD_AVERAGE,
+        max_staleness_days=10,
+        allow_cross_kind_implied=False,
+        auto_fetch_fx=True,
+        fx_fetcher=fetch_frankfurter_fx_rates,
+    )
+    assert resolved is not None
+    assert auto_meta["fx_auto_fetch_end_date"] is None
+    assert captured_urls and "..?" in captured_urls[0]
+
+    # Custom mock fx_fetcher with today's date still receives exact end_date=today_utc
+    mock_calls: list[dict[str, Any]] = []
+
+    def mock_today_fetcher(**kwargs: Any) -> SecFxRateTable:
+        mock_calls.append(kwargs)
+        return spot_table
+
+    resolve_auto_fx_table(
+        [today_row],
+        implied_map={},
+        fx_table=None,
+        use_filing_implied=True,
+        date_policy=SecFxDatePolicy.PERIOD_END_SPOT,
+        flow_method=SecFxFlowMethod.SPOT,
+        max_staleness_days=10,
+        allow_cross_kind_implied=False,
+        auto_fetch_fx=True,
+        fx_fetcher=mock_today_fetcher,
+    )
+    assert mock_calls[0]["end_date"] == today_utc
+
+    # P2 SDK fail-fast: invalid FX params fail before running ZIP projection or creating output_dir
+    uncreated_raw = tmp_path / "should-not-exist-raw"
+    uncreated_usd = tmp_path / "should-not-exist-usd"
+    with pytest.raises(ValueError, match="max_staleness_days"):
+        build_bulk_companyfacts_dataset(
+            cf_zip,
+            sub_zip,
+            uncreated_raw,
+            usd_output_dir=uncreated_usd,
+            max_staleness_days=-1,
+        )
+    assert not uncreated_raw.exists()
+    assert not uncreated_usd.exists()
+
+    # P2 & P3 CLI: USD flags without --usd-output and blank --usd-output fail cleanly
+    for bad_argv in (
+        [
+            "sec",
+            "financials",
+            "bulk-project",
+            "--companyfacts-zip",
+            str(cf_zip),
+            "--submissions-zip",
+            str(sub_zip),
+            "--output",
+            str(tmp_path / "out-flag-1"),
+            "--no-auto-fx",
+        ],
+        [
+            "sec",
+            "financials",
+            "bulk-project",
+            "--companyfacts-zip",
+            str(cf_zip),
+            "--submissions-zip",
+            str(sub_zip),
+            "--output",
+            str(tmp_path / "out-flag-2"),
+            "--date-policy",
+            "PERIOD_END_SPOT",
+        ],
+        [
+            "sec",
+            "financials",
+            "bulk-project",
+            "--companyfacts-zip",
+            str(cf_zip),
+            "--submissions-zip",
+            str(sub_zip),
+            "--output",
+            str(tmp_path / "out-flag-3"),
+            "--usd-output",
+            "",
+        ],
+        [
+            "sec",
+            "financials",
+            "bulk-project",
+            "--companyfacts-zip",
+            str(cf_zip),
+            "--submissions-zip",
+            str(sub_zip),
+            "--output",
+            str(tmp_path / "out-flag-4"),
+            "--usd-output",
+            "   ",
+        ],
+    ):
+        assert cli_main(bad_argv) == 2
+        err_text = capsys.readouterr().err
+        assert "usd-output" in err_text or "--usd-output" in err_text

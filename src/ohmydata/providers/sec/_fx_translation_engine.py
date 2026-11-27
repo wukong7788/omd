@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, localcontext
 from typing import Any
 
@@ -22,6 +22,7 @@ from ._fx_translation_models import (
     SecUsdTranslatedFundamentalRow,
     _validate_utc_datetime,
 )
+from .fx_rates import FRANKFURTER_FX_SOURCE, fetch_frankfurter_fx_rates
 
 _ISO_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _FLOW_FIELDS = (
@@ -387,4 +388,101 @@ def translate_single_row(
     )
 
 
-__all__ = ["translate_single_row"]
+def _kind_covered_by_implied(
+    implied_pair: SecFilingImpliedFxPair | None, kind: str, *, allow_cross_kind_implied: bool
+) -> bool:
+    if implied_pair is None:
+        return False
+    primary = implied_pair.flow if kind == "flow" else implied_pair.bs
+    if primary is not None:
+        return True
+    other = implied_pair.bs if kind == "flow" else implied_pair.flow
+    return allow_cross_kind_implied and other is not None
+
+
+def resolve_auto_fx_table(
+    rows: Sequence[SecBulkFundamentalRow],
+    *,
+    implied_map: Mapping[tuple[str, str, str], SecFilingImpliedFxPair],
+    fx_table: SecFxRateTable | None,
+    use_filing_implied: bool,
+    date_policy: SecFxDatePolicy,
+    flow_method: SecFxFlowMethod = SecFxFlowMethod.PERIOD_AVERAGE,
+    max_staleness_days: int = 10,
+    allow_cross_kind_implied: bool = False,
+    auto_fetch_fx: bool = True,
+    fx_fetcher: Callable[..., SecFxRateTable] | None = None,
+) -> tuple[SecFxRateTable | None, dict[str, Any]]:
+    """Fetch official Frankfurter FX rates only when unresolved non-USD rows remain."""
+    accepted_list: list[datetime] = [
+        _validate_utc_datetime(r.accepted_at, "accepted_at") for r in rows
+    ]
+    if fx_table is not None or not auto_fetch_fx:
+        return fx_table, {"fx_auto_fetched": False}
+
+    min_date: date | None = None
+    max_date: date | None = None
+    for row, accepted_utc in zip(rows, accepted_list, strict=True):
+        raw_ccy = row.reporting_currency
+        norm_ccy = raw_ccy.strip().upper() if isinstance(raw_ccy, str) else ""
+        if (
+            not norm_ccy
+            or norm_ccy in {"MULTI", "USD"}
+            or _ISO_CURRENCY_RE.fullmatch(norm_ccy) is None
+        ):
+            continue
+        pair = (
+            implied_map.get((row.cik, row.accession_number, norm_ccy))
+            if use_filing_implied
+            else None
+        )
+        has_flow = any(getattr(row, fld) is not None for fld in _FLOW_FIELDS)
+        has_bs = any(getattr(row, fld) is not None for fld in _BS_FIELDS)
+        need_flow = (has_flow or not has_bs) and not _kind_covered_by_implied(
+            pair, "flow", allow_cross_kind_implied=allow_cross_kind_implied
+        )
+        need_bs = (has_bs or not has_flow) and not _kind_covered_by_implied(
+            pair, "bs", allow_cross_kind_implied=allow_cross_kind_implied
+        )
+        if not need_flow and not need_bs:
+            continue
+
+        accepted_day = accepted_utc.date()
+        pit_end = min(row.period_end, accepted_day)
+        anchor = (
+            pit_end
+            if date_policy is SecFxDatePolicy.PERIOD_END_SPOT
+            else min(row.filing_date, accepted_day)
+        )
+        p_low = (
+            row.period_start
+            if flow_method is SecFxFlowMethod.PERIOD_AVERAGE
+            and row.period_start is not None
+            and row.period_start <= row.period_end
+            else anchor
+        )
+        row_min = min(anchor - timedelta(days=max_staleness_days), p_low)
+        row_max = max(anchor, pit_end)
+        min_date = row_min if min_date is None else min(min_date, row_min)
+        max_date = row_max if max_date is None else max(max_date, row_max)
+
+    if min_date is None or max_date is None:
+        return None, {"fx_auto_fetched": False}
+
+    today_utc = datetime.now(UTC).date()
+    fetcher = fx_fetcher if fx_fetcher is not None else fetch_frankfurter_fx_rates
+    fetch_end = (
+        None if (fetcher is fetch_frankfurter_fx_rates and max_date >= today_utc) else max_date
+    )
+    fetched = fetcher(start_date=min_date, end_date=fetch_end)
+    if not isinstance(fetched, SecFxRateTable):
+        raise TypeError("fx_fetcher must return a SecFxRateTable")
+    return fetched, {
+        "fx_auto_fetched": True,
+        "fx_auto_fetch_source": FRANKFURTER_FX_SOURCE,
+        "fx_auto_fetch_start_date": min_date.isoformat(),
+        "fx_auto_fetch_end_date": fetch_end.isoformat() if fetch_end is not None else None,
+    }
+
+
+__all__ = ["resolve_auto_fx_table", "translate_single_row"]

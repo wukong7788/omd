@@ -11,7 +11,16 @@ from .financials import normalize_sec_cik
 from .financials_sync import load_cik_universe
 
 BOOL_CONFIG_KEYS = frozenset(
-    {"json", "quiet", "rows", "latest", "no_amendments", "no_filing_implied", "no_spot_fallback"}
+    {
+        "json",
+        "quiet",
+        "rows",
+        "latest",
+        "no_amendments",
+        "no_filing_implied",
+        "no_spot_fallback",
+        "no_auto_fx",
+    }
 )
 PARSER_VERSIONS = (
     "sec-live-financial-parser-v1-edgartools-6.4.0",
@@ -97,6 +106,10 @@ def add_financials_commands(sec_subparsers: Any) -> None:
             "--ciks",
             "--forms",
             "--acceptance-upper",
+            "--usd-output",
+            "--fx-rates",
+            "--date-policy",
+            "--flow-method",
         ),
         int_flags=(
             "--start-year",
@@ -104,8 +117,9 @@ def add_financials_commands(sec_subparsers: Any) -> None:
             "--max-entry-bytes",
             "--max-total-bytes",
             "--workers",
+            "--max-staleness-days",
         ),
-        bool_flags=("--no-amendments",),
+        bool_flags=("--no-amendments", "--no-filing-implied", "--no-spot-fallback", "--no-auto-fx"),
     )
     _add_flags(
         fin.add_parser("translate-usd"),
@@ -117,7 +131,7 @@ def add_financials_commands(sec_subparsers: Any) -> None:
             "--flow-method",
         ),
         int_flags=("--max-staleness-days",),
-        bool_flags=("--no-filing-implied", "--no-spot-fallback"),
+        bool_flags=("--no-filing-implied", "--no-spot-fallback", "--no-auto-fx"),
     )
     _add_flags(
         fin.add_parser("fetch-fx-rates"),
