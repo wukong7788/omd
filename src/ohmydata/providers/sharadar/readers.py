@@ -53,7 +53,7 @@ def _read_frame(path: Path, pd_mod: Any) -> pd.DataFrame:
         raise FileNotFoundError(f"Sharadar local data file not found: {path}")
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        return pd_mod.read_csv(path)
+        return pd_mod.read_csv(path, keep_default_na=False, na_values=[""])
     if suffix == ".parquet":
         return pd_mod.read_parquet(path)
     raise ValueError(f"Unsupported local file format {suffix!r}; expected .csv or .parquet")

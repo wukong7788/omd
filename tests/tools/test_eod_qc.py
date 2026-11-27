@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from types import MappingProxyType
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import pytest
 
 from ohmydata.tools import (
@@ -787,3 +788,434 @@ def test_run_eod_qc_skip_corporate_action_symbols_and_capital_gain_rev_split() -
         ]
     )
     assert detect_reverse_split_dividend_mismatch(rev_df, rev_actions, tolerance=0.10) == []
+
+
+def test_polars_input_parity_across_all_detectors_and_reports() -> None:
+    bars_rows = [
+        # Non-positive + NaN/Inf + zero volume
+        {
+            "symbol": "NFE",
+            "date": "2026-01-02",
+            "open": 10.0,
+            "high": 10.5,
+            "low": 9.8,
+            "close": 10.2,
+            "adj_close": -1.25,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "NFE",
+            "date": "2026-01-05",
+            "open": 10.0,
+            "high": np.inf,
+            "low": 9.8,
+            "close": np.nan,
+            "adj_close": 10.2,
+            "volume": -5.0,
+        },
+        # OHLC violation
+        {
+            "symbol": "OHLCB",
+            "date": "2026-01-02",
+            "open": 100.0,
+            "high": 98.0,
+            "low": 99.0,
+            "close": 99.5,
+            "adj_close": 99.5,
+            "volume": 0.0,
+        },
+        # PDBC distribution ex-date + missing split + spinoff
+        {
+            "symbol": "PDBC",
+            "date": "2026-01-02",
+            "open": 18.41,
+            "high": 18.50,
+            "low": 18.30,
+            "close": 18.41,
+            "adj_close": 13.52,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "PDBC",
+            "date": "2026-01-05",
+            "open": 13.52,
+            "high": 13.60,
+            "low": 13.40,
+            "close": 13.52,
+            "adj_close": 13.52,
+            "volume": 1200.0,
+        },
+        {
+            "symbol": "SPLT2",
+            "date": "2026-01-02",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "adj_close": 100.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "SPLT2",
+            "date": "2026-01-05",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "adj_close": 50.0,
+            "volume": 2000.0,
+        },
+        {
+            "symbol": "GE",
+            "date": "2026-01-02",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "adj_close": 100.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "GE",
+            "date": "2026-01-05",
+            "open": 78.0,
+            "high": 79.0,
+            "low": 77.0,
+            "close": 78.0,
+            "adj_close": 100.0,
+            "volume": 1000.0,
+        },
+        # WPM currency oscillation
+        {
+            "symbol": "WPM",
+            "date": "2026-01-08",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "adj_close": 50.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "WPM",
+            "date": "2026-01-09",
+            "open": 68.0,
+            "high": 69.0,
+            "low": 67.0,
+            "close": 68.0,
+            "adj_close": 68.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "WPM",
+            "date": "2026-01-12",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "adj_close": 50.0,
+            "volume": 1000.0,
+        },
+        # NVD reverse-split dividend mismatch
+        {
+            "symbol": "NVD",
+            "date": "2026-01-02",
+            "open": 20.0,
+            "high": 21.0,
+            "low": 19.0,
+            "close": 20.0,
+            "adj_close": 20.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "NVD",
+            "date": "2026-01-05",
+            "open": 20.0,
+            "high": 21.0,
+            "low": 19.0,
+            "close": 20.0,
+            "adj_close": 26.0,
+            "volume": 1000.0,
+        },
+        {
+            "symbol": "NVD",
+            "date": "2026-01-10",
+            "open": 20.0,
+            "high": 21.0,
+            "low": 19.0,
+            "close": 20.0,
+            "adj_close": 26.0,
+            "volume": 1000.0,
+        },
+        # ^VIX skipped for corporate-action checks
+        {
+            "symbol": "^VIX",
+            "date": "2026-01-02",
+            "open": 20.0,
+            "high": 21.0,
+            "low": 19.0,
+            "close": 20.0,
+            "adj_close": 20.0,
+            "volume": 0.0,
+        },
+        {
+            "symbol": "^VIX",
+            "date": "2026-01-05",
+            "open": 31.0,
+            "high": 32.0,
+            "low": 30.0,
+            "close": 31.0,
+            "adj_close": 31.0,
+            "volume": 0.0,
+        },
+    ]
+    actions_rows = [
+        {"symbol": "PDBC", "date": "2026-01-05", "action": "dividend", "value": 4.89},
+        {"symbol": "GE", "date": "2026-01-05", "action": "spinoff", "value": 22.0},
+        {"symbol": "NVD", "date": "2026-01-10", "action": "split", "value": 0.2},
+        {"symbol": "NVD", "date": "2026-01-05", "action": "dividend", "value": 1.0},
+    ]
+
+    pd_bars = pd.DataFrame(bars_rows)
+    pl_bars = pl.DataFrame(bars_rows)
+    pd_actions = pd.DataFrame(actions_rows)
+    pl_actions = pl.DataFrame(actions_rows)
+
+    pd_rep = run_eod_qc(
+        pd_bars,
+        actions_df=pd_actions,
+        provider="mixed",
+        expected_latest_date="2026-01-15",
+        active_symbols=("NFE", "MISSING_SYM"),
+        skip_corporate_action_symbols=("^VIX",),
+    )
+    pl_rep = run_eod_qc(
+        pl_bars,
+        actions_df=pl_actions,
+        provider="mixed",
+        expected_latest_date="2026-01-15",
+        active_symbols=("NFE", "MISSING_SYM"),
+        skip_corporate_action_symbols=("^VIX",),
+    )
+    assert pl_rep.to_dict() == pd_rep.to_dict()
+    assert pl_rep.symbol_count == 8
+    assert pl_rep.total_rows == len(bars_rows)
+
+    # Also verify Polars Date & timezone-aware Datetime columns
+    pl_tz = pl_bars.with_columns(
+        (pl.col("date") + "T12:00:00")
+        .str.to_datetime("%Y-%m-%dT%H:%M:%S")
+        .dt.replace_time_zone("UTC")
+        .dt.convert_time_zone("America/New_York")
+        .alias("date")
+    )
+    pl_tz_rep = run_eod_qc(
+        pl_tz,
+        actions_df=pl_actions.with_columns(pl.col("date").str.to_date("%Y-%m-%d")),
+        provider="mixed",
+        expected_latest_date="2026-01-15",
+        active_symbols=("NFE", "MISSING_SYM"),
+        skip_corporate_action_symbols=("^VIX",),
+    )
+    assert pl_tz_rep.to_dict() == pd_rep.to_dict()
+
+
+def test_apply_corrections_polars_native_parity_and_errors() -> None:
+    df = pl.DataFrame(
+        {
+            "symbol": ["NFE", "SPY", "A"],
+            "date": [date(2026, 1, 2), date(2026, 1, 2), date(2026, 1, 2)],
+            "close": [10.2, 504.0, None],
+            "adj_close": [-1.25, 504.0, 10.0],
+            "volume": [1000, 50000, 100],
+        },
+        schema={
+            "symbol": pl.String,
+            "date": pl.Date,
+            "close": pl.Float64,
+            "adj_close": pl.Float64,
+            "volume": pl.Int64,
+        },
+    )
+
+    r1 = CorrectionRecord("NFE", "2026-01-02", "adj_close", -1.25, 10.2, "fix neg", "nasdaq")
+    r2 = CorrectionRecord("A", "2026-01-02", "close", None, 15.0, "fill null", "sec", "1.0")
+    r3 = CorrectionRecord("A", "2026-01-02", "close", 15.0, 15.5, "refine", "exch", "2.0")
+    r_int_promote = CorrectionRecord(
+        "SPY", "2026-01-02", "volume", 50000, 50000.5, "promote int", "tape"
+    )
+    r_missing = CorrectionRecord("QQQ", "2026-01-02", "close", 400.0, 401.0, "absent", "manual")
+
+    out, receipts = apply_corrections(df, [r1, r2, r3, r_int_promote, r_missing])
+    assert isinstance(out, pl.DataFrame)
+    # Original df remains untouched
+    assert df["adj_close"].to_list() == [-1.25, 504.0, 10.0]
+    assert "raw_adj_close" not in df.columns
+
+    assert out["adj_close"].to_list() == [10.2, 504.0, 10.0]
+    assert out["raw_adj_close"].to_list() == [-1.25, 504.0, 10.0]
+    assert out["close"].to_list() == [10.2, 504.0, 15.5]
+    assert out["raw_close"].to_list() == [10.2, 504.0, None]
+    assert out.schema["volume"] == pl.Float64
+    assert out["volume"].to_list() == [1000.0, 50000.5, 100.0]
+    assert [r.status for r in receipts] == [
+        "APPLIED",
+        "APPLIED",
+        "APPLIED",
+        "APPLIED",
+        "NOT_FOUND",
+    ]
+
+    with pytest.raises(ValueError, match="raw_value mismatch"):
+        apply_corrections(
+            df, [CorrectionRecord("NFE", "2026-01-02", "adj_close", 999.0, 10.2, "bad", "src")]
+        )
+    with pytest.raises(ValueError, match="Invalid or missing correction target field"):
+        apply_corrections(
+            df,
+            [CorrectionRecord("NFE", "2026-01-02", "date", "2026-01-02", "2026-01-03", "bad", "s")],
+        )
+    dup_df = pl.concat([df, df.head(1)])
+    with pytest.raises(ValueError, match="Duplicate rows"):
+        apply_corrections(
+            dup_df, [CorrectionRecord("NFE", "2026-01-02", "close", 10.2, 11.0, "dup", "src")]
+        )
+    with pytest.raises(TypeError, match="Expected polars.DataFrame or pandas.DataFrame"):
+        apply_corrections({"symbol": ["A"]}, [])  # type: ignore[arg-type]
+
+    # Empty pl.DataFrame / pl.DataFrame missing dt check also works cleanly
+    empty_rep = run_eod_qc(pl.DataFrame(), provider="polars")
+    assert empty_rep.status == "PASSED"
+    assert empty_rep.total_rows == 0
+    assert datetime(2026, 1, 2, tzinfo=UTC).date().isoformat() == "2026-01-02"
+
+
+def test_eod_qc_yyyymmdd_and_slash_date_formats_parity() -> None:
+    for date_vals in (["20260102", "20260105"], ["2026/01/02", "2026/01/05"]):
+        rows = [
+            {
+                "symbol": "A",
+                "date": date_vals[0],
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1000.0,
+            },
+            {
+                "symbol": "A",
+                "date": date_vals[1],
+                "open": 100.0,
+                "high": 101.0,
+                "low": -5.0,
+                "close": -5.0,
+                "volume": 1000.0,
+            },
+        ]
+        pd_rep = run_eod_qc(pd.DataFrame(rows))
+        pl_rep = run_eod_qc(pl.DataFrame(rows))
+        assert pd_rep.status == "BLOCKED_DATA"
+        assert pd_rep.symbol_count == 1
+        assert pl_rep.to_dict() == pd_rep.to_dict()
+
+        rec = CorrectionRecord("A", date_vals[1], "close", -5.0, 99.5, "fix", "tape")
+        pd_corr, pd_rcpts = apply_corrections(pd.DataFrame(rows), [rec])
+        pl_corr, pl_rcpts = apply_corrections(pl.DataFrame(rows), [rec])
+        assert pd_rcpts[0].status == "APPLIED"
+        assert pl_rcpts[0].status == "APPLIED"
+        assert pd_corr["close"].tolist() == [100.0, 99.5]
+        assert pl_corr["close"].to_list() == [100.0, 99.5]
+
+
+def test_splits_missing_close_overnight_gap_and_nan_vs_inf_split_values() -> None:
+    bars_null_close = pl.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "date": "2026-01-02",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "adj_close": 100.0,
+                "volume": 1000.0,
+            },
+            {
+                "symbol": "AAPL",
+                "date": "2026-01-05",
+                "open": 50.0,
+                "high": 51.0,
+                "low": 49.0,
+                "close": None,
+                "adj_close": 50.0,
+                "volume": 2000.0,
+            },
+        ]
+    )
+    acts_div = pl.DataFrame(
+        [{"symbol": "AAPL", "date": "2026-01-05", "action": "dividend", "value": 50.0}]
+    )
+    findings = detect_suspect_missing_splits(bars_null_close, acts_div)
+    assert len(findings) == 1
+    assert findings[0].category == QualityCategory.SUSPECT_MISSING_SPLIT
+
+    bars_jump = pl.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "date": "2026-01-02",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "adj_close": 100.0,
+                "volume": 1000.0,
+            },
+            {
+                "symbol": "AAPL",
+                "date": "2026-01-05",
+                "open": 50.0,
+                "high": 51.0,
+                "low": 49.0,
+                "close": 50.0,
+                "adj_close": 50.0,
+                "volume": 2000.0,
+            },
+        ]
+    )
+    acts_nan = pl.DataFrame(
+        [{"symbol": "AAPL", "date": "2026-01-05", "action": "split", "value": float("nan")}]
+    )
+    assert detect_suspect_missing_splits(bars_jump, acts_nan) == []
+
+    acts_inf = pl.DataFrame(
+        [{"symbol": "AAPL", "date": "2026-01-05", "action": "split", "value": float("inf")}]
+    )
+    inf_findings = detect_suspect_missing_splits(bars_jump, acts_inf)
+    assert len(inf_findings) == 1
+    assert inf_findings[0].category == QualityCategory.SUSPECT_MISSING_SPLIT
+
+
+def test_apply_corrections_pandas_nullable_na_and_bool_mismatch() -> None:
+    df_na = pd.DataFrame(
+        {
+            "symbol": ["A", "B", "C"],
+            "date": ["2026-01-02", "2026-01-02", "2026-01-02"],
+            "close": pd.Series([pd.NA, pd.NA, 1.0], dtype="Float64"),
+        }
+    )
+    out, receipts = apply_corrections(
+        df_na,
+        [
+            CorrectionRecord("A", "2026-01-02", "close", None, 11.0, "fill", "sec"),
+            CorrectionRecord("B", "2026-01-02", "close", pd.NA, 12.0, "fill", "sec"),
+        ],
+    )
+    assert [r.status for r in receipts] == ["APPLIED", "APPLIED"]
+    assert out["close"].tolist()[:2] == [11.0, 12.0]
+
+    with pytest.raises(ValueError, match="raw_value mismatch"):
+        apply_corrections(
+            df_na,
+            [CorrectionRecord("C", "2026-01-02", "close", True, 2.0, "bad bool", "src")],
+        )

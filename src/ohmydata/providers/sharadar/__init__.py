@@ -13,6 +13,12 @@ from .endpoints import (
 )
 from .errors import SharadarError, classify_sharadar_http_error, redact_secret
 from .readers import read_local_actions, read_local_bars
+from .readers_polars import (
+    read_local_actions_pl,
+    read_local_bars_pl,
+    scan_local_actions_pl,
+    scan_local_bars_pl,
+)
 
 __all__ = [
     "DEFAULT_BASE_URL",
@@ -28,6 +34,10 @@ __all__ = [
     "SharadarTableStatusResult",
     "classify_sharadar_http_error",
     "read_local_actions",
+    "read_local_actions_pl",
     "read_local_bars",
+    "read_local_bars_pl",
     "redact_secret",
+    "scan_local_actions_pl",
+    "scan_local_bars_pl",
 ]

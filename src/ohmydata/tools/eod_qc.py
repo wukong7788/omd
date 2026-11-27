@@ -1,4 +1,4 @@
-"""Offline, vectorized pandas EOD market-data quality control and correction overlay."""
+"""Offline, single-core Polars EOD market-data quality control supporting Polars and Pandas."""
 
 from __future__ import annotations
 
@@ -7,11 +7,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
-import pandas as pd
-
+from ._eod_qc_corrections import apply_corrections_work
 from ._eod_qc_detectors import (
     detect_non_positive_prices_work,
     detect_ohlc_violations_work,
@@ -26,9 +24,17 @@ from ._eod_qc_prep import (
     norm_date_str,
     prepare_actions,
     prepare_bars,
-    symbol_col,
+    require_polars,
 )
 from ._eod_qc_splits import detect_suspect_missing_splits_work
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import polars as pl
+
+    DataFrameInput = pd.DataFrame | pl.DataFrame
+else:
+    DataFrameInput = Any
 
 
 class EodAdjustmentBasis(StrEnum):
@@ -181,97 +187,29 @@ class EodQcReport:
         return "\n".join(lines)
 
 
-def _values_match(current: Any, expected: Any) -> bool:
-    if pd.isna(current) and pd.isna(expected):
-        return True
-    if pd.isna(current) or pd.isna(expected):
-        return False
-    if isinstance(current, (int, float, np.number)) and isinstance(
-        expected, (int, float, np.number)
-    ):
-        cf, ef = float(current), float(expected)
-        if np.isfinite(cf) and np.isfinite(ef):
-            return bool(np.isclose(cf, ef, rtol=1e-9, atol=1e-12))
-    return current == expected
-
-
-def _make_receipt(rec: CorrectionRecord, *, applied: bool, status: str) -> CorrectionReceipt:
-    return CorrectionReceipt(
-        symbol=rec.symbol,
-        date=rec.date,
-        field=rec.field,
-        raw_value=rec.raw_value,
-        corrected_value=rec.corrected_value,
-        reason=rec.reason,
-        evidence_source=rec.evidence_source,
-        version=rec.version,
-        applied=applied,
-        status=status,
-    )
-
-
 def apply_corrections(
-    df: pd.DataFrame,
+    df: DataFrameInput,
     records: Sequence[CorrectionRecord] | Iterable[CorrectionRecord],
-) -> tuple[pd.DataFrame, list[CorrectionReceipt]]:
-    """Apply explicit CorrectionRecords to a copy of df while preserving raw_<field>."""
-    out = df.copy(deep=True)
-    rec_list = list(records)
-    if not rec_list or out.empty:
-        return out, [_make_receipt(r, applied=False, status="NOT_FOUND") for r in rec_list]
-
-    s_col = symbol_col(out)
-    if "date" not in out.columns:
-        raise ValueError("df must contain a 'date' column")
-    sym_keys = out[s_col].astype(str)
-    date_keys = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-    for r in rec_list:
-        if r.field in ("symbol", "canonical_symbol", "date") or r.field not in out.columns:
-            raise ValueError(f"Invalid or missing correction target field: {r.field!r}")
-        raw_col = f"raw_{r.field}"
-        if raw_col not in out.columns:
-            out[raw_col] = out[r.field]
-
-    receipts: list[CorrectionReceipt] = []
-    for r in rec_list:
-        matches = out.index[(sym_keys == r.symbol) & (date_keys == r.date)]
-        if len(matches) == 0:
-            receipts.append(_make_receipt(r, applied=False, status="NOT_FOUND"))
-            continue
-        if len(matches) > 1:
-            raise ValueError(f"Duplicate rows found for ({r.symbol}, {r.date})")
-        idx = matches[0]
-        current_val = out.at[idx, r.field]
-        if not _values_match(current_val, r.raw_value):
-            raise ValueError(
-                f"raw_value mismatch for ({r.symbol}, {r.date}, {r.field}): "
-                f"expected {r.raw_value!r}, found {current_val!r}"
-            )
-        if pd.api.types.is_integer_dtype(out[r.field].dtype) and (
-            pd.isna(r.corrected_value) or isinstance(r.corrected_value, float)
-        ):
-            out[r.field] = out[r.field].astype("float64")
-        out.at[idx, r.field] = r.corrected_value
-        receipts.append(_make_receipt(r, applied=True, status="APPLIED"))
-    return out, receipts
+) -> tuple[Any, list[CorrectionReceipt]]:
+    """Apply explicit CorrectionRecords to a copy of a Polars or Pandas DataFrame."""
+    return apply_corrections_work(df, records, CorrectionReceipt)
 
 
-def detect_non_positive_prices(bars_df: pd.DataFrame) -> list[QualityFinding]:
+def detect_non_positive_prices(bars_df: DataFrameInput) -> list[QualityFinding]:
     """Flag rows with <= 0 or non-finite values in open/high/low/close/adj_close."""
     return detect_non_positive_prices_work(prepare_bars(bars_df), QualityFinding)
 
 
 def detect_ohlc_violations(
-    bars_df: pd.DataFrame, ulp_rel_tol: float = 1e-9
+    bars_df: DataFrameInput, ulp_rel_tol: float = 1e-9
 ) -> list[QualityFinding]:
     """Flag rows violating high >= max(open, close) >= min(open, close) >= low."""
     return detect_ohlc_violations_work(prepare_bars(bars_df), ulp_rel_tol, QualityFinding)
 
 
 def detect_suspect_missing_splits(
-    bars_df: pd.DataFrame,
-    actions_df: pd.DataFrame | None = None,
+    bars_df: DataFrameInput,
+    actions_df: DataFrameInput | None = None,
     jump_threshold: float = 0.15,
     *,
     adjustment_basis: EodAdjustmentBasis = EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
@@ -289,7 +227,7 @@ def detect_suspect_missing_splits(
 
 
 def detect_oscillating_currency_jumps(
-    bars_df: pd.DataFrame,
+    bars_df: DataFrameInput,
     jump_threshold: float = 0.20,
     max_gap_days: int = 3,
 ) -> list[QualityFinding]:
@@ -300,8 +238,8 @@ def detect_oscillating_currency_jumps(
 
 
 def detect_reverse_split_dividend_mismatch(
-    bars_df: pd.DataFrame,
-    actions_df: pd.DataFrame | None,
+    bars_df: DataFrameInput,
+    actions_df: DataFrameInput | None,
     tolerance: float = 0.10,
 ) -> list[QualityFinding]:
     """Flag pre-split adj_close vs dividend return distortions on symbols with <1.0 splits."""
@@ -311,7 +249,7 @@ def detect_reverse_split_dividend_mismatch(
 
 
 def detect_trailing_staleness(
-    bars_df: pd.DataFrame,
+    bars_df: DataFrameInput,
     expected_latest_date: str | date | datetime | None,
     max_lag_days: int = 2,
     active_symbols: Iterable[str] | None = None,
@@ -322,15 +260,15 @@ def detect_trailing_staleness(
     )
 
 
-def detect_zero_volume(bars_df: pd.DataFrame) -> list[QualityFinding]:
+def detect_zero_volume(bars_df: DataFrameInput) -> list[QualityFinding]:
     """Flag rows with zero, negative, or non-finite volume."""
     return detect_zero_volume_work(prepare_bars(bars_df), QualityFinding)
 
 
 def run_eod_qc(
-    bars_df: pd.DataFrame,
+    bars_df: DataFrameInput,
     *,
-    actions_df: pd.DataFrame | None = None,
+    actions_df: DataFrameInput | None = None,
     provider: str = "unknown",
     adjustment_basis: EodAdjustmentBasis = EodAdjustmentBasis.SPLIT_ADJUSTED_WITH_ADJ_CLOSE,
     expected_latest_date: str | date | datetime | None = None,
@@ -344,7 +282,7 @@ def run_eod_qc(
     max_lag_days: int = 2,
     ulp_rel_tol: float = 1e-9,
 ) -> EodQcReport:
-    """Run all vectorized EOD quality control detectors and assemble an EodQcReport."""
+    """Run all vectorized Polars EOD quality control detectors and assemble an EodQcReport."""
     work = prepare_bars(bars_df)
     act = prepare_actions(actions_df)
     skip_ca_set = (
@@ -352,11 +290,12 @@ def run_eod_qc(
         if skip_corporate_action_symbols is not None
         else set()
     )
-    ca_work = (
-        work[~work["_symbol"].isin(skip_ca_set)].reset_index(drop=True)
-        if (skip_ca_set and not work.empty)
-        else work
-    )
+    if skip_ca_set and not work.is_empty():
+        pl_mod = require_polars()
+        ca_work = work.filter(~pl_mod.col("_symbol").is_in(sorted(skip_ca_set)))
+    else:
+        ca_work = work
+
     findings: list[QualityFinding] = [
         *detect_non_positive_prices_work(work, QualityFinding),
         *detect_ohlc_violations_work(work, ulp_rel_tol, QualityFinding),
@@ -391,8 +330,8 @@ def run_eod_qc(
         provider=provider,
         adjustment_basis=adjustment_basis,
         status=status,
-        total_rows=len(bars_df) if bars_df is not None else 0,
-        symbol_count=int(work["_symbol"].nunique()) if not work.empty else 0,
+        total_rows=0 if bars_df is None else len(bars_df),
+        symbol_count=int(work["_symbol"].n_unique()) if not work.is_empty() else 0,
         findings=tuple(findings),
         summary_counts=MappingProxyType(counts),
     )

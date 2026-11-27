@@ -1703,6 +1703,14 @@ For verified empirical data-quality pitfalls across `yfinance` and Sharadar Dire
 (delisted coverage, ticker recycling, silent drops, negative `adj_close`, unrecorded
 splits, spin-offs, and venue differences), see [data-quality-pitfalls.md](docs/providers/data-quality-pitfalls.md).
 
+`ohmydata.providers.sharadar` also provides lazy/eager Polars local readers
+(`scan_local_bars_pl`, `read_local_bars_pl`, `scan_local_actions_pl`,
+`read_local_actions_pl`) under `ohmydata[polars]`, preserving literal `"NA"`,
+`"NAN"`, and `"NULL"` tickers as strings. `ohmydata.tools.eod_qc` (`run_eod_qc`,
+`detect_*`, `apply_corrections`) runs on Polars internally and requires
+`ohmydata[polars]` (`polars` + `pyarrow`) for both `polars.DataFrame` and
+`pandas.DataFrame` inputs.
+
 ## Dataframe Adapters (Polars & Pandas)
 
 The optional `ohmydata[polars]` extra provides explicit, eager representation

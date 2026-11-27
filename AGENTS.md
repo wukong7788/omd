@@ -172,6 +172,16 @@ uv build
 git diff --check
 ```
 
+Run static checks in one pass in format-first order before longer test runs:
+`uv run ruff format . && uv run ruff check . && uv run ruff format --check . && uv run ty check`.
+
+For fast sandboxed iteration, run targeted pytest suites with an isolated
+sandbox-writable EDGAR cache:
+`EDGAR_LOCAL_DATA_DIR=/tmp/omd-edgar-sandbox uv run pytest <paths>`.
+Keep full `uv run pytest` (under `BypassSandbox: true` for ledger ancestor-lock
+and git-safety tests) as a single final pre-delivery or release gate rather than
+running it on every edit loop.
+
 Do not use system Python or mix Conda with the project environment.
 
 Runtime dependencies must remain minimal. Provider and dataframe integrations
@@ -231,7 +241,9 @@ version after `v1.0.0`.
   in the same commit: `pyproject.toml`, `src/ohmydata/__init__.py`,
   `uv.lock`, the exact version assertion in `tests/test_package.py`, and
   `CHANGELOG.md`. Documentation describing changed public behavior must be
-  updated in that commit as well.
+  updated in that commit as well. Format each release entry in `CHANGELOG.md`
+  using Keep-a-Changelog subsection headings (`### Added`, `### Changed`,
+  `### Fixed`), omitting any empty heading.
 - Before committing, run the canonical test, Ruff, format, ty check, build, and
   `git diff --check` gates; inspect the built wheel/sdist version and the
   staged diff, and run the secret scan. Never publish a version that is
@@ -273,6 +285,19 @@ scope, test coverage, or acceptance evidence.
 Resolve routine choices within the user's authorized scope and continue work.
 Ask only when missing information materially affects correctness or scope, or
 an action requires authorization not already provided in the conversation.
+
+- Before editing files that change existing public CLI/SDK defaults or span
+  multiple modules, propose a brief design summary (scope, behavior changes,
+  impacted callers) for user confirmation before writing code.
+- Before modifying a module approaching the 500-line limit (> 450 lines),
+  split cohesive helpers upfront rather than expanding past 500 lines and
+  refactoring later.
+- Before claiming completion or creating a release commit on non-trivial
+  changes, run a self-review against the Review Priorities below (fail-fast
+  parameter validation, no silent flag ignores, explicit error propagation, PIT
+  safety).
+- Prefer direct execution or focused subagents for 1–2 module changes; reserve
+  `/swarm` for 3+ genuinely independent parallel tracks.
 
 ### Unresolved Data Outcomes
 

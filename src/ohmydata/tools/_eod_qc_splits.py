@@ -1,12 +1,9 @@
-"""Vectorized split, spinoff, and distribution ex-date jump detector for EOD QC."""
+"""Vectorized Polars split, spinoff, and distribution ex-date jump detector for EOD QC."""
 
 from __future__ import annotations
 
 import math
 from typing import Any
-
-import numpy as np
-import pandas as pd
 
 from ._eod_qc_prep import (
     DISTRIBUTION_ACTIONS,
@@ -16,6 +13,8 @@ from ._eod_qc_prep import (
     QualityCategory,
     QualitySeverity,
     make_finding,
+    opt_float,
+    require_polars,
 )
 
 _DISTRIBUTION_UNADJUSTED_BASES = frozenset(
@@ -23,59 +22,44 @@ _DISTRIBUTION_UNADJUSTED_BASES = frozenset(
 )
 
 
-def _merge_nearest_action(
-    cand: pd.DataFrame, action_df: pd.DataFrame, col_name: str, tol: pd.Timedelta
-) -> pd.DataFrame:
-    if action_df.empty:
-        cand[col_name] = pd.NaT
-        return cand
-    ref = action_df[["_symbol", "_dt"]].rename(columns={"_dt": col_name})
-    return pd.merge_asof(
-        cand,
+def _merge_nearest_action(cand: Any, action_df: Any, col_name: str, pl_mod: Any) -> Any:
+    if action_df.is_empty():
+        return cand.with_columns(pl_mod.lit(None, dtype=pl_mod.Date).alias(col_name))
+    ref = action_df.select(["_symbol", "_dt", pl_mod.col("_dt").alias(col_name)]).sort(
+        ["_symbol", "_dt"]
+    )
+    return cand.join_asof(
         ref,
-        left_on="_dt",
-        right_on=col_name,
+        on="_dt",
         by="_symbol",
-        direction="nearest",
-        tolerance=tol,
+        strategy="nearest",
+        tolerance="3d",
+        check_sortedness=False,
     )
 
 
 def _merge_exact_date_amount(
-    cand: pd.DataFrame, act: pd.DataFrame, action_names: frozenset[str], col_name: str
-) -> pd.DataFrame:
-    if act.empty:
-        cand[col_name] = 0.0
-        return cand
-    sub = act[
-        act["_action"].isin(action_names)
-        & act["_value"].notna()
-        & np.isfinite(act["_value"])
-        & (act["_value"] > 0.0)
-    ]
-    if sub.empty:
-        cand[col_name] = 0.0
-        return cand
-    agg = (
-        sub.groupby(["_symbol", "_dt"], as_index=False)["_value"]
-        .sum()
-        .rename(columns={"_value": col_name})
+    cand: Any, act: Any, action_names: frozenset[str], col_name: str, pl_mod: Any
+) -> Any:
+    if act.is_empty():
+        return cand.with_columns(pl_mod.lit(0.0, dtype=pl_mod.Float64).alias(col_name))
+    sub = act.filter(
+        pl_mod.col("_action").is_in(sorted(action_names))
+        & pl_mod.col("_value").is_not_null()
+        & pl_mod.col("_value").is_finite()
+        & (pl_mod.col("_value") > 0.0)
     )
-    out = cand.merge(agg, on=["_symbol", "_dt"], how="left")
-    out[col_name] = out[col_name].fillna(0.0)
-    return out
-
-
-def _opt_float(val: Any) -> float | None:
-    if val is None or pd.isna(val):
-        return None
-    f = float(val)
-    return f if math.isfinite(f) else None
+    if sub.is_empty():
+        return cand.with_columns(pl_mod.lit(0.0, dtype=pl_mod.Float64).alias(col_name))
+    agg = sub.group_by(["_symbol", "_dt"]).agg(pl_mod.col("_value").sum().alias(col_name))
+    return cand.join(agg, on=["_symbol", "_dt"], how="left").with_columns(
+        pl_mod.col(col_name).fill_null(0.0)
+    )
 
 
 def detect_suspect_missing_splits_work(
-    work: pd.DataFrame,
-    act: pd.DataFrame,
+    work: Any,
+    act: Any,
     jump_threshold: float,
     finding_cls: Any,
     *,
@@ -94,50 +78,86 @@ def detect_suspect_missing_splits_work(
             f"{error_jump_threshold!r} (jump_threshold={jump_threshold!r})"
         )
 
-    if work.empty or "close" not in work.columns:
+    if work.is_empty() or "close" not in work.columns:
         return []
 
-    prev_close = work.groupby("_symbol", sort=False)["close"].shift(1)
-    valid_prev = prev_close > 0.0
-    close_ret = np.where(valid_prev, work["close"] / prev_close - 1.0, np.nan)
-    overnight_gap = (
-        np.where(valid_prev, work["open"] / prev_close - 1.0, np.nan)
-        if "open" in work.columns
-        else np.nan
+    pl_mod = require_polars()
+    prev_close = pl_mod.col("close").shift(1).over("_symbol")
+    valid_prev = (
+        pl_mod.col("_prev_close").is_not_null()
+        & pl_mod.col("_prev_close").is_finite()
+        & (pl_mod.col("_prev_close") > 0.0)
     )
-    if "adj_close" in work.columns:
-        prev_adj = work.groupby("_symbol", sort=False)["adj_close"].shift(1)
-        valid_adj = (prev_adj > 0.0) & (work["adj_close"] > 0.0)
-        adj_close_ret = np.where(valid_adj, work["adj_close"] / prev_adj - 1.0, np.nan)
+    close_finite = pl_mod.col("close").is_not_null() & pl_mod.col("close").is_finite()
+
+    exprs = [prev_close.alias("_prev_close")]
+    enriched = work.with_columns(exprs)
+
+    ret_exprs = [
+        pl_mod.when(valid_prev & close_finite)
+        .then(pl_mod.col("close") / pl_mod.col("_prev_close") - 1.0)
+        .otherwise(None)
+        .alias("_close_ret")
+    ]
+    if "open" in enriched.columns:
+        open_finite = pl_mod.col("open").is_not_null() & pl_mod.col("open").is_finite()
+        ret_exprs.append(
+            pl_mod.when(valid_prev & open_finite)
+            .then(pl_mod.col("open") / pl_mod.col("_prev_close") - 1.0)
+            .otherwise(None)
+            .alias("_overnight_gap")
+        )
     else:
-        adj_close_ret = np.nan
+        ret_exprs.append(pl_mod.lit(None, dtype=pl_mod.Float64).alias("_overnight_gap"))
 
-    work = work.assign(
-        _prev_close=prev_close,
-        _close_ret=close_ret,
-        _overnight_gap=overnight_gap,
-        _adj_close_ret=adj_close_ret,
+    if "adj_close" in enriched.columns:
+        enriched = enriched.with_columns(
+            pl_mod.col("adj_close").shift(1).over("_symbol").alias("_prev_adj")
+        )
+        valid_adj = (
+            pl_mod.col("_prev_adj").is_not_null()
+            & pl_mod.col("_prev_adj").is_finite()
+            & (pl_mod.col("_prev_adj") > 0.0)
+            & pl_mod.col("adj_close").is_not_null()
+            & pl_mod.col("adj_close").is_finite()
+            & (pl_mod.col("adj_close") > 0.0)
+        )
+        ret_exprs.append(
+            pl_mod.when(valid_adj)
+            .then(pl_mod.col("adj_close") / pl_mod.col("_prev_adj") - 1.0)
+            .otherwise(None)
+            .alias("_adj_close_ret")
+        )
+    else:
+        ret_exprs.append(pl_mod.lit(None, dtype=pl_mod.Float64).alias("_adj_close_ret"))
+
+    enriched = enriched.with_columns(ret_exprs)
+
+    cand_mask = (pl_mod.col("_close_ret").abs() >= jump_threshold).fill_null(False) | (
+        pl_mod.col("_overnight_gap").abs() >= jump_threshold
+    ).fill_null(False)
+    cand = enriched.filter(cand_mask).sort(["_symbol", "_dt"], maintain_order=True)
+    if cand.is_empty():
+        return []
+
+    splits = act.filter(
+        pl_mod.col("_action").is_in(sorted(SPLIT_ACTIONS))
+        & (
+            pl_mod.col("_value").is_null()
+            | pl_mod.col("_value").is_nan()
+            | (pl_mod.col("_value").is_finite() & (pl_mod.col("_value") > 0.0))
+        )
     )
-    cand = work[
-        (work["_close_ret"].abs() >= jump_threshold)
-        | (work["_overnight_gap"].abs() >= jump_threshold)
-    ].copy()
-    if cand.empty:
+    cand = _merge_nearest_action(cand, splits, "_split_dt", pl_mod)
+    cand = cand.filter(pl_mod.col("_split_dt").is_null())
+    if cand.is_empty():
         return []
 
-    cand.sort_values(["_dt", "_symbol"], kind="mergesort", inplace=True)
-    tol = pd.Timedelta(days=3)
-    splits = act[act["_action"].isin(SPLIT_ACTIONS) & (act["_value"].isna() | (act["_value"] > 0))]
-    cand = _merge_nearest_action(cand, splits, "_split_dt", tol)
-    cand = cand[cand["_split_dt"].isna()].copy()
-    if cand.empty:
-        return []
-
-    spinoffs = act[act["_action"].isin(SPINOFF_ACTIONS)]
-    cand = _merge_nearest_action(cand, spinoffs, "_spinoff_dt", tol)
-    cand = _merge_exact_date_amount(cand, act, DIVIDEND_ACTIONS, "_div_amt")
-    cand = _merge_exact_date_amount(cand, act, DISTRIBUTION_ACTIONS, "_dist_amt")
-    cand.sort_values(["_symbol", "_dt"], kind="mergesort", inplace=True)
+    spinoffs = act.filter(pl_mod.col("_action").is_in(sorted(SPINOFF_ACTIONS)))
+    cand = _merge_nearest_action(cand, spinoffs, "_spinoff_dt", pl_mod)
+    cand = _merge_exact_date_amount(cand, act, DIVIDEND_ACTIONS, "_div_amt", pl_mod)
+    cand = _merge_exact_date_amount(cand, act, DISTRIBUTION_ACTIONS, "_dist_amt", pl_mod)
+    cand = cand.sort(["_symbol", "_dt"], maintain_order=True)
 
     basis_val = (
         adjustment_basis.value
@@ -149,22 +169,22 @@ def detect_suspect_missing_splits_work(
         )
     )
     is_dist_unadjusted_basis = basis_val in _DISTRIBUTION_UNADJUSTED_BASES
-    open_series = cand["open"] if "open" in cand.columns else pd.Series(np.nan, index=cand.index)
+    has_open = "open" in cand.columns
 
+    select_cols = [
+        "_symbol",
+        "_date_str",
+        "_close_ret",
+        "_overnight_gap",
+        "_prev_close",
+        "close",
+        "open" if has_open else pl_mod.lit(None, dtype=pl_mod.Float64).alias("open"),
+        "_adj_close_ret",
+        "_div_amt",
+        "_dist_amt",
+        "_spinoff_dt",
+    ]
     findings: list[Any] = []
-    cols = (
-        cand["_symbol"],
-        cand["_date_str"],
-        cand["_close_ret"],
-        cand["_overnight_gap"],
-        cand["_prev_close"],
-        cand["close"],
-        open_series,
-        cand["_adj_close_ret"],
-        cand["_div_amt"],
-        cand["_dist_amt"],
-        cand["_spinoff_dt"],
-    )
     for (
         sym,
         d_str,
@@ -177,19 +197,21 @@ def detect_suspect_missing_splits_work(
         div_v,
         dist_v,
         sp_dt,
-    ) in zip(*cols, strict=True):
-        has_spin = pd.notna(sp_dt)
-        cr = _opt_float(cr_v)
-        og = _opt_float(og_v)
+    ) in cand.select(select_cols).iter_rows():
+        has_spin = sp_dt is not None
+        cr = opt_float(cr_v)
+        og = opt_float(og_v)
         pc = float(pc_v)
-        close_f = float(c_v)
-        open_f = _opt_float(o_v)
-        adj_ret = _opt_float(adj_v)
+        close_f = opt_float(c_v)
+        open_f = opt_float(o_v)
+        adj_ret = opt_float(adj_v)
         div_amt = float(div_v)
         dist_amt = float(dist_v)
 
         ex_dist_ret = (
-            float(close_f / (pc - dist_amt) - 1.0) if (dist_amt > 0.0 and pc > dist_amt) else None
+            float(close_f / (pc - dist_amt) - 1.0)
+            if (dist_amt > 0.0 and pc > dist_amt and close_f is not None)
+            else None
         )
         ex_dist_gap = (
             float(open_f / (pc - dist_amt) - 1.0)
@@ -251,7 +273,7 @@ def detect_suspect_missing_splits_work(
             "dividend_adjusted_ret": ex_dist_ret,
             "close_adj_ret_diff": close_adj_ret_diff,
             "distribution_confirmed_by_action": confirmed_by_action,
-            "spinoff_date": pd.Timestamp(sp_dt).strftime("%Y-%m-%d") if has_spin else None,
+            "spinoff_date": sp_dt.isoformat() if sp_dt is not None else None,
         }
         findings.append(make_finding(finding_cls, str(sym), str(d_str), cat, sev, msg, metrics))
     return findings

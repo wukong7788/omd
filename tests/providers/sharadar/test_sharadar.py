@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Self
 
 import pandas as pd
+import polars as pl
 import pytest
 
 from ohmydata.core.errors import (
@@ -36,8 +37,12 @@ from ohmydata.providers.sharadar import (
     SharadarTable,
     classify_sharadar_http_error,
     read_local_actions,
+    read_local_actions_pl,
     read_local_bars,
+    read_local_bars_pl,
     redact_secret,
+    scan_local_actions_pl,
+    scan_local_bars_pl,
 )
 
 
@@ -675,3 +680,216 @@ class TestLocalReaders:
         assert filtered["action"].tolist() == ["spinoff", "split"]
         assert pd.isna(filtered.loc[0, "value"])
         assert filtered.loc[1, "value"] == pytest.approx(4.0)
+
+    def test_na_nan_null_tickers_preserved_in_pandas_and_polars(self, tmp_path: Path) -> None:
+        bars_csv = tmp_path / "na_stocks.csv"
+        bars_csv.write_text(
+            "ticker,date,open,high,low,close,volume,closeadj,closeunadj\n"
+            "NA,2026-01-02,10.0,11.0,9.5,10.5,,10.5,10.5\n"
+            "NAN,2026-01-02,20.0,21.0,19.5,20.5,500,20.5,20.5\n"
+            "NULL,2026-01-02,30.0,31.0,29.5,30.5,600,30.5,30.5\n"
+            "N/A,2026-01-02,40.0,41.0,39.5,40.5,700,40.5,40.5\n",
+            encoding="utf-8",
+        )
+        pd_bars = read_local_bars(bars_csv, symbols=["NA", "NAN", "NULL", "N/A"])
+        pl_bars = read_local_bars_pl(bars_csv, symbols=["NA", "NAN", "NULL", "N/A"])
+        assert pd_bars["symbol"].tolist() == ["N/A", "NA", "NAN", "NULL"]
+        assert pl_bars["symbol"].to_list() == ["N/A", "NA", "NAN", "NULL"]
+        assert pd.isna(pd_bars.loc[pd_bars["symbol"] == "NA", "volume"].iloc[0])
+        assert pl_bars.filter(pl.col("symbol") == "NA")["volume"].to_list() == [None]
+
+        actions_csv = tmp_path / "na_actions.csv"
+        actions_csv.write_text(
+            "date,action,ticker,name,value\n"
+            "2026-01-05,dividend,NA,Nano Alpha Inc,0.25\n"
+            "2026-01-05,split,NAN,North Am Corp,2.0\n",
+            encoding="utf-8",
+        )
+        pd_act = read_local_actions(actions_csv, symbols=["NA", "NAN"])
+        pl_act = read_local_actions_pl(actions_csv, symbols=["NA", "NAN"])
+        assert pd_act["symbol"].tolist() == ["NA", "NAN"]
+        assert pl_act["symbol"].to_list() == ["NA", "NAN"]
+
+    @staticmethod
+    def _assert_bars_cell_parity(pd_df: pd.DataFrame, pl_df: pl.DataFrame) -> None:
+        assert tuple(pl_df.columns) == tuple(pd_df.columns)
+        assert pl_df.height == len(pd_df)
+        assert pl_df["symbol"].to_list() == pd_df["symbol"].tolist()
+        assert pl_df["date"].to_list() == pd_df["date"].tolist()
+        for col in ("open", "high", "low", "close", "adj_close", "volume"):
+            for pv, lv in zip(pd_df[col].tolist(), pl_df[col].to_list(), strict=True):
+                if pd.isna(pv):
+                    assert lv is None
+                else:
+                    assert lv == pytest.approx(float(pv), rel=1e-12, abs=1e-12)
+
+    @pytest.mark.parametrize("fmt", ["csv", "parquet"])
+    def test_polars_scan_and_read_cell_parity_with_pandas(self, tmp_path: Path, fmt: str) -> None:
+        raw_df = self._sample_bars_df()
+        file_path = tmp_path / f"stocks_parity.{fmt}"
+        if fmt == "csv":
+            raw_df.to_csv(file_path, index=False)
+        else:
+            raw_df.to_parquet(file_path, index=False)
+
+        for mode in SharadarAdjustmentMode:
+            lf = scan_local_bars_pl(file_path, adjustment_mode=mode)
+            assert isinstance(lf, pl.LazyFrame)
+            pl_full = read_local_bars_pl(file_path, adjustment_mode=mode)
+            assert isinstance(pl_full, pl.DataFrame)
+            pd_full = read_local_bars(file_path, adjustment_mode=mode)
+            self._assert_bars_cell_parity(pd_full, lf.collect())
+            self._assert_bars_cell_parity(pd_full, pl_full)
+
+            # Filtered query + empty match
+            pd_sub = read_local_bars(
+                file_path,
+                symbols=["AAPL"],
+                start_date="2026-01-03",
+                end_date="2026-01-03",
+                adjustment_mode=mode,
+            )
+            pl_sub = read_local_bars_pl(
+                file_path,
+                symbols=["AAPL"],
+                start_date="2026-01-03",
+                end_date="2026-01-03",
+                adjustment_mode=mode,
+            )
+            self._assert_bars_cell_parity(pd_sub, pl_sub)
+
+        pl_empty = read_local_bars_pl(file_path, symbols=["MISSING"])
+        assert pl_empty.height == 0
+        assert tuple(pl_empty.columns) == STANDARD_COLUMNS
+
+        # Zero close guard parity
+        zero_path = tmp_path / f"zero_parity.{fmt}"
+        zero_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "date": ["2026-01-02"],
+                "open": [10.0],
+                "high": [10.0],
+                "low": [10.0],
+                "close": [0.0],
+                "volume": [100],
+                "closeadj": [9.0],
+                "closeunadj": [10.0],
+            }
+        )
+        if fmt == "csv":
+            zero_df.to_csv(zero_path, index=False)
+        else:
+            zero_df.to_parquet(zero_path, index=False)
+        self._assert_bars_cell_parity(
+            read_local_bars(zero_path, adjustment_mode=SharadarAdjustmentMode.TOTAL_RETURN),
+            read_local_bars_pl(zero_path, adjustment_mode=SharadarAdjustmentMode.TOTAL_RETURN),
+        )
+
+        # Actions parity
+        act_df = pd.DataFrame(
+            {
+                "date": ["2026-01-05", "2026-01-02", "2026-01-03"],
+                "action": ["Split", "dividend", "spinoff"],
+                "ticker": ["AAPL", "MSFT", "AAPL"],
+                "name": ["Apple Inc", "Microsoft Corp", "Apple Inc"],
+                "value": [4.0, 0.75, None],
+            }
+        )
+        act_path = tmp_path / f"actions_parity.{fmt}"
+        if fmt == "csv":
+            act_df.to_csv(act_path, index=False)
+        else:
+            act_df.to_parquet(act_path, index=False)
+
+        act_lf = scan_local_actions_pl(act_path, symbols=["AAPL"], start_date="2026-01-03")
+        assert isinstance(act_lf, pl.LazyFrame)
+        pl_act = read_local_actions_pl(act_path, symbols=["AAPL"], start_date="2026-01-03")
+        pd_act = read_local_actions(act_path, symbols=["AAPL"], start_date="2026-01-03")
+        assert tuple(pl_act.columns) == tuple(pd_act.columns)
+        assert pl_act["symbol"].to_list() == pd_act["symbol"].tolist()
+        assert pl_act["date"].to_list() == pd_act["date"].tolist()
+        assert pl_act["action"].to_list() == pd_act["action"].tolist()
+        assert pl_act["name"].to_list() == pd_act["name"].tolist()
+        for pv, lv in zip(pd_act["value"].tolist(), pl_act["value"].to_list(), strict=True):
+            if pd.isna(pv):
+                assert lv is None
+            else:
+                assert lv == pytest.approx(float(pv))
+
+        bad_path = tmp_path / f"bad_parity.{fmt}"
+        bad_df = pd.DataFrame({"ticker": ["AAPL"], "date": ["2026-01-02"], "close": [10.0]})
+        if fmt == "csv":
+            bad_df.to_csv(bad_path, index=False)
+        else:
+            bad_df.to_parquet(bad_path, index=False)
+        with pytest.raises(SchemaMismatchError):
+            scan_local_bars_pl(bad_path)
+
+    def test_polars_csv_late_float_na_and_date_formats(self, tmp_path: Path) -> None:
+        # >150 rows starting as integers before late decimal and "NA" values in numeric columns
+        bars_csv = tmp_path / "late_float_bars.csv"
+        bar_lines = ["ticker,date,open,high,low,close,volume,closeadj"]
+        for _ in range(150):
+            bar_lines.append("AAPL,2026-01-02,10,11,9,10,100,10")
+        bar_lines.append("AAPL,2026-01-05,10.5,11.5,9.5,10.5,100,NA")
+        bars_csv.write_text("\n".join(bar_lines) + "\n", encoding="utf-8")
+
+        pd_bars = read_local_bars(bars_csv)
+        pl_bars = read_local_bars_pl(bars_csv)
+        self._assert_bars_cell_parity(pd_bars, pl_bars)
+
+        actions_csv = tmp_path / "late_float_actions.csv"
+        act_lines = ["ticker,date,action,value"]
+        for _ in range(150):
+            act_lines.append("AAPL,2026-01-02,split,2")
+        act_lines.append("AAPL,2026-01-05,dividend,0.75")
+        act_lines.append("AAPL,2026-01-06,spinoff,NA")
+        actions_csv.write_text("\n".join(act_lines) + "\n", encoding="utf-8")
+
+        pd_act = read_local_actions(actions_csv)
+        pl_act = read_local_actions_pl(actions_csv)
+        assert pl_act.height == pd_act.shape[0] == 152
+        for pv, lv in zip(pd_act["value"].tolist(), pl_act["value"].to_list(), strict=True):
+            if pd.isna(pv):
+                assert lv is None
+            else:
+                assert lv == pytest.approx(float(pv))
+
+        # Date format parity (YYYY/MM/DD CSV, YYYYMMDD Parquet/CSV) and fail-closed invalid dates
+        slash_csv = tmp_path / "date_slash.csv"
+        slash_csv.write_text(
+            "ticker,date,open,high,low,close,volume,closeadj\nAAPL,2026/01/02,10,11,9,10,100,10\n",
+            encoding="utf-8",
+        )
+        self._assert_bars_cell_parity(read_local_bars(slash_csv), read_local_bars_pl(slash_csv))
+
+        ymd_pq = tmp_path / "date_ymd.parquet"
+        pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "date": ["20260105"],
+                "open": [10.0],
+                "high": [11.0],
+                "low": [9.0],
+                "close": [10.0],
+                "volume": [100],
+                "closeadj": [10.0],
+            }
+        ).to_parquet(ymd_pq, index=False)
+        self._assert_bars_cell_parity(read_local_bars(ymd_pq), read_local_bars_pl(ymd_pq))
+
+        ymd_csv = tmp_path / "date_ymd.csv"
+        ymd_csv.write_text(
+            "ticker,date,open,high,low,close,volume,closeadj\nAAPL,20260105,10,11,9,10,100,10\n",
+            encoding="utf-8",
+        )
+        assert read_local_bars_pl(ymd_csv)["date"].to_list() == [date(2026, 1, 5)]
+
+        bad_date_csv = tmp_path / "bad_date.csv"
+        bad_date_csv.write_text(
+            "ticker,date,open,high,low,close,volume,closeadj\nAAPL,not-a-date,10,11,9,10,100,10\n",
+            encoding="utf-8",
+        )
+        with pytest.raises((pl.exceptions.InvalidOperationError, ValueError)):
+            read_local_bars_pl(bad_date_csv)

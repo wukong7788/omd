@@ -119,7 +119,8 @@ keepna=True`) across three audit tiers:
 | Currency oscillation (`WPM`) | `eod_qc.detect_oscillating_currency_jumps` | `QualityCategory.OSCILLATING_CURRENCY_JUMP` (`WARNING`/`ERROR`) |
 | Trailing staleness (`BITO`) | `eod_qc.detect_trailing_staleness` | `QualityCategory.TRAILING_STALENESS` (`WARNING` → `WARN`) |
 | Single-venue prints (`USMV` Cboe BZX) | `SHARADAR_CAPABILITIES.single_venue_caveat_exchanges` + `market-data-audit` | Explicit provider/venue selection rule |
-| Explicit repair lineage | `CorrectionRecord` + `eod_qc.apply_corrections(df, records)` | Non-destructive copy retaining `raw_<field>` + versioned receipt |
+| Explicit repair lineage | `CorrectionRecord` + `eod_qc.apply_corrections(df, records)` | Non-destructive copy retaining `raw_<field>` + versioned receipt (`pd.DataFrame` or `pl.DataFrame`) |
+| Native Polars / Pandas local Sharadar reads & `"NA"` ticker safety | `sharadar.scan_local_bars_pl` / `read_local_bars_pl` / `read_local_bars` (`actions` variants) | Zero-copy pushdown (`LazyFrame`, requires `ohmydata[polars]`); `NA`/`NAN`/`NULL` preserved verbatim as strings |
 
 ---
 
@@ -145,7 +146,7 @@ or backtests US EOD market data must complete this checklist:
    - Preserve Consolidated Tape continuity where production strategies depend
      on it (e.g., do not swap Cboe BZX-listed ETFs such as `USMV` onto
      single-venue prints without parity evidence).
-4. **Wire `ohmydata.tools.run_eod_qc` as a pre-backtest gate**:
+4. **Wire `ohmydata.tools.run_eod_qc` as a pre-backtest gate** (requires `ohmydata[polars]` for both `polars.DataFrame` and `pandas.DataFrame` inputs):
    ```python
    from ohmydata.tools import EodAdjustmentBasis, apply_corrections, run_eod_qc
 
